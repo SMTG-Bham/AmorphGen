@@ -63,7 +63,6 @@ Crystalline input  (POSCAR / .xyz / .cif / .extxyz)
 ## Installation
 
 ```bash
-git clone https://github.com/cywkmc21/amorphMD.git
 cd amorphMD
 
 # Install dependencies
