@@ -193,9 +193,9 @@ run_melt_quench.py --extract-snapshots \
 |---|---|
 | `LBFGS` | **default** — Stage 1 crystalline cells |
 | `FIRE` | Stage 7 amorphous structures (recommended) |
-| `BFGSLineSearch` | difficult convergence cases |
-| `BFGS` | general fallback |
-| `MDMin` | very soft cells |
+| `BFGSLineSearch` |  |
+| `BFGS` |  |
+| `MDMin` |  |
 
 ### Cell filters
 
