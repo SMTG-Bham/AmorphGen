@@ -35,8 +35,8 @@ Crystalline input  (POSCAR / .xyz / .cif / .extxyz)
       │                      │ snapshots  →  snapshot_0000.extxyz …
       │              ┌───────▼──────────────────────────────────┐
       │              │  batch_quench: Stage 5 → 6 → 7           │
-      │              │  N independent amorphous structures       │
-      │              │  --resume to continue interrupted jobs    │
+      │              │  N independent amorphous structures      │
+      │              │  --resume to continue interrupted jobs   │
       │              └──────────────────────────────────────────┘
       │
    ┌──▼─────────────────────────────────────────────┐
