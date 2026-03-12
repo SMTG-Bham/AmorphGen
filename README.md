@@ -204,7 +204,7 @@ run_melt_quench.py --extract-snapshots \
 | `UnitCellFilter` | **default** — relax all 6 cell DOF simultaneously |
 | `ExpCellFilter` | better convergence for soft / amorphous cells |
 | `StrainFilter` | relax cell strain only |
-| `cubic` | reshape to cube + fix angles at 90° — **recommended for Stage 7** |
+| `cubic` | reshape to cube + fix angles at 90° |
 
 ```bash
 # Stage 1: LBFGS + UnitCellFilter (default)
