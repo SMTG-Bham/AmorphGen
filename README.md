@@ -110,7 +110,7 @@ run_melt_quench.py --list-models
 
 ---
 
-## Protocol details (In₂O₃ reference)
+## Example protocol details (In₂O₃)
 
 | Stage | Ensemble | T (K) | Duration | Notes |
 |---|---|---|---|---|
@@ -430,7 +430,7 @@ amorphMD/
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
-#SBATCH --time=12:00:00
+#SBATCH --time=4:00:00
 
 source /path/to/conda/env/bin/activate
 
