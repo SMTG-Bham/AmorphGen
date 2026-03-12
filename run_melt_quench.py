@@ -4,13 +4,13 @@ run_melt_quench.py
 ------------------
 Command-line entry point for the 7-stage melt-and-quench amorphous oxide pipeline.
 
-Stage 1 : Optimise crystalline input               (LBFGS)
+Stage 1 : Optimise crystalline input              
 Stage 2 : Pre-melt equilibration  300 K            (NVT/NPT, 50 ps)
-Stage 3 : Melt  –  heat ramp  300 → T_melt        (NPT, 100 K/ps)
-Stage 4 : High-T equilibration at T_melt           (NVT, 100 ps)
-Stage 5 : Quench  –  cooling ramp  T_melt → 300 K (NVT, 100 K/ps)
-Stage 6 : Low-T equilibration  300 K               (NVT, 50 ps)
-Stage 7 : Final optimisation  →  amorphous         (LBFGS)
+Stage 3 : Melt  –  heat ramp  300 → T_melt        (NVT/NPT, 100 K/ps)
+Stage 4 : High-T equilibration at T_melt           (NVT/NPT, 100 ps)
+Stage 5 : Quench  –  cooling ramp  T_melt → 300 K (NVT/NPT 100 K/ps)
+Stage 6 : Low-T equilibration  300 K               (NVT/NPT 50 ps)
+Stage 7 : Final optimisation  →  amorphous      
 
 Examples
 --------
