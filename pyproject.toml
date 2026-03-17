@@ -55,9 +55,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/cywkmc21/AmorphGen"
-Repository = "https://github.com/cywkmc21/AmorphGen"
-Issues = "https://github.com/cywkmc21/AmorphGen/issues"
+Homepage = "https://github.com/SMTG-Bham/AmorphGen"
+Repository = "https://github.com/SMTG-Bham/AmorphGen"
+Issues = "https://github.com/SMTG-Bham/AmorphGen/issues"
 
 [project.scripts]
 amorphgen = "amorphgen.cli:main"
