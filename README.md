@@ -80,8 +80,8 @@ cd AmorphGen
 
 # Install with your preferred backend
 pip install -e ".[mace]"        # MACE only (recommended)
-pip install -e ".[chgnet]"      # CHGNet only
-pip install -e ".[m3gnet]"      # M3GNet only
+pip install -e ".[chgnet]"      # CHGNet only (recommended)
+pip install -e ".[mace,chgnet]"      # MACE and CHGNet (recommended)
 pip install -e ".[all]"         # all backends
 pip install -e ".[all,dev]"     # all backends + pytest
 ```
