@@ -1,0 +1,64 @@
+"""
+tests/test_imports.py
+---------------------
+Verify all public API imports work correctly.
+"""
+
+import pytest
+
+
+class TestPackageImports:
+    """Tier 1: verify the package structure is importable."""
+
+    def test_top_level_import(self):
+        import amorphgen
+        assert hasattr(amorphgen, "__version__")
+        assert amorphgen.__version__ == "2.0.0"
+
+    def test_pipeline_import(self):
+        from amorphgen import MeltQuenchPipeline
+        assert callable(MeltQuenchPipeline)
+
+    def test_config_import(self):
+        from amorphgen import DEFAULT_CONFIG
+        assert isinstance(DEFAULT_CONFIG, dict)
+        assert "model" in DEFAULT_CONFIG
+
+    def test_calculator_factory_import(self):
+        from amorphgen.utils import get_calculator
+        assert callable(get_calculator)
+
+    def test_deprecated_alias_import(self):
+        from amorphgen.utils import get_mace_calculator
+        assert callable(get_mace_calculator)
+
+    def test_list_models_import(self):
+        from amorphgen.utils import list_models
+        assert callable(list_models)
+
+    def test_stage_modules_import(self):
+        from amorphgen.pipeline import (
+            opt_cell, melt_cell, equilibrate, quench,
+            final_opt, batch_quench, random_gen,
+        )
+        for mod in [opt_cell, melt_cell, equilibrate, quench,
+                    final_opt, batch_quench, random_gen]:
+            assert hasattr(mod, "run") or hasattr(mod, "batch_random")
+
+    def test_utility_imports(self):
+        from amorphgen.utils import (
+            make_cubic, build_md_dynamics, resolve_ramp,
+            MDLogger, TrajectoryWriter, TRAJ_FORMATS,
+            attach_outputs, merge_config, extract_snapshots,
+        )
+
+    def test_model_registries_import(self):
+        from amorphgen.utils import (
+            MACE_FOUNDATION_MODELS,
+            CHGNET_MODELS,
+            M3GNET_MODELS,
+            MODEL_DESCRIPTIONS,
+        )
+        assert len(MACE_FOUNDATION_MODELS) > 10
+        assert "chgnet" in CHGNET_MODELS
+        assert "m3gnet" in M3GNET_MODELS
