@@ -75,6 +75,7 @@ Only install the backend(s) you need. Use `amorphgen --list-models` to see all a
 ## Installation
 
 ```bash
+git clone https://github.com/SMTG-Bham/AmorphGen.git
 cd AmorphGen
 
 # Install with your preferred backend
