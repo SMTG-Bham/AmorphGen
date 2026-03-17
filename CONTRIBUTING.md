@@ -8,7 +8,7 @@ guidelines for contributing to this project.
 1. Fork the repository on GitHub
 2. Clone your fork:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/AmorphGen.git
+   git clone https://github.com/SMTG-Bham/AmorphGen.git
    cd AmorphGen
    ```
 3. Install in development mode:
