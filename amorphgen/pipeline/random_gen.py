@@ -115,28 +115,39 @@ def generate_random(
     if minsep is None:
         minsep = _default_minsep(symbols, scale=minsep_scale)
 
-    # Place atoms one by one
-    positions = []
+    # Place atoms one by one (vectorised distance checks)
+    positions = np.empty((n_atoms, 3))
     placed_symbols = []
+    n_placed = 0
 
     for i, sym in enumerate(symbols):
+        # Pre-compute minsep thresholds for this species vs all placed
+        if n_placed > 0:
+            min_dists = np.array([_get_minsep(sym, ps, minsep)
+                                  for ps in placed_symbols])
+
         placed = False
         for attempt in range(max_attempts_per_atom):
             pos = rng.random(3) * L
-            # Check against all already-placed atoms
-            ok = True
-            for j, (prev_pos, prev_sym) in enumerate(zip(positions, placed_symbols)):
-                d = pos - prev_pos
-                if pbc:
-                    d -= L * np.round(d / L)
-                dist = np.linalg.norm(d)
-                min_d = _get_minsep(sym, prev_sym, minsep)
-                if dist < min_d:
-                    ok = False
-                    break
-            if ok:
-                positions.append(pos)
+
+            if n_placed == 0:
+                # First atom — always accept
+                positions[0] = pos
                 placed_symbols.append(sym)
+                n_placed = 1
+                placed = True
+                break
+
+            # Vectorised distance check: all placed atoms at once
+            d = pos - positions[:n_placed]
+            if pbc:
+                d -= L * np.round(d / L)
+            dists = np.sqrt(np.sum(d * d, axis=1))
+
+            if np.all(dists >= min_dists):
+                positions[n_placed] = pos
+                placed_symbols.append(sym)
+                n_placed += 1
                 placed = True
                 break
 
@@ -149,7 +160,7 @@ def generate_random(
 
     atoms = Atoms(
         symbols=placed_symbols,
-        positions=positions,
+        positions=positions[:n_placed],
         cell=[L, L, L],
         pbc=pbc,
     )
@@ -190,11 +201,12 @@ def batch_random(
     os.makedirs(output_dir, exist_ok=True)
     paths = []
 
+    # Extract seed once — each structure gets seed+i for reproducibility
+    base_seed = kwargs.pop("seed", None)
+
     for i in range(n_structures):
-        seed = kwargs.pop("seed", None)
-        if seed is not None:
-            seed = seed + i
-        atoms = generate_random(composition, seed=seed, **kwargs)
+        seed_i = base_seed + i if base_seed is not None else None
+        atoms = generate_random(composition, seed=seed_i, **kwargs)
 
         if relax and calc is not None:
             from ase.optimize import LBFGS
