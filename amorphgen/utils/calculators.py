@@ -139,7 +139,6 @@ def _load_mace(model: str, device: str, model_path: str | None = None,
         print(f"[MACE] Loading foundation model '{model}' → mace_mp(model='{resolved}')")
         return mace_mp(model=resolved, device=device, **kwargs)
 
-
 def _load_chgnet(device: str, **kwargs) -> Any:
     """Load the pretrained CHGNet calculator."""
     try:
@@ -153,8 +152,16 @@ def _load_chgnet(device: str, **kwargs) -> Any:
         )
 
     print(f"[CHGNet] Loading pretrained model on {device}")
-    model = CHGNet.load()
+    # Always load on CPU first to avoid MPS float64 crash,
+    # then cast to float32 and move to target device
+    model = CHGNet.load(use_device="cpu")
+    if device == "mps":
+        model = model.float()   # ensure float32 for MPS compatibility
+        model = model.to("mps")
+        print("[CHGNet] Moved to MPS (float32)")
     return CHGNetCalculator(model=model, use_device=device, **kwargs)
+
+
 
 
 def _load_m3gnet(model: str, device: str, **kwargs) -> Any:
