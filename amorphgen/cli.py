@@ -11,9 +11,6 @@ Full pipeline with MACE (default):
 Use CHGNet:
     amorphgen POSCAR --model chgnet --device cpu
 
-Use CHGNet:
-    amorphgen POSCAR --model chgnet --device cpu
-
 Use a custom fine-tuned model:
     amorphgen POSCAR --model-path /data/InO_finetuned.model
 
@@ -22,6 +19,13 @@ List all available models:
 
 Random structure generation:
     amorphgen --random-gen --composition In=32,O=48 --target-density 5.5
+
+Random generation with custom minsep:
+    amorphgen --random-gen --composition In=16,O=24 --target-density 5.5 \
+        --minsep In-In=2.8,In-O=1.9,O-O=2.5
+
+Optimise with cubic cell constraint:
+    amorphgen POSCAR --stages 1 --cell-filter cubic --model mace-mpa-0-medium
 
 Batch quench from snapshots:
     amorphgen --batch-quench --snapshot-dir snapshots/ --n-runs 20
@@ -66,7 +70,12 @@ def parse_args():
         "--model-path", default=None, metavar="PATH",
         help="Path to a local .model file (fine-tuned / custom model)"
     )
-    p.add_argument("--device", default="cuda", choices=["cuda", "cpu"])
+    p.add_argument("--device", default="cuda", choices=["cuda", "cpu", "mps"])
+    p.add_argument("--default-dtype", default="float64",
+                   choices=["float32", "float64"],
+                   help="Floating point precision for MLIP calculator. "
+                        "Use float64 for geometry optimisation accuracy, "
+                        "float32 for faster MD.")
 
     # ── Stage 1 & 7: optimisation ─────────────────────────────────────────────
     p.add_argument("--fmax", type=float, default=0.01,
@@ -76,6 +85,12 @@ def parse_args():
     p.add_argument("--optimizer", default="LBFGS",
                    choices=["LBFGS", "FIRE", "BFGSLineSearch", "BFGS", "MDMin"],
                    help="Optimizer for structure optimisation")
+    p.add_argument("--cell-filter", default="UnitCellFilter",
+                   choices=["UnitCellFilter", "ExpCellFilter", "StrainFilter",
+                            "cubic", "none"],
+                   help="Cell filter for optimisation. "
+                        "'cubic' = isotropic volume only (shape fixed), "
+                        "'none' = positions only (cell fixed)")
 
     # ── Stage 2: pre-melt equilibration ────────────────────────────────────────
     p.add_argument("--eq-premelt-ensemble", default="NVT", choices=["NVT", "NPT"])
@@ -120,7 +135,7 @@ def parse_args():
 
     # ── Random generation mode ────────────────────────────────────────────────
     p.add_argument("--random-gen", action="store_true",
-                   help="Generate random structures (AIRSS-style)")
+                   help="Generate random structures")
     p.add_argument("--composition", default=None, metavar="SPEC",
                    help="Composition, e.g. In=32,O=48")
     p.add_argument("--target-density", type=float, default=None,
@@ -128,6 +143,14 @@ def parse_args():
     p.add_argument("--n-structures", type=int, default=10)
     p.add_argument("--no-relax", action="store_true",
                    help="Skip relaxation of random structures")
+    p.add_argument("--minsep", default=None, metavar="SPEC",
+                   help="Minimum separation distances, e.g. "
+                        "In-In=2.8,In-O=1.9,O-O=2.5")
+    p.add_argument("--max-attempts", type=int, default=50000,
+                   help="Max placement attempts per atom for random generation")
+    p.add_argument("--format", default="extxyz",
+                   choices=["extxyz", "vasp", "cif"],
+                   help="Output format for random structures")
 
     return p.parse_args()
 
@@ -139,6 +162,15 @@ def _parse_composition(spec: str) -> dict[str, int]:
         sym, count = part.strip().split("=")
         comp[sym.strip()] = int(count.strip())
     return comp
+
+
+def _parse_minsep(spec: str) -> dict[str, float]:
+    """Parse 'In-In=2.8,In-O=1.9,O-O=2.5' -> {'In-In': 2.8, ...}."""
+    minsep = {}
+    for part in spec.split(","):
+        pair, val = part.strip().split("=")
+        minsep[pair.strip()] = float(val.strip())
+    return minsep
 
 
 def main():
@@ -155,10 +187,12 @@ def main():
         "model": args.model,
         "model_path": args.model_path,
         "device": args.device,
+        "default_dtype": args.default_dtype,
         "opt": {
             "fmax": args.fmax,
             "max_steps": args.opt_steps,
             "optimizer": args.optimizer,
+            "cell_filter": args.cell_filter,
         },
         "eq_premelt": {
             "ensemble": args.eq_premelt_ensemble,
@@ -189,6 +223,12 @@ def main():
             "T": args.eq_low_T,
             "steps": args.eq_low_steps,
         },
+        "final_opt": {
+            "fmax": args.fmax,
+            "max_steps": args.opt_steps,
+            "optimizer": args.optimizer,
+            "cell_filter": args.cell_filter,
+        },
     }
 
     # ── Random generation mode ────────────────────────────────────────────────
@@ -202,28 +242,51 @@ def main():
         from .utils import get_calculator
 
         composition = _parse_composition(args.composition)
+
+        # Parse minsep if provided
+        minsep = None
+        if args.minsep is not None:
+            minsep = _parse_minsep(args.minsep)
+
         calc = None
         if not args.no_relax:
             calc = get_calculator(
                 model=args.model,
                 device=args.device,
                 model_path=args.model_path,
+                default_dtype=args.default_dtype,
             )
 
-        batch_random(
+               
+        files = batch_random(
             composition=composition,
             n_structures=args.n_structures,
             output_dir=args.work_dir,
             relax=not args.no_relax,
             calc=calc,
             target_density=args.target_density,
+            minsep=minsep,
+            max_attempts_per_atom=args.max_attempts,
         )
+
+        # Convert output format if requested
+        if args.format != "extxyz" and files:
+            from ase.io import read, write
+            for fp in files:
+                atoms = read(fp)
+                if args.format == "vasp":
+                    new_fp = fp.replace(".extxyz", ".vasp")
+                    write(new_fp, atoms, format="vasp")
+                elif args.format == "cif":
+                    new_fp = fp.replace(".extxyz", ".cif")
+                    write(new_fp, atoms)
+                print(f"  Converted: {new_fp}")
         return
 
     # ── Batch quench mode ─────────────────────────────────────────────────────
     if args.batch_quench:
         from .pipeline import batch_quench
-        from .utils import get_calculator, extract_snapshots
+        from .utils import get_calculator
         import glob
 
         snap_files = sorted(glob.glob(
@@ -241,6 +304,7 @@ def main():
             model=args.model,
             device=args.device,
             model_path=args.model_path,
+            default_dtype=args.default_dtype,
         )
 
         batch_quench.run(
