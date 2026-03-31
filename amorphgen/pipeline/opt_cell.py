@@ -52,7 +52,7 @@ def _log(msg, lf=None):
 
 def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt", **kwargs):
     """
-    Optimise a structure using a chosen optimizer + UnitCellFilter.
+    Optimise a structure using a chosen optimizer + cell filter.
 
     Parameters
     ----------
@@ -108,13 +108,18 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt", **kwargs):
         OptimizerClass = _get_optimizer(opt_name)
 
         # Cell filter: "UnitCellFilter" (default), "ExpCellFilter",
-        #              "StrainFilter", "none" (positions only)
+        #              "StrainFilter", "cubic", "none" (positions only)
         filter_name = cfg.get("cell_filter", "UnitCellFilter")
         _log(f"  Cell filter: {filter_name}", lf)
 
         if filter_name == "none" or filter_name is None:
             # Positions only — cell stays fixed
             target = atoms
+        elif filter_name == "cubic":
+            # Keep cubic shape (a=b=c, 90 deg) but allow volume to change
+            from ase.filters import ExpCellFilter
+            target = ExpCellFilter(atoms, hydrostatic_strain=True)
+            _log("  [cell] Cubic: isotropic volume only, shape fixed", lf)
         elif filter_name == "ExpCellFilter":
             from ase.filters import ExpCellFilter
             target = ExpCellFilter(atoms)
@@ -152,8 +157,8 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt", **kwargs):
             _log(f"\n  WARNING: did not converge in {max_steps} steps.", lf)
 
     out_cif = cfg.get("output_cif", "opt_final.cif")
-    out_xyz = cfg.get("output_xyz", "opt_final.extxyz")
+    out_xyz = cfg.get("output_xyz", "opt_final.xyz")
     write(out_cif, atoms)
-    write(out_xyz, atoms, format="extxyz")
+    write(out_xyz, atoms, format="xyz")
     print(f"[Opt] Saved -> {out_cif}, {out_xyz}")
     return atoms
