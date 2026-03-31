@@ -70,7 +70,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
     )
 
     logfile = cfg.get("log_file", "stage2_melt.log")
-    trajfile = cfg.get("traj_file", "stage2_melt.extxyz")
+    trajfile = cfg.get("traj_file", "stage2_melt.xyz")
     logger, traj = attach_outputs(dyn, atoms, logfile, trajfile,
                                   fmt=global_cfg.get("traj_format", "extxyz"))
 
@@ -91,7 +91,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
     logger.close()
     traj.close()
 
-    out_xyz = cfg.get("output_xyz", "stage2_melted.extxyz")
-    write(out_xyz, atoms, format="extxyz")
+    out_xyz = cfg.get("output_xyz", "stage2_melted.xyz")
+    write(out_xyz, atoms, format="xyz")
     print(f"[Stage 2] Saved -> {out_xyz}\n")
     return atoms
