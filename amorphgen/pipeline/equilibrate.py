@@ -81,7 +81,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high", **kwargs):
     )
 
     logfile = cfg.get("log_file", f"stage{stage_label}_eq.log")
-    trajfile = cfg.get("traj_file", f"stage{stage_label}_eq.extxyz")
+    trajfile = cfg.get("traj_file", f"stage{stage_label}_eq.xyz")
     logger, traj = attach_outputs(dyn, atoms, logfile, trajfile,
                                   fmt=global_cfg.get("traj_format", "extxyz"))
 
@@ -95,7 +95,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high", **kwargs):
     logger.close()
     traj.close()
 
-    out_xyz = cfg.get("output_xyz", f"stage{stage_label}_eq.extxyz")
-    write(out_xyz, atoms, format="extxyz")
+    out_xyz = cfg.get("output_xyz", f"stage{stage_label}_eq.xyz")
+    write(out_xyz, atoms, format="xyz")
     print(f"[Stage {stage_label}] Saved -> {out_xyz}\n")
     return atoms
