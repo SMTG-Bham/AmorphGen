@@ -65,7 +65,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
     )
 
     logfile = cfg.get("log_file", "stage4_quench.log")
-    trajfile = cfg.get("traj_file", "stage4_quench.extxyz")
+    trajfile = cfg.get("traj_file", "stage4_quench.xyz")
     logger, traj = attach_outputs(dyn, atoms, logfile, trajfile,
                                   fmt=global_cfg.get("traj_format", "extxyz"))
 
@@ -91,7 +91,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
     logger.close()
     traj.close()
 
-    out_xyz = cfg.get("output_xyz", "stage4_quenched.extxyz")
-    write(out_xyz, atoms, format="extxyz")
+    out_xyz = cfg.get("output_xyz", "stage4_quenched.xyz")
+    write(out_xyz, atoms, format="xyz")
     print(f"[Stage 4] Saved -> {out_xyz}\n")
     return atoms
