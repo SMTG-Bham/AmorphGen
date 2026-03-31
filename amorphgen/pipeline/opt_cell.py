@@ -2,7 +2,7 @@
 amorphgen.pipeline.opt_cell
 ----------------------------
 Stage 1 – Structural optimisation of the crystalline input cell.
-Stage 6 – Final optimisation of the quenched amorphous structure.
+Stage 7 – Final optimisation of the quenched amorphous structure.
 
 Supported optimisers (set via cfg["opt"]["optimizer"]):
   "LBFGS"          – default, fast quasi-Newton (recommended)
@@ -106,8 +106,25 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt", **kwargs):
         _log(f"  Optimizer: {opt_name}  fmax={fmax}  max_steps={max_steps}", lf)
 
         OptimizerClass = _get_optimizer(opt_name)
-        ucf = UnitCellFilter(atoms)
-        optimizer = OptimizerClass(ucf, logfile=None, trajectory=trajfile)
+
+        # Cell filter: "UnitCellFilter" (default), "ExpCellFilter",
+        #              "StrainFilter", "none" (positions only)
+        filter_name = cfg.get("cell_filter", "UnitCellFilter")
+        _log(f"  Cell filter: {filter_name}", lf)
+
+        if filter_name == "none" or filter_name is None:
+            # Positions only — cell stays fixed
+            target = atoms
+        elif filter_name == "ExpCellFilter":
+            from ase.filters import ExpCellFilter
+            target = ExpCellFilter(atoms)
+        elif filter_name == "StrainFilter":
+            from ase.filters import StrainFilter
+            target = StrainFilter(atoms)
+        else:
+            target = UnitCellFilter(atoms)
+
+        optimizer = OptimizerClass(target, logfile=None, trajectory=trajfile)
 
         header = (f"\n  {'Step':>5}  {'Energy(eV)':>14}  {'Fmax(eV/A)':>11}  "
                   f"{'a(A)':>10}  {'b(A)':>10}  {'c(A)':>10}  {'Vol(A3)':>10}")
@@ -118,7 +135,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt", **kwargs):
         for step in range(max_steps):
             optimizer.step()
             energy = atoms.get_potential_energy()
-            forces = ucf.get_forces()
+            forces = target.get_forces()
             max_f = float((forces ** 2).sum(axis=1).max() ** 0.5)
             cp = cell_to_cellpar(atoms.cell)
             a, b, c = cp[:3]
