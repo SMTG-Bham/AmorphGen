@@ -1,7 +1,7 @@
 """
 amorphgen.pipeline.final_opt
 ------------------------------
-Stage 6 – Final structural optimisation of the quenched amorphous structure.
+Stage 7 – Final structural optimisation of the quenched amorphous structure.
 
 Delegates to opt_cell.run() with stage_key="opt" (same optimizer machinery).
 """
