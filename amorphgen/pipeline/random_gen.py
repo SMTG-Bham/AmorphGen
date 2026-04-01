@@ -64,7 +64,7 @@ def generate_random(
     minsep: dict[str, float] | None = None,
     minsep_scale: float = 0.85,
     seed: int | None = None,
-    max_attempts_per_atom: int = 10000,
+    max_attempts_per_atom: int = 200000,
     pbc: bool = True,
 ) -> Atoms:
     """

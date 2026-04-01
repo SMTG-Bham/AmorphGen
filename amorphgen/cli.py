@@ -146,11 +146,13 @@ def parse_args():
     p.add_argument("--minsep", default=None, metavar="SPEC",
                    help="Minimum separation distances, e.g. "
                         "In-In=2.8,In-O=1.9,O-O=2.5")
-    p.add_argument("--max-attempts", type=int, default=50000,
+    p.add_argument("--max-attempts", type=int, default=200000,
                    help="Max placement attempts per atom for random generation")
+
+    # ── Output format (applies to both random-gen and pipeline modes) ─────────
     p.add_argument("--format", default="extxyz",
                    choices=["extxyz", "vasp", "cif"],
-                   help="Output format for random structures")
+                   help="Output format for generated/optimised structures")
 
     return p.parse_args()
 
@@ -193,6 +195,7 @@ def main():
             "max_steps": args.opt_steps,
             "optimizer": args.optimizer,
             "cell_filter": args.cell_filter,
+            "output_format": args.format,
         },
         "eq_premelt": {
             "ensemble": args.eq_premelt_ensemble,
@@ -228,6 +231,7 @@ def main():
             "max_steps": args.opt_steps,
             "optimizer": args.optimizer,
             "cell_filter": args.cell_filter,
+            "output_format": args.format,
         },
     }
 
