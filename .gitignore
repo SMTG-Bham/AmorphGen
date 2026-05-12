@@ -111,4 +111,5 @@ factor_test*/
 random_*/
 .coverage
 *.png
+!docs/**/*.png
 test_mace_overnight.py
