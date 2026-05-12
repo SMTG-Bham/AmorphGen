@@ -1,0 +1,18 @@
+model: chgnet
+device: mps
+default_dtype: float32
+
+opt:
+  fmax: 0.05
+  max_steps: 500
+  cell_filter: cubic
+
+random_gen:
+  composition:
+    Si: 16
+    O: 32
+  n_structures: 5
+  target_cn:
+    Si: 4
+    O: 2
+  output_format: vasp

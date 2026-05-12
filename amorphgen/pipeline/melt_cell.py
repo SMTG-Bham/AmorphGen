@@ -1,7 +1,7 @@
 """
 amorphgen.pipeline.melt_cell
 -----------------------------
-Stage 2 – Heat the structure from T_start to T_end via a temperature ramp.
+Stage 3 – Heat the structure from T_start to T_end via a temperature ramp.
 
 Ensemble is configurable: NPT (default) or NVT.
 """
@@ -12,7 +12,7 @@ from copy import deepcopy
 from ase.io import read, write
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 
-from ..utils import (get_calculator, make_cubic,
+from ..utils import (get_calculator,
                      build_md_dynamics, attach_outputs, merge_config)
 from ..configs import DEFAULT_CONFIG
 
@@ -37,15 +37,14 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
 
     if isinstance(atoms_or_file, str):
         atoms = read(atoms_or_file)
-        print(f"[Stage 2] Loaded from {atoms_or_file}")
+        print(f"[Stage 3] Loaded from {atoms_or_file}")
     else:
         atoms = deepcopy(atoms_or_file)
-        print("[Stage 2] Using provided Atoms object")
+        print("[Stage 3] Using provided Atoms object")
 
-    # Optional cubic reshape
-    if cfg.get("make_cubic", True):
-        atoms = make_cubic(atoms)
-        print("[Stage 2] Cell reshaped to cubic")
+    # NOTE: cubic cell reshape moved to start of Stage 4 (eq_high), so
+    # that the reshape acts on a fully molten liquid rather than a
+    # partially-melted structure.  See amorphgen.pipeline.equilibrate.
 
     if calc is None:
         device = global_cfg.get("device", "cuda")
@@ -69,19 +68,34 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
         ttime=cfg.get("ttime", 25.0),
     )
 
-    logfile = cfg.get("log_file", "stage2_melt.log")
-    trajfile = cfg.get("traj_file", "stage2_melt.xyz")
+    logfile = cfg.get("log_file", "stage3_melt.log")
+    trajfile = cfg.get("traj_file", "stage3_melt.xyz")
     logger, traj = attach_outputs(dyn, atoms, logfile, trajfile,
                                   fmt=global_cfg.get("traj_format", "extxyz"))
 
     # Temperature ramp
     T_end = cfg["T_end"]
     T_step = abs(cfg.get("T_step", 100))
-    steps = cfg.get("steps_per_T", 1000)
-    target_temps = list(range(T_start, T_end + T_step, T_step))
+    timestep_fs = cfg.get("timestep", 1.0)
 
-    print(f"[Stage 2] {ensemble} heat ramp: {T_start} -> {T_end} K  "
-          f"(+{T_step} K, {steps} steps each)")
+    # Allow rate (K/ps) to auto-calculate steps_per_T
+    rate = cfg.get("rate")
+    if rate is not None:
+        if T_step == 0:
+            raise ValueError("T_step cannot be 0 when rate is specified.")
+        steps = int(round(T_step / (rate * timestep_fs / 1000)))
+        steps = max(steps, 1)
+    else:
+        steps = cfg.get("steps_per_T", 1000)
+
+    target_temps = list(range(T_start, T_end + T_step, T_step))
+    actual_rate = T_step / (steps * timestep_fs / 1000)
+
+    from ..utils.common import compute_density_gcm3
+    density = compute_density_gcm3(atoms)
+    print(f"[Stage 3] {ensemble} heat ramp: {T_start} -> {T_end} K  "
+          f"(+{T_step} K, {steps} steps each, {actual_rate:.1f} K/ps)  "
+          f"density={density:.2f} g/cm3")
 
     for T in target_temps:
         dyn.set_temperature(temperature_K=T)
@@ -91,7 +105,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
     logger.close()
     traj.close()
 
-    out_xyz = cfg.get("output_xyz", "stage2_melted.xyz")
-    write(out_xyz, atoms, format="xyz")
-    print(f"[Stage 2] Saved -> {out_xyz}\n")
+    out_xyz = cfg.get("output_xyz", "stage3_melted.xyz")
+    write(out_xyz, atoms, format="extxyz")
+    print(f"[Stage 3] Saved -> {out_xyz}\n")
     return atoms

@@ -1,0 +1,70 @@
+# ── AmorphGen: Full 7-stage melt-quench pipeline ──
+#
+# Usage:
+#   amorphgen POSCAR --config full_pipeline.yaml --device cuda
+#   amorphgen POSCAR --config full_pipeline.yaml --stages 1 4 5 6 7   # skip heating
+#
+# Python API:
+#   from amorphgen import MeltQuenchPipeline
+#   pipe = MeltQuenchPipeline("POSCAR", cfg_override=load_yaml_config("full_pipeline.yaml"))
+#   atoms = pipe.run()
+
+model: mace-mpa-0
+# Device: "cuda" (NVIDIA), "cpu", "mps" (Apple Silicon), or "auto" (auto-detect).
+# This file defaults to cuda for HPC; override on the CLI for other systems:
+#   amorphgen POSCAR --config full_pipeline.yaml --device mps
+device: cuda
+default_dtype: float64
+# All MD stages below set timestep: 1.0 fs. Safe for typical oxides with chgnet
+# / MACE foundation models. The DEFAULT_CONFIG default is 0.5 fs (more
+# conservative for heavy elements / unusual chemistries). Reduce here if you
+# see energy drift or high T-fluctuations during equilibration.
+
+# ── Stage 1 & 7: Structure optimisation ──
+opt:
+  fmax: 0.05             # eV/A convergence
+  max_steps: 500
+  optimizer: LBFGS
+  cell_filter: none   # or "none" for fixed volume
+
+# ── Stage 2: Pre-melt equilibration ──
+eq_premelt:
+  ensemble: NVT
+  T: 300                 # K
+  steps: 10000           # 10 ps
+  timestep: 1.0          # fs
+
+
+# ── Stage 3: Heating ramp ──
+melt:
+  ensemble: NPT
+  T_start: 300           # K
+  T_end: 3000            # K
+  T_step: 100            # K per segment
+  rate: 100              # K/ps (auto-calculates steps_per_T)
+  timestep: 1.0          # fs
+
+
+# ── Stage 4: High-temperature equilibration ──
+eq_high:
+  ensemble: NVT
+  T: 3000                # K (match melt T_end)
+  steps: 50000           # 50 ps
+  timestep: 1.0          # fs
+
+
+# ── Stage 5: Quench (cooling ramp) ──
+quench:
+  ensemble: NVT
+  T_start: 3000          # K (match eq_high T)
+  T_end: 300             # K
+  T_step: -100           # K (negative = cooling)
+  rate: 100              # K/ps (auto-calculates steps_per_T)
+  timestep: 1.0          # fs
+
+# ── Stage 6: Low-temperature equilibration ──
+eq_low:
+  ensemble: NVT
+  T: 300                 # K (match quench T_end)
+  steps: 10000           # 10 ps
+  timestep: 1.0          # fs

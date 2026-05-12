@@ -13,11 +13,19 @@ class TestPackageImports:
     def test_top_level_import(self):
         import amorphgen
         assert hasattr(amorphgen, "__version__")
-        assert amorphgen.__version__ == "2.0.0"
+        assert amorphgen.__version__ == "1.0.0"
 
     def test_pipeline_import(self):
         from amorphgen import MeltQuenchPipeline
         assert callable(MeltQuenchPipeline)
+
+    def test_top_level_generate_random(self):
+        from amorphgen import generate_random
+        assert callable(generate_random)
+
+    def test_top_level_batch_random(self):
+        from amorphgen import batch_random
+        assert callable(batch_random)
 
     def test_config_import(self):
         from amorphgen import DEFAULT_CONFIG
@@ -56,9 +64,10 @@ class TestPackageImports:
         from amorphgen.utils import (
             MACE_FOUNDATION_MODELS,
             CHGNET_MODELS,
-            M3GNET_MODELS,
+            SEVENNET_MODELS,
             MODEL_DESCRIPTIONS,
         )
         assert len(MACE_FOUNDATION_MODELS) > 10
         assert "chgnet" in CHGNET_MODELS
-        assert "m3gnet" in M3GNET_MODELS
+        assert "sevennet" in SEVENNET_MODELS
+        assert "7net-mf-ompa" in SEVENNET_MODELS

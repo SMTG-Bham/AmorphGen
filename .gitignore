@@ -1,0 +1,114 @@
+# ======================
+# Atomistic simulation files
+# ======================
+*.xyz
+*.extxyz
+*.traj
+*.dump
+*.lammps
+*.lammpstrj
+*.h5
+*.hdf5
+*.nc
+*.cif
+*.POSCAR
+POSCAR
+CONTCAR
+OUTCAR
+XDATCAR
+OSZICAR
+vasprun.xml
+# ======================
+# MACE / ML potential files
+# ======================
+*.model
+*.pt
+*.pth
+*.ckpt
+*.pkl
+*.sav
+
+# ======================
+# HPC / job scheduler outputs
+# ======================
+*.out
+*.err
+slurm-*.out
+job_*.sh.o*
+job_*.sh.e*
+core.*
+
+# ======================
+# Python
+# ======================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+
+# ======================
+# Jupyter Notebooks
+# ======================
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ======================
+# Virtual environments
+# ======================
+.env
+.venv
+env/
+venv/
+
+# ======================
+# macOS
+# ======================
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ======================
+# Editors
+# ======================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ======================
+# Sphinx docs build output
+# ======================
+docs/_build/
+
+# ======================
+# Large output/results directories
+# ======================
+results/
+outputs/
+scratch/
+tmp/
+logs/
+
+# ======================
+# Internal experiments / archived research code
+# Kept locally for revival, not published to either remote.
+# ======================
+experiments/
+
+# ======================
+# Test / scratch outputs
+# ======================
+gen_*/
+factor_test*/
+random_*/
+.coverage
+*.png
+test_mace_overnight.py

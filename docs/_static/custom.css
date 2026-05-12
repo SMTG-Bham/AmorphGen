@@ -1,0 +1,64 @@
+/* AmorphGen docs — minimal overrides on top of sphinx_rtd_theme */
+
+/* Wider content area */
+.wy-nav-content {
+    max-width: 960px;
+}
+
+/* Sidebar colours — dark navy for logo contrast */
+.wy-side-nav-search, .wy-side-nav-search > a, .wy-nav-top {
+    background: #2a3548;
+}
+.wy-nav-side {
+    background: #1a1f2e;
+}
+.wy-menu-vertical p.caption {
+    color: #e63946;
+    font-weight: 700;
+}
+.wy-menu-vertical li.current > a {
+    border-right: 3px solid #e63946;
+}
+
+/* Sidebar logo sizing */
+.wy-side-nav-search > a img.logo,
+.sidebar-logo {
+    width: 120px;
+    max-width: 70%;
+    height: auto;
+    margin-bottom: 6px;
+    background: #ffffff;
+    padding: 8px;
+    border-radius: 8px;
+}
+
+/* Feature cards (sphinx-design) */
+.sd-card {
+    border-radius: 6px;
+    transition: box-shadow 0.2s;
+}
+.sd-card:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+.sd-card .sd-card-footer {
+    font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.82em;
+    color: #666;
+    background: #f8f9fa;
+    border-top: 1px solid #eee;
+    padding: 8px 12px;
+}
+
+/* Landing page — hide H1 text when logo is shown */
+section#amorphgen > h1 {
+    font-size: 0;
+    margin: 0;
+    padding: 0;
+    line-height: 0;
+}
+
+/* Hero logo on landing page */
+.content img[alt="AmorphGen"] {
+    margin-top: 10px;
+    margin-bottom: 6px;
+}

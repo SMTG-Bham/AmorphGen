@@ -1,0 +1,51 @@
+# ============================================================================
+# AmorphGen — Classical Potential YAML Configuration
+# ============================================================================
+# Usage:
+#   amorphgen POSCAR --config classical.yaml
+#   amorphgen --random-gen SiO2 --relax --config classical.yaml
+#
+# Classical potentials run on CPU — no GPU needed.
+# ============================================================================
+
+# ── Calculator ───────────────────────────────────────────────────────────────
+# model: lennard-jones    # LJ pair potential
+model: buckingham          # Buckingham + Coulomb (Wolf summation)
+device: cpu
+
+# ── Classical potential parameters ───────────────────────────────────────────
+# Pair keys use "Element1-Element2" format (order doesn't matter).
+classical_params:
+  # BKS potential for SiO2 (van Beest, Kramer, van Santen, PRL 1990)
+  params:
+    Si-O:
+      A: 18003.7572
+      rho: 0.205205
+      C: 133.5381
+    O-O:
+      A: 1388.7730
+      rho: 0.362319
+      C: 175.0
+  charges:
+    Si: 2.4
+    O: -1.2
+  cutoff: 10.0       # Angstrom
+  alpha: 0.2          # Wolf damping parameter (1/Angstrom)
+  coulomb: true       # Include Coulomb interactions
+
+# ── Optimisation ─────────────────────────────────────────────────────────────
+opt:
+  fmax: 0.05           # eV/A — use 0.05 for classical (Wolf approximation)
+  max_steps: 3000
+  optimizer: FIRE
+  cell_filter: none    # No cell relaxation for classical
+
+# ============================================================================
+# Lennard-Jones example (uncomment and set model: lennard-jones):
+# ============================================================================
+# classical_params:
+#   params:
+#     Ar-Ar:
+#       epsilon: 0.0104    # eV
+#       sigma: 3.40        # Angstrom
+#   cutoff: 10.0

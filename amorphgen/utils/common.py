@@ -12,10 +12,20 @@ from __future__ import annotations
 
 import os
 import copy
-import time
 import numpy as np
 from ase import units
 from ase.io import read, write
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Density helper
+# ═════════════════════════════════════════════════════════════════════════════
+
+def compute_density_gcm3(atoms) -> float:
+    """Compute density of an Atoms object in g/cm3."""
+    mass_g = sum(atoms.get_masses()) / 6.022e23
+    vol_cm3 = atoms.get_volume() * 1e-24
+    return mass_g / vol_cm3
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -252,9 +262,15 @@ def merge_config(defaults: dict, overrides: dict | None) -> dict:
 # Snapshot extraction
 # ═════════════════════════════════════════════════════════════════════════════
 
+_FORMAT_EXT = {"xyz": "xyz", "extxyz": "xyz",
+               "vasp": "vasp", "cif": "cif"}
+
+
 def extract_snapshots(traj_file: str, n_snapshots: int = 20,
                       select: str = "uniform",
-                      output_dir: str = "snapshots") -> list[str]:
+                      output_dir: str = "snapshots",
+                      burn_in_frames: int = 0,
+                      output_format: str = "xyz") -> list[str]:
     """
     Extract snapshot frames from a trajectory file.
 
@@ -269,32 +285,68 @@ def extract_snapshots(traj_file: str, n_snapshots: int = 20,
         ``"last"`` (final *n* frames).
     output_dir : str
         Directory for output files.
+    burn_in_frames : int, default 0
+        Number of leading frames to discard before sampling. Useful for
+        skipping the non-equilibrated portion of an MD trajectory (e.g.
+        the first ~50 ps of a 100 ps high-T equilibration). The reported
+        frame indices in the output filenames remain absolute (relative
+        to the original trajectory) so the provenance of each snapshot
+        is preserved.
+    output_format : str, default ``"xyz"``
+        File format for written snapshots. One of ``xyz`` / ``extxyz``
+        (extxyz with full metadata), ``vasp`` (POSCAR, sorted by species),
+        or ``cif``.  All formats are ASE-readable round-trip.
 
     Returns
     -------
     list of str
         Paths to extracted snapshot files.
     """
+    if output_format not in _FORMAT_EXT:
+        raise ValueError(
+            f"Unknown output_format '{output_format}'. "
+            f"Supported: {sorted(_FORMAT_EXT)}"
+        )
+    ext = _FORMAT_EXT[output_format]
+    ase_fmt = "extxyz" if output_format in ("xyz", "extxyz") else output_format
     frames = read(traj_file, index=":")
-    n_frames = len(frames)
+    n_frames_total = len(frames)
+
+    if burn_in_frames < 0:
+        raise ValueError(f"burn_in_frames must be >= 0, got {burn_in_frames}.")
+    if burn_in_frames >= n_frames_total:
+        raise ValueError(
+            f"burn_in_frames={burn_in_frames} >= trajectory length "
+            f"{n_frames_total}; nothing left to sample.")
+    n_frames = n_frames_total - burn_in_frames
 
     if n_snapshots > n_frames:
-        print(f"Warning: requested {n_snapshots} snapshots but trajectory "
-              f"has only {n_frames} frames. Using all frames.")
+        print(f"Warning: requested {n_snapshots} snapshots but only "
+              f"{n_frames} frames available after burn-in. Using all.")
         n_snapshots = n_frames
 
     if select == "uniform":
-        indices = np.linspace(0, n_frames - 1, n_snapshots, dtype=int)
+        indices = np.linspace(burn_in_frames, n_frames_total - 1,
+                              n_snapshots, dtype=int)
     elif select == "last":
-        indices = list(range(max(0, n_frames - n_snapshots), n_frames))
+        indices = list(range(max(burn_in_frames, n_frames_total - n_snapshots),
+                             n_frames_total))
     else:
         raise ValueError(f"Unknown selection strategy '{select}'.")
+
+    if burn_in_frames > 0:
+        print(f"  Burn-in: skipping first {burn_in_frames} frames "
+              f"(sampling from frame {burn_in_frames}-{n_frames_total - 1})")
 
     os.makedirs(output_dir, exist_ok=True)
     paths = []
     for i, idx in enumerate(indices):
-        fname = os.path.join(output_dir, f"snapshot_{i:04d}_frame{idx:05d}.extxyz")
-        write(fname, frames[idx], format="extxyz")
+        fname = os.path.join(output_dir,
+                             f"snapshot_{i:04d}_frame{idx:05d}.{ext}")
+        if ase_fmt == "vasp":
+            write(fname, frames[idx], format=ase_fmt, sort=True)
+        else:
+            write(fname, frames[idx], format=ase_fmt)
         paths.append(fname)
 
     print(f"Extracted {len(paths)} snapshots → {output_dir}/")

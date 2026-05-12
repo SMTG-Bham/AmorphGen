@@ -1,0 +1,48 @@
+# ── AmorphGen: Hybrid AIRSS + Melt-Quench ──
+#
+# For pre-generated amorphous structures (e.g. from --random-gen).
+# Skips stages 2 & 3 (heating) since structures are already disordered.
+#
+# Usage (single structure):
+#   amorphgen structure.xyz --config hybrid_airss_mq.yaml --stages 1 4 5 6 7
+#
+# Usage (ensemble — recommended):
+#   amorphgen --hybrid-ensemble --input-dir random_inputs/ \
+#       --config hybrid_airss_mq.yaml -o hybrid_run/
+
+model: mace-mpa-0
+# Override --device on the CLI for non-CUDA systems (e.g. --device mps on Mac).
+device: cuda
+default_dtype: float64
+
+# ── Stage 1 & 7: Optimisation (fixed volume) ──
+opt:
+  fmax: 0.05
+  max_steps: 500
+  cell_filter: none      # fixed cell — preserve AIRSS volume
+
+# ── Stage 4: High-T equilibration ──
+eq_high:
+  ensemble: NVT
+  T: 3000                # K
+  steps: 200000          # 100 ps at 0.5 fs
+  timestep: 0.5          # fs
+  friction: 0.01
+
+# ── Stage 5: Quench ──
+quench:
+  ensemble: NVT
+  T_start: 3000
+  T_end: 300
+  T_step: -100
+  rate: 100              # K/ps quench rate
+  timestep: 0.5          # fs
+  friction: 0.01
+
+# ── Stage 6: Low-T equilibration ──
+eq_low:
+  ensemble: NVT
+  T: 300
+  steps: 100000          # 50 ps at 0.5 fs
+  timestep: 0.5          # fs
+  friction: 0.01

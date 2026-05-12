@@ -130,6 +130,53 @@ class TestTrajectoryWriter:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Snapshot extraction (with burn-in)
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestExtractSnapshots:
+    """Verify burn_in_frames option of extract_snapshots."""
+
+    @staticmethod
+    def _write_dummy_traj(path, n_frames):
+        """Write a fake extxyz trajectory of n_frames Cu fcc cells."""
+        from ase.io import write
+        atoms_list = [bulk("Cu", "fcc", a=3.6 + 0.001 * i, cubic=True) * (2, 2, 2)
+                      for i in range(n_frames)]
+        write(path, atoms_list, format="extxyz")
+
+    def test_no_burn_in_default(self, tmp_path):
+        from amorphgen.utils.common import extract_snapshots
+        traj = str(tmp_path / "traj.xyz")
+        self._write_dummy_traj(traj, n_frames=20)
+        out = str(tmp_path / "snaps")
+        paths = extract_snapshots(traj, n_snapshots=5, output_dir=out)
+        assert len(paths) == 5
+        # First snapshot starts at frame 0
+        assert "frame00000" in paths[0]
+
+    def test_burn_in_skips_leading_frames(self, tmp_path):
+        from amorphgen.utils.common import extract_snapshots
+        traj = str(tmp_path / "traj.xyz")
+        self._write_dummy_traj(traj, n_frames=20)
+        out = str(tmp_path / "snaps")
+        paths = extract_snapshots(traj, n_snapshots=5,
+                                  burn_in_frames=10, output_dir=out)
+        assert len(paths) == 5
+        # First sampled index is the burn-in cutoff (10), not 0
+        assert "frame00010" in paths[0]
+        # Last sampled index is the final trajectory frame (n_frames - 1)
+        assert "frame00019" in paths[-1]
+
+    def test_burn_in_equal_to_length_raises(self, tmp_path):
+        from amorphgen.utils.common import extract_snapshots
+        traj = str(tmp_path / "traj.xyz")
+        self._write_dummy_traj(traj, n_frames=10)
+        with pytest.raises(ValueError):
+            extract_snapshots(traj, n_snapshots=2, burn_in_frames=10,
+                              output_dir=str(tmp_path / "snaps"))
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Backend detection
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -143,10 +190,11 @@ class TestBackendDetection:
     def test_chgnet_detected(self):
         assert _detect_backend("chgnet") == "chgnet"
 
-    def test_m3gnet_detected(self):
-        assert _detect_backend("m3gnet") == "m3gnet"
-        assert _detect_backend("matgl") == "m3gnet"
-        assert _detect_backend("m3gnet-pes") == "m3gnet"
+    def test_sevennet_detected(self):
+        assert _detect_backend("sevennet") == "sevennet"
+        assert _detect_backend("7net-mf-ompa") == "sevennet"
+        assert _detect_backend("7net-l3i5") == "sevennet"
+        assert _detect_backend("7net-omat") == "sevennet"
 
     def test_unknown_model_raises(self):
         with pytest.raises(ValueError, match="Unrecognised model"):
@@ -155,7 +203,7 @@ class TestBackendDetection:
     def test_case_insensitive(self):
         assert _detect_backend("MACE-MPA-0") == "mace"
         assert _detect_backend("CHGNet") == "chgnet"
-        assert _detect_backend("M3GNet") == "m3gnet"
+        assert _detect_backend("SevenNet") == "sevennet"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -173,7 +221,7 @@ class TestModelRegistry:
         backends = {d.split()[0] for d in MODEL_DESCRIPTIONS.values()}
         assert "MACE-MPA-0" in backends or any("MACE" in b for b in backends)
         assert any("CHGNet" in b for b in backends)
-        assert any("M3GNet" in b for b in backends)
+        assert any("SevenNet" in b for b in backends)
 
     def test_default_model_in_registry(self):
         assert "mace-mpa-0" in MACE_FOUNDATION_MODELS

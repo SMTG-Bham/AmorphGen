@@ -1,0 +1,55 @@
+# ── AmorphGen: Fast test config ──
+#
+# Minimal steps for quick testing on CPU. Not for production.
+#
+# Usage:
+#   amorphgen POSCAR --config fast_test.yaml --device cpu
+
+model: mace-mpa-0
+device: cpu
+default_dtype: float64
+
+opt:
+  fmax: 0.1
+  max_steps: 50
+  cell_filter: none
+
+eq_premelt:
+  ensemble: NVT
+  T: 300
+  steps: 50
+  timestep: 1.0
+  friction: 0.01
+
+melt:
+  ensemble: NVT
+  T_start: 300
+  T_end: 1000
+  T_step: 100
+  rate: 1000             # very fast for testing
+  timestep: 1.0
+  friction: 0.01
+  make_cubic: false
+
+eq_high:
+  ensemble: NVT
+  T: 1000
+  steps: 50
+  timestep: 1.0
+  friction: 0.01
+
+quench:
+  ensemble: NVT
+  T_start: 1000
+  T_end: 300
+  T_step: -100
+  rate: 1000             # very fast for testing
+  timestep: 1.0
+  friction: 0.01
+
+eq_low:
+  ensemble: NVT
+  T: 300
+  steps: 50
+  timestep: 1.0
+  friction: 0.01

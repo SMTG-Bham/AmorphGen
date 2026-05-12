@@ -14,7 +14,7 @@ DEFAULT_CONFIG = {
     # Foundation model short name — works across all backends:
     #   MACE:     "mace-mpa-0", "mace-mh-1", "mace-omat-0-medium", ...
     #   CHGNet:   "chgnet"
-    #   M3GNet:   "m3gnet"
+    #   SevenNet: "sevennet", "7net-mf-ompa", "7net-l3i5", ...
     "model": "mace-mpa-0",
 
     # Legacy alias — reads are redirected to "model" in the pipeline
@@ -31,6 +31,10 @@ DEFAULT_CONFIG = {
     "traj_format": "extxyz",
 
     # ── Stage 1 & 7: structure optimisation ───────────────────────────────────
+    # Stage 1 reads from `opt:`; Stage 7 reads from `final_opt:` and FALLS BACK
+    # to `opt:` when `final_opt:` is absent. To use different settings for
+    # the final amorphous opt (e.g. tighter fmax, FrechetCellFilter for cell
+    # relax), add a `final_opt:` block with the same schema.
     "opt": {
         "fmax":      0.01,   # eV/Å  force convergence
         "max_steps": 1000,
@@ -40,8 +44,8 @@ DEFAULT_CONFIG = {
     "eq_premelt": {
         "ensemble":  "NVT",
         "T":         300,      # K
-        "steps":     50000,    # 50 ps at 1 fs timestep
-        "timestep":  1.0,
+        "steps":     100000,   # 50 ps at 0.5 fs timestep
+        "timestep":  0.5,
         "friction":  0.01,
     },
 
@@ -51,8 +55,9 @@ DEFAULT_CONFIG = {
         "T_start":      300,     # K
         "T_end":        3000,    # K
         "T_step":       100,     # K  per ramp segment
-        "steps_per_T":  1000,
-        "timestep":     1.0,     # fs
+        "steps_per_T":  2000,
+        "rate":         None,    # K/ps  (overrides steps_per_T if set)
+        "timestep":     0.5,     # fs
         "friction":     0.01,    # 1/fs  (NVT Langevin)
         "ttime":        25.0,    # fs    (NPT thermostat)
     },
@@ -61,8 +66,8 @@ DEFAULT_CONFIG = {
     "eq_high": {
         "ensemble":  "NVT",
         "T":         3000,     # K  (should match melt T_end)
-        "steps":     10000,
-        "timestep":  1.0,
+        "steps":     20000,
+        "timestep":  0.5,
         "friction":  0.01,
     },
 
@@ -72,8 +77,9 @@ DEFAULT_CONFIG = {
         "T_start":      3000,    # K  (should match eq_high T)
         "T_end":        300,     # K
         "T_step":       -100,    # K  (negative = cooling)
-        "steps_per_T":  1000,
-        "timestep":     1.0,
+        "steps_per_T":  2000,
+        "rate":         None,    # K/ps  (overrides steps_per_T if set)
+        "timestep":     0.5,
         "friction":     0.01,
         "ttime":        25.0,
     },
@@ -82,8 +88,8 @@ DEFAULT_CONFIG = {
     "eq_low": {
         "ensemble":  "NVT",
         "T":         300,      # K  (should match quench T_end)
-        "steps":     10000,
-        "timestep":  1.0,
+        "steps":     20000,
+        "timestep":  0.5,
         "friction":  0.01,
     },
 }

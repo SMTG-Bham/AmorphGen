@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "amorphgen"
-version = "2.0.0"
-description = "Model-agnostic melt-and-quench pipeline for amorphous structure generation using universal machine learning force fields"
+version = "1.0.0"
+description = "Amorphous structure generation via melt-quench MD and random placement with universal MLIPs"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "Chayawat Kaewmeechai"},
+    {name = "Chaiyawat Kaewmeechai"},
 ]
 requires-python = ">=3.10"
 classifiers = [
@@ -28,30 +28,66 @@ classifiers = [
 dependencies = [
     "ase>=3.22",
     "numpy>=1.24",
+    "scipy>=1.10",
     "torch>=2.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
-# Individual backend extras
+# Individual backend extras.
+#
+# MACE pre-trained foundation models (mace-mpa-0 etc.) were pickled with
+# e3nn 0.4.x, which uses 2-tuples in `_codegen`. e3nn 0.5+ switched to
+# 3-tuples and raises "ValueError: too many values to unpack" when the
+# foundation model is loaded. Pin e3nn here to keep MACE working
+# out-of-the-box.
 mace = [
     "mace-torch>=0.3",
+    "e3nn>=0.4.4,<0.5",
 ]
 chgnet = [
     "chgnet>=0.3",
 ]
-m3gnet = [
-    "matgl>=1.0",
+# SevenNet pulls in e3nn>=0.5, which conflicts with the MACE pin above.
+# Install SevenNet in its own environment, or with `[full]` if you accept
+# that MACE foundation-model loading may then break.
+sevennet = [
+    "sevenn>=0.10",
+]
+
+# Analysis and plotting
+analysis = [
+    "matplotlib>=3.5",
 ]
 
 # Convenience bundles
+# `[all]` covers the conflict-free combo (MACE + CHGNet + analysis); for
+# SevenNet alongside MACE see the docs note on separate envs.
 all = [
     "mace-torch>=0.3",
+    "e3nn>=0.4.4,<0.5",
     "chgnet>=0.3",
-    "matgl>=1.0",
+    "matplotlib>=3.5",
+]
+# Everything in one env -- only works if you skip MACE foundation models
+# or use a mace-torch build that supports e3nn>=0.5. Read docs first.
+full = [
+    "mace-torch>=0.3",
+    "chgnet>=0.3",
+    "sevenn>=0.10",
+    "matplotlib>=3.5",
 ]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "matplotlib>=3.5",
+]
+docs = [
+    "sphinx",
+    "myst-parser",
+    "sphinx-rtd-theme",
+    "sphinx-copybutton",
+    "sphinx-design",
 ]
 
 [project.urls]
@@ -64,6 +100,9 @@ amorphgen = "amorphgen.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["amorphgen*"]
+
+[tool.setuptools.package-data]
+amorphgen = ["configs/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["test"]

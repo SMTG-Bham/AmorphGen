@@ -52,7 +52,7 @@ class TestOptCell:
                 "logfile": "test_opt.log",
                 "traj_file": "test_opt.traj",
                 "output_cif": "test_opt.cif",
-                "output_xyz": "test_opt.extxyz",
+                "output_xyz": "test_opt.xyz",
             },
         }
 
@@ -71,6 +71,101 @@ class TestOptCell:
         from amorphgen.pipeline.opt_cell import _get_optimizer
         with pytest.raises(ValueError):
             _get_optimizer("NonexistentOptimizer")
+
+
+class TestResume:
+    """Test smart resume in MeltQuenchPipeline."""
+
+    def test_find_resume_point_no_checkpoints(self, cu_bulk, tmp_work_dir):
+        """With no checkpoint files, all stages should be returned."""
+        from amorphgen.pipeline.run_pipeline import MeltQuenchPipeline
+        from ase.io import write
+
+        input_file = str(tmp_work_dir / "input.xyz")
+        write(input_file, cu_bulk)
+
+        pipe = MeltQuenchPipeline(
+            input_file=input_file,
+            work_dir=str(tmp_work_dir / "run"),
+        )
+        stages = [1, 4, 5, 6, 7]
+        remaining, resume_input = pipe._find_resume_point(stages)
+        assert remaining == [1, 4, 5, 6, 7]
+        assert resume_input == input_file
+
+    def test_find_resume_point_partial(self, cu_bulk, tmp_work_dir):
+        """With stages 1 and 4 complete, should resume from stage 5."""
+        from amorphgen.pipeline.run_pipeline import MeltQuenchPipeline
+        from ase.io import write
+
+        input_file = str(tmp_work_dir / "input.xyz")
+        write(input_file, cu_bulk)
+
+        work = tmp_work_dir / "run"
+        work.mkdir()
+        pipe = MeltQuenchPipeline(
+            input_file=input_file,
+            work_dir=str(work),
+        )
+
+        # Simulate completed stages 1 and 4
+        write(str(work / "stage1_opt.xyz"), cu_bulk)
+        write(str(work / "stage4_eq.xyz"), cu_bulk)
+
+        stages = [1, 4, 5, 6, 7]
+        remaining, resume_input = pipe._find_resume_point(stages)
+        assert remaining == [5, 6, 7]
+        assert resume_input == str(work / "stage4_eq.xyz")
+
+    def test_find_resume_point_all_done(self, cu_bulk, tmp_work_dir):
+        """With all stages complete, no stages should remain."""
+        from amorphgen.pipeline.run_pipeline import MeltQuenchPipeline
+        from ase.io import write
+
+        input_file = str(tmp_work_dir / "input.xyz")
+        write(input_file, cu_bulk)
+
+        work = tmp_work_dir / "run"
+        work.mkdir()
+        pipe = MeltQuenchPipeline(
+            input_file=input_file,
+            work_dir=str(work),
+        )
+
+        # Simulate all stages complete
+        for fname in ["stage1_opt.xyz", "stage4_eq.xyz",
+                      "stage5_quenched.xyz", "stage6_eq.xyz",
+                      "stage7_opt.xyz"]:
+            write(str(work / fname), cu_bulk)
+
+        stages = [1, 4, 5, 6, 7]
+        remaining, resume_input = pipe._find_resume_point(stages)
+        assert remaining == []
+
+    def test_run_resume_skips_completed(self, cu_bulk, tmp_work_dir):
+        """run(resume=True) should return atoms when all stages are done."""
+        from amorphgen.pipeline.run_pipeline import MeltQuenchPipeline
+        from ase.io import write
+
+        input_file = str(tmp_work_dir / "input.xyz")
+        write(input_file, cu_bulk)
+
+        work = tmp_work_dir / "run"
+        work.mkdir()
+        pipe = MeltQuenchPipeline(
+            input_file=input_file,
+            work_dir=str(work),
+        )
+
+        # Simulate all stages complete
+        for fname in ["stage1_opt.xyz", "stage4_eq.xyz",
+                      "stage5_quenched.xyz", "stage6_eq.xyz",
+                      "stage7_opt.xyz"]:
+            write(str(work / fname), cu_bulk)
+
+        result = pipe.run(stages=[1, 4, 5, 6, 7], resume=True)
+        assert result is not None
+        assert len(result) == len(cu_bulk)
 
 
 class TestMDStages:

@@ -1,7 +1,7 @@
 """
 amorphgen.pipeline.quench
 --------------------------
-Stage 4 – Cool the melt from T_start down to T_end via a temperature ramp.
+Stage 5 – Cool the melt from T_start down to T_end via a temperature ramp.
 
 Ensemble is configurable: NVT (default) or NPT.
 """
@@ -37,10 +37,10 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
 
     if isinstance(atoms_or_file, str):
         atoms = read(atoms_or_file)
-        print(f"[Stage 4] Loaded from {atoms_or_file}")
+        print(f"[Stage 5] Loaded from {atoms_or_file}")
     else:
         atoms = deepcopy(atoms_or_file)
-        print("[Stage 4] Using provided Atoms object")
+        print("[Stage 5] Using provided Atoms object")
 
     if calc is None:
         device = global_cfg.get("device", "cuda")
@@ -64,14 +64,22 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
         ttime=cfg.get("ttime", 25.0),
     )
 
-    logfile = cfg.get("log_file", "stage4_quench.log")
-    trajfile = cfg.get("traj_file", "stage4_quench.xyz")
+    logfile = cfg.get("log_file", "stage5_quench.log")
+    trajfile = cfg.get("traj_file", "stage5_quench.xyz")
     logger, traj = attach_outputs(dyn, atoms, logfile, trajfile,
                                   fmt=global_cfg.get("traj_format", "extxyz"))
 
     T_end = cfg["T_end"]
     T_step = cfg.get("T_step", -100)
-    steps = cfg.get("steps_per_T", 1000)
+    timestep_fs = cfg.get("timestep", 1.0)
+
+    # Allow rate (K/ps) to auto-calculate steps_per_T
+    rate = cfg.get("rate")
+    if rate is not None:
+        steps = int(round(abs(T_step) / (rate * timestep_fs / 1000)))
+        steps = max(steps, 1)
+    else:
+        steps = cfg.get("steps_per_T", 1000)
 
     # Build temperature list (cooling)
     temps = []
@@ -80,8 +88,12 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
         temps.append(int(round(T)))
         T += T_step
 
-    print(f"[Stage 4] {ensemble} quench: {T_start} -> {T_end} K  "
-          f"({T_step} K/step, {steps} steps each)")
+    from ..utils.common import compute_density_gcm3
+    density = compute_density_gcm3(atoms)
+    actual_rate = abs(T_step) / (steps * timestep_fs / 1000)
+    print(f"[Stage 5] {ensemble} quench: {T_start} -> {T_end} K  "
+          f"({T_step} K/step, {steps} steps each, {actual_rate:.1f} K/ps)  "
+          f"density={density:.2f} g/cm3")
 
     for T in temps:
         dyn.set_temperature(temperature_K=T)
@@ -91,7 +103,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
     logger.close()
     traj.close()
 
-    out_xyz = cfg.get("output_xyz", "stage4_quenched.xyz")
-    write(out_xyz, atoms, format="xyz")
-    print(f"[Stage 4] Saved -> {out_xyz}\n")
+    out_xyz = cfg.get("output_xyz", "stage5_quenched.xyz")
+    write(out_xyz, atoms, format="extxyz")
+    print(f"[Stage 5] Saved -> {out_xyz}\n")
     return atoms

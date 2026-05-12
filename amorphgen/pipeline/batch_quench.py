@@ -1,20 +1,42 @@
 """
 amorphgen.pipeline.batch_quench
 --------------------------------
-Run quench + equilibration + final optimisation on multiple snapshots
-from a high-T trajectory.
+Run a subset of pipeline stages independently on each of N input
+structures, producing a library of amorphous candidates.
 
-This module takes snapshot files (extracted from Stage 3's trajectory)
-and runs Stages 4-5-6 independently on each one, producing a library
-of amorphous candidate structures.
+Typical use cases:
+
+* **MQ snapshot quench** (default ``stages=[5, 6, 7]``): take N snapshots
+  extracted from a Stage 4 high-T equilibration trajectory and quench each
+  through stages 5 (cooling) -> 6 (low-T eq) -> 7 (final opt).
+* **Hybrid workflow** (``stages=[4, 5, 6, 7]``): take N already-disordered
+  inputs (e.g. ``--random-gen`` outputs), anneal at high T, then quench.
+
+Stage numbers follow the canonical 7-stage pipeline:
+4 = eq_high, 5 = quench, 6 = eq_low, 7 = final_opt.
 """
 
 from __future__ import annotations
 
 import os
+import re
 from copy import deepcopy
 
 from ase.io import read, write
+
+
+def _run_dir_name(snap_file: str, fallback_idx: int) -> str:
+    """Pick a self-documenting run-dir name from a snapshot filename.
+
+    ``snapshot_0007_frame00184.extxyz`` -> ``run_0007``.
+    If no leading ``snapshot_NNNN`` index is parseable, fall back to
+    ``run_{fallback_idx:04d}`` so the loop's enumerate index is preserved.
+    """
+    base = os.path.splitext(os.path.basename(snap_file))[0]
+    m = re.match(r"snapshot[_-]?(\d+)", base)
+    if m:
+        return f"run_{int(m.group(1)):04d}"
+    return f"run_{fallback_idx:04d}"
 
 from ..utils import get_calculator, merge_config
 from ..configs import DEFAULT_CONFIG
@@ -44,13 +66,18 @@ def run(snapshot_files: list[str],
     work_dir : str
         Base output directory.
     stages : list of int
-        Which stages to run per snapshot (default [4, 5, 6]).
+        Which stages to run per snapshot. Stage numbers follow the canonical
+        7-stage pipeline: 4=eq_high, 5=quench, 6=eq_low, 7=final_opt.
+        Default ``[5, 6, 7]`` (quench + eq_low + final_opt — the standard
+        post-Stage-4 batch workflow). Include 4 when starting from random /
+        already-disordered structures that need to be annealed first
+        (the 'hybrid' workflow).
     calc : ASE calculator, optional
     resume : bool
         If True, skip runs whose final output already exists.
     """
     if stages is None:
-        stages = [4, 5, 6]
+        stages = [5, 6, 7]
 
     global_cfg = merge_config(DEFAULT_CONFIG, cfg_override)
     os.makedirs(work_dir, exist_ok=True)
@@ -87,18 +114,21 @@ def run(snapshot_files: list[str],
 
     results = []
     for i, snap_file in enumerate(selected):
-        run_dir = os.path.join(work_dir, f"run_{i:04d}")
-        final_output = os.path.join(run_dir, "final_amorphous.extxyz")
+        run_name = _run_dir_name(snap_file, fallback_idx=i)
+        run_dir = os.path.join(work_dir, run_name)
+        final_output = os.path.join(run_dir, "final_amorphous.xyz")
+        legacy_final = os.path.join(run_dir, "final_amorphous.extxyz")
 
-        if resume and os.path.isfile(final_output):
-            print(f"  [run_{i:04d}] Already complete -- skipping.")
-            results.append(read(final_output))
+        if resume and (os.path.isfile(final_output) or os.path.isfile(legacy_final)):
+            existing = final_output if os.path.isfile(final_output) else legacy_final
+            print(f"  [{run_name}] Already complete -- skipping.")
+            results.append(read(existing))
             continue
 
         os.makedirs(run_dir, exist_ok=True)
-        print(f"\n  {'─' * 60}")
-        print(f"  Run {i:04d} / {len(selected)-1}  <-  {os.path.basename(snap_file)}")
-        print(f"  {'─' * 60}")
+        print(f"\n  {'-' * 60}")
+        print(f"  Run {i+1:04d} / {len(selected)}  <-  {os.path.basename(snap_file)}  ->  {run_name}/")
+        print(f"  {'-' * 60}")
 
         atoms = read(snap_file)
         atoms.calc = calc
@@ -108,18 +138,28 @@ def run(snapshot_files: list[str],
         try:
             for s in stages:
                 if s == 4:
-                    atoms = quench.run(atoms, cfg_override=cfg_override, calc=calc)
-                elif s == 5:
                     atoms = equilibrate.run(atoms, cfg_override=cfg_override,
-                                           calc=calc, stage="low")
+                                            calc=calc, stage="high")
+                elif s == 5:
+                    atoms = quench.run(atoms, cfg_override=cfg_override, calc=calc)
                 elif s == 6:
+                    atoms = equilibrate.run(atoms, cfg_override=cfg_override,
+                                            calc=calc, stage="low")
+                elif s == 7:
                     atoms = final_opt.run(atoms, cfg_override=cfg_override, calc=calc)
+                else:
+                    raise ValueError(
+                        f"batch_quench: unknown stage {s}. "
+                        f"Allowed: 4 (eq_high), 5 (quench), 6 (eq_low), 7 (final_opt)."
+                    )
         finally:
             os.chdir(orig_dir)
 
         write(final_output, atoms, format="extxyz")
         results.append(atoms)
-        print(f"  [run_{i:04d}] Done -> {final_output}")
+        from ..utils.common import compute_density_gcm3
+        d = compute_density_gcm3(atoms)
+        print(f"  [{run_name}] Done -> {final_output}  density={d:.2f} g/cm3")
 
     print(f"\n{bar}")
     print(f"  Batch complete: {len(results)} structures generated")

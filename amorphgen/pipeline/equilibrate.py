@@ -15,7 +15,7 @@ from ase.io import read, write
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 
 from ..utils import (get_calculator, build_md_dynamics,
-                     attach_outputs, merge_config)
+                     attach_outputs, merge_config, make_cubic)
 from ..configs import DEFAULT_CONFIG
 
 
@@ -57,6 +57,22 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high", **kwargs):
         atoms = deepcopy(atoms_or_file)
         print(f"[Stage {stage_label}] Using provided Atoms object")
 
+    # Stage 4 (eq_high) reshapes the molten cell to a cube of equal volume
+    # before high-T equilibration. Reshaping a fully melted liquid is
+    # benign (atoms diffuse and lose memory of the deformation in <1 ps),
+    # whereas reshaping a still-crystalline structure (the previous
+    # behaviour, executed at start of stage 3) causes a small unphysical
+    # jolt at low T. The flag is honoured under either eq_high.make_cubic
+    # or melt.make_cubic for one release as a backwards-compat bridge.
+    if stage == "high":
+        make_cubic_flag = cfg.get(
+            "make_cubic",
+            global_cfg.get("melt", {}).get("make_cubic", True),
+        )
+        if make_cubic_flag:
+            atoms = make_cubic(atoms)
+            print(f"[Stage {stage_label}] Cell reshaped to cubic")
+
     if calc is None:
         device = global_cfg.get("device", "cuda")
         if device == "auto":
@@ -81,14 +97,21 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high", **kwargs):
     )
 
     logfile = cfg.get("log_file", f"stage{stage_label}_eq.log")
-    trajfile = cfg.get("traj_file", f"stage{stage_label}_eq.xyz")
+    # Distinct names for the running trajectory vs the final-state output.
+    # `stage{N}_eq_traj.xyz` accumulates frames during the run; the final
+    # single-frame `stage{N}_eq.xyz` is only written at successful completion.
+    # This is also what --resume checks, so partial trajectories no longer
+    # cause stage skipping when a job hits walltime mid-stage.
+    trajfile = cfg.get("traj_file", f"stage{stage_label}_eq_traj.xyz")
     logger, traj = attach_outputs(dyn, atoms, logfile, trajfile,
                                   fmt=global_cfg.get("traj_format", "extxyz"))
 
+    from ..utils.common import compute_density_gcm3
+    density = compute_density_gcm3(atoms)
     steps = cfg.get("steps", 10000)
     total_ps = steps * cfg.get("timestep", 1.0) / 1000
     print(f"[Stage {stage_label}] {ensemble} equilibration  T={T} K  "
-          f"{steps} steps ({total_ps:.1f} ps)")
+          f"{steps} steps ({total_ps:.1f} ps)  density={density:.2f} g/cm3")
 
     dyn.run(steps)
 
@@ -96,6 +119,6 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high", **kwargs):
     traj.close()
 
     out_xyz = cfg.get("output_xyz", f"stage{stage_label}_eq.xyz")
-    write(out_xyz, atoms, format="xyz")
+    write(out_xyz, atoms, format="extxyz")
     print(f"[Stage {stage_label}] Saved -> {out_xyz}\n")
     return atoms

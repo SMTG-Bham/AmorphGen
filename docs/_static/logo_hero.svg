@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AmorphGen hero logo
+  Bold split-colour wordmark with single SiO4 tetrahedron
+  positioned above-right of the final 'n' (exponent style).
+  Flat colours throughout - no gradients.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 180" width="720" height="180">
+  <title>AmorphGen</title>
+  <desc>AmorphGen logo: bold wordmark with SiO4 unit in exponent position</desc>
+
+  <!-- Wordmark -->
+  <text x="20" y="140" font-family="Inter, -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="96" font-weight="800" fill="#3066D9" letter-spacing="-3">Amorph<tspan fill="#D33A2C">Gen</tspan></text>
+
+  <!-- Single SiO4 unit, exponent position above-right of final 'n', rotated ~20deg -->
+  <g transform="translate(595, 15) rotate(20, 40, 40)">
+    <g stroke="#3A3A3A" stroke-width="2.4" stroke-linecap="round">
+      <line x1="40" y1="40" x2="14" y2="14"/>
+      <line x1="40" y1="40" x2="66" y2="14"/>
+      <line x1="40" y1="40" x2="14" y2="66"/>
+      <line x1="40" y1="40" x2="66" y2="66"/>
+    </g>
+    <circle cx="14" cy="14" r="8.5" fill="#D33A2C"/>
+    <circle cx="66" cy="14" r="8.5" fill="#D33A2C"/>
+    <circle cx="14" cy="66" r="8.5" fill="#D33A2C"/>
+    <circle cx="66" cy="66" r="8.5" fill="#D33A2C"/>
+    <circle cx="40" cy="40" r="11.5" fill="#3066D9"/>
+  </g>
+</svg>

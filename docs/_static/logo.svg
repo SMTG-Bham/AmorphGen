@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AmorphGen favicon mark
+  Single flat SiO4 tetrahedron - the same unit shown in the hero logo.
+  Used for: favicon, GitHub avatar, Sphinx logo, conda-forge listing.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="256" height="256">
+  <title>AmorphGen</title>
+  <desc>Single SiO4 tetrahedron, flat colours</desc>
+
+  <g transform="rotate(20, 50, 50)">
+    <g stroke="#3A3A3A" stroke-width="3" stroke-linecap="round">
+      <line x1="50" y1="50" x2="20" y2="20"/>
+      <line x1="50" y1="50" x2="80" y2="20"/>
+      <line x1="50" y1="50" x2="20" y2="80"/>
+      <line x1="50" y1="50" x2="80" y2="80"/>
+    </g>
+
+    <circle cx="20" cy="20" r="11" fill="#D33A2C"/>
+    <circle cx="80" cy="20" r="11" fill="#D33A2C"/>
+    <circle cx="20" cy="80" r="11" fill="#D33A2C"/>
+    <circle cx="80" cy="80" r="11" fill="#D33A2C"/>
+    <circle cx="50" cy="50" r="15" fill="#3066D9"/>
+  </g>
+</svg>

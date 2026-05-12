@@ -1,0 +1,71 @@
+=================================================================
+  AmorphGen — Pipeline Summary
+  Date: 2026-05-10 17:55:32
+  Platform: macOS-15.0-arm64-arm-64bit-Mach-O
+  Python: 3.13.12
+=================================================================
+
+  System:  O16Ti8 (24 atoms)
+  Model:   chgnet
+  Device:  cpu
+  Input:   snapshots/snapshot_0003.extxyz
+  Output:  batch_quench/run_0003/
+  Stages:  [5, 6, 7]
+
+  Stage                                           Time (s)   Time (min)
+  ---------------------------------------------------------------------
+  5. Quench (cooling ramp)                            26.5         0.4
+  6. Low-T equilibration                             119.6         2.0
+  7. Final optimisation (amorphous)                    4.0         0.1
+  ---------------------------------------------------------------------
+  Total                                              150.1         2.5
+
+  Per-atom total: 6.26 s/atom
+  Per-atom stage 5: 1.11 s/atom
+  Per-atom stage 6: 4.98 s/atom
+  Per-atom stage 7: 0.17 s/atom
+
+  Configuration:
+    opt:
+      fmax: 0.1
+      max_steps: 100
+    eq_premelt:
+      ensemble: NVT
+      T: 300
+      steps: 100000
+      timestep: 0.5
+      friction: 0.01
+    melt:
+      ensemble: NPT
+      T_start: 300
+      T_end: 3000
+      T_step: 100
+      steps_per_T: 2000
+      rate: None
+      timestep: 0.5
+      friction: 0.01
+      ttime: 25.0
+    eq_high:
+      ensemble: NVT
+      T: 3000
+      steps: 20000
+      timestep: 0.5
+      friction: 0.01
+    quench:
+      ensemble: NVT
+      T_start: 2000
+      T_end: 300
+      T_step: -200
+      steps_per_T: 50
+      rate: None
+      timestep: 2.0
+      friction: 0.01
+      ttime: 25.0
+    eq_low:
+      ensemble: NVT
+      T: 300
+      steps: 2000
+      timestep: 2.0
+      friction: 0.01
+
+=================================================================

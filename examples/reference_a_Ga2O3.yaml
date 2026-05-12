@@ -1,0 +1,42 @@
+# Literature reference values for amorphous Ga2O3 (a-Ga2O3).
+# Pass to amorphgen via:
+#   amorphgen --analyse --input-dir DIR --reference examples/reference_a_Ga2O3.yaml
+#
+# Each "expected" range is a [low, high] interval. A computed value inside
+# the range is reported "match"; within ~5% of either bound is "concern";
+# otherwise "fail".
+#
+# Primary reference: melt-quench MD by the AmorphGen author group.
+# Ranges bracket that central value with ~5% tolerance for ensemble
+# variation, plus broader experimental literature.
+
+system: a-Ga2O3
+
+references:
+  - "Kaewmeechai, Strand & Shluger, Phys. Rev. B 111, 035203 (2025)  -- DFT melt-quench, primary"
+  - "Stehlik et al., J. Non-Cryst. Solids 458 (2017) 14  (neutron + EXAFS)"
+  - "Yoshioka et al., J. Phys. Condens. Matter 19 (2007) 346211  (DFT MD)"
+
+density:
+  expected: [4.70, 5.10]      # central 4.84 g/cm^3 (PRB 2025) +/- ~5%
+  units: "g/cm^3"
+
+bond_distances:
+  Ga-O:
+    expected: [1.85, 1.95]    # melt-quench DFT and EXAFS agree ~1.88-1.92 A
+    units: "A"
+
+coordination:
+  Ga-O:
+    mean_expected: [4.0, 4.8] # mixed Ga(IV)+Ga(V)+Ga(VI); a-Ga2O3 is
+                              # tetrahedral-dominated with octahedral tail
+  O-Ga:
+    mean_expected: [2.7, 3.0]
+
+bond_angles:
+  Ga-O-Ga:
+    expected: [110.0, 130.0]
+    units: "deg"
+  O-Ga-O:
+    expected: [100.0, 115.0]  # tetrahedral-dominated
+    units: "deg"

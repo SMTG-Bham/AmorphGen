@@ -1,0 +1,13 @@
+# YAML-driven format conversion.
+#
+# Run as:   amorphgen --config convert.yaml
+#
+# This is a one-shot utility, equivalent to:
+#   amorphgen --convert <input> --format <format> -o <output_dir>
+#
+# CLI flags override the YAML values when both are present.
+
+convert:
+  input:      snapshots/        # file or directory of structure files
+  format:     vasp              # xyz / extxyz / vasp / cif
+  output_dir: snapshots_vasp/   # optional; defaults to <input>_<format>/

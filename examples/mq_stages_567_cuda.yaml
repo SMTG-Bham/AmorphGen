@@ -1,0 +1,45 @@
+# Stages 5–7 of the melt-quench pipeline for batch_quench on BlueBEAR (CUDA).
+# Used by:
+#   amorphgen --batch-quench --snapshot-dir snapshots/ \
+#             --config mq_stages_567_cuda.yaml \
+#             --stages 5 6 7 \
+#             --model chgnet --device cuda \
+#             -o quench_runs/
+#
+# Each input snapshot is taken to be already at high T (post-stage-4
+# equilibration); these stages cool, equilibrate, and relax it.
+# Tune T_step / steps_per_T / steps if you need a slower or faster quench.
+
+# ── Calculator ────────────────────────────────────────────────────────────
+model: chgnet
+device: cuda
+traj_format: extxyz
+
+# ── Stage 5: quench (cooling ramp 3000 K → 300 K) ─────────────────────────
+quench:
+  ensemble: NVT
+  T_start: 3000          # K — must match the snapshot T (= eq_high.T)
+  T_end:   300           # K
+  T_step:  -100          # K per segment (negative = cooling)
+  steps_per_T: 2000      # MD steps per temperature segment
+  # rate: 1.0            # uncomment to set K/ps directly (overrides steps_per_T)
+  timestep: 0.5          # fs
+  friction: 0.01         # 1/fs (NVT Langevin)
+  ttime:    25.0         # fs (used if ensemble: NPT)
+
+# ── Stage 6: low-temperature equilibration (300 K) ────────────────────────
+eq_low:
+  ensemble: NVT
+  T:        300          # K — must match quench.T_end
+  steps:    20000        # 10 ps at 0.5 fs timestep
+  timestep: 0.5
+  friction: 0.01
+
+# ── Stage 7: final structure optimisation ─────────────────────────────────
+# A separate final_opt: block lets you tighten fmax for the amorphous opt
+# without affecting the (unused here) stage-1 opt block.
+final_opt:
+  fmax: 0.05             # eV/Å
+  max_steps: 1000
+  optimizer: FIRE        # FIRE is robust on glassy minima; LBFGS also fine
+  # cell_filter: FrechetCellFilter  # uncomment to allow cell relax in stage 7

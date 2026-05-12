@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AmorphGen horizontal AG mark
+  Bold AG monogram with SiO4 tetrahedron in exponent position.
+  For: sidebar logos, conda-forge listing, wide-format avatars, GitHub social headers.
+  Matches hero logo palette and rotation for brand consistency.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 230 100" width="230" height="100">
+  <title>AmorphGen</title>
+  <desc>AG monogram with rotated SiO4 unit in exponent position</desc>
+
+  <!-- AG wordmark -->
+  <text x="10" y="80" font-family="Inter, -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="98" font-weight="800" fill="#3066D9" letter-spacing="-3">A<tspan fill="#D33A2C">G</tspan></text>
+
+  <!-- SiO4 unit, exponent position, rotated 20 degrees -->
+  <g transform="translate(155, 8) rotate(20, 30, 30)">
+    <g stroke="#3A3A3A" stroke-width="2" stroke-linecap="round">
+      <line x1="30" y1="30" x2="10" y2="10"/>
+      <line x1="30" y1="30" x2="50" y2="10"/>
+      <line x1="30" y1="30" x2="10" y2="50"/>
+      <line x1="30" y1="30" x2="50" y2="50"/>
+    </g>
+    <circle cx="10" cy="10" r="6.5" fill="#D33A2C"/>
+    <circle cx="50" cy="10" r="6.5" fill="#D33A2C"/>
+    <circle cx="10" cy="50" r="6.5" fill="#D33A2C"/>
+    <circle cx="50" cy="50" r="6.5" fill="#D33A2C"/>
+    <circle cx="30" cy="30" r="9" fill="#3066D9"/>
+  </g>
+</svg>
