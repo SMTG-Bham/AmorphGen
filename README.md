@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <strong>AmorphGen: Amorphous structure generation via melt-quench MD and random placement with universal MLIPs (MACE, CHGNet, SevenNet).</strong>
+  <strong>AmorphGen: Amorphous structure generation via melt-quench MD and random placement.</strong>
 </p>
 
 <p align="center">
