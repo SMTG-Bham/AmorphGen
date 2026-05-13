@@ -1,12 +1,20 @@
-# AmorphGen
+<p align="center">
+  <img src="docs/_static/logo_hero.png" alt="AmorphGen" width="500">
+</p>
 
-[![CI](https://github.com/SMTG-Bham/AmorphGen/actions/workflows/test.yml/badge.svg)](https://github.com/SMTG-Bham/AmorphGen/actions/workflows/test.yml)
-[![Docs](https://img.shields.io/badge/docs-online-blue)](https://smtg-bham.github.io/AmorphGen/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+<p align="center">
+  <a href="https://github.com/SMTG-Bham/AmorphGen/actions/workflows/test.yml"><img src="https://github.com/SMTG-Bham/AmorphGen/actions/workflows/test.yml/badge.svg" alt="CI"></a>
+  <a href="https://smtg-bham.github.io/AmorphGen/"><img src="https://img.shields.io/badge/docs-online-blue" alt="Docs"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+</p>
 
-**AmorphGen: Amorphous structure generation via melt-quench MD and random placement with universal MLIPs (MACE, CHGNet, SevenNet).**
+<p align="center">
+  <strong>AmorphGen: Amorphous structure generation via melt-quench MD and random placement with universal MLIPs (MACE, CHGNet, SevenNet).</strong>
+</p>
 
-📚 **Documentation:** [smtg-bham.github.io/AmorphGen](https://smtg-bham.github.io/AmorphGen/)
+<p align="center">
+  📚 <strong>Documentation:</strong> <a href="https://smtg-bham.github.io/AmorphGen/">smtg-bham.github.io/AmorphGen</a>
+</p>
 
 ---
 
