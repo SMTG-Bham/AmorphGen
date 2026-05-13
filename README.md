@@ -1,11 +1,12 @@
 <p align="center">
-  <img src="docs/_static/logo_hero.png" alt="AmorphGen" width="500">
+  <img src="https://raw.githubusercontent.com/SMTG-Bham/AmorphGen/main/docs/_static/logo_hero.png" alt="AmorphGen" width="500">
 </p>
 
 <p align="center">
-  <a href="https://github.com/SMTG-Bham/AmorphGen/actions/workflows/test.yml"><img src="https://github.com/SMTG-Bham/AmorphGen/actions/workflows/test.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/SMTG-Bham/AmorphGen/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/SMTG-Bham/AmorphGen/test.yml?branch=main&label=CI" alt="CI"></a>
   <a href="https://smtg-bham.github.io/AmorphGen/"><img src="https://img.shields.io/badge/docs-online-blue" alt="Docs"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://pypi.org/project/amorphgen/"><img src="https://img.shields.io/pypi/v/amorphgen?label=PyPI" alt="PyPI"></a>
 </p>
 
 <p align="center">
@@ -19,6 +20,37 @@
 ---
 
 ## Pipeline overview
+
+AmorphGen exposes three workflows. Pick the one that matches your starting point:
+
+| # | Workflow | CLI flag | Starting point |
+|---|----------|----------|----------------|
+| 1 | **Random generation** | `--random-gen` | Composition only |
+| 2 | **Melt-quench (MQ)** | (default) or `--mq-ensemble` | Crystalline input |
+| 3 | **Hybrid** | `--hybrid-ensemble` | Directory of disordered structures |
+
+### 1. Random generation (`--random-gen`)
+
+```
+Composition  (e.g. "In2O3*16"  or  In=32,O=48)
+         │
+   ┌─────▼──────────────────────────────────────────┐
+   │  Auto-derive  minsep, density, target CN       │
+   │  from Shannon ionic / metallic radii           │
+   └─────┬──────────────────────────────────────────┘
+         │
+   ┌─────▼──────────────────────────────────────────┐
+   │  Random / coordination-aware placement         │
+   └─────┬──────────────────────────────────────────┘
+         │
+   ┌─────▼──────────────────────────────────────────┐
+   │  Optional relax  (--relax)                     │
+   └─────┬──────────────────────────────────────────┘
+         │
+   N amorphous structures  (.xyz / .vasp / .cif)
+```
+
+### 2. Melt-quench (MQ)
 
 ```
 Crystalline input  (POSCAR / .xyz / .cif / .extxyz)
@@ -34,23 +66,16 @@ Crystalline input  (POSCAR / .xyz / .cif / .extxyz)
    └─────┬──────────────────────────────────────────┘
          │
    ┌─────▼──────────────────────────────────────────┐
-   │  Stage 3  Melt  –  NPT/NVT heat ramp           │ 
+   │  Stage 3  Melt  –  NPT/NVT heat ramp           │
    │           T-low → T_melt                       │
-   │                                                │
    └─────┬──────────────────────────────────────────┘
          │
    ┌─────▼──────────────────────────────────────────┐
    │  Stage 4  High-T equilibration   T_melt        │
    │           NVT/NPT                              │
-   └──┬──────────────────────┬──────────────────────┘
-      │                      │ snapshots (optional)
-      │              ┌───────▼──────────────────────────────────┐
-      │              │  batch_quench: Stage 5 → 6 → 7           │
-      │              │  N independent amorphous structures      │
-      │              │  --resume to continue interrupted jobs   │
-      │              └──────────────────────────────────────────┘
-      │
-   ┌──▼─────────────────────────────────────────────┐
+   └─────┬──────────────────────────────────────────┘
+         │
+   ┌─────▼──────────────────────────────────────────┐
    │  Stage 5  Quench  –  NVT cooling ramp          │
    │           T_melt → T-low                       │
    └─────┬──────────────────────────────────────────┘
@@ -67,6 +92,36 @@ Crystalline input  (POSCAR / .xyz / .cif / .extxyz)
          │
    stage7_opt.cif  +  stage7_opt.xyz
 ```
+
+> `--mq-ensemble` extends MQ: stages 1–4 run once, then N independent quenches (stages 5–6–7) are launched from snapshots of the stage-4 trajectory.
+
+### 3. Hybrid: random → MQ stages 4-7 (`--hybrid-ensemble`)
+
+```
+Directory of disordered structures  (e.g. --random-gen outputs)
+         │
+   ┌─────▼──────────────────────────────────────────┐
+   │  Stage 4  High-T equilibration   T_melt        │
+   │           NVT/NPT,  20+ ps                     │
+   └─────┬──────────────────────────────────────────┘
+         │
+   ┌─────▼──────────────────────────────────────────┐
+   │  Stage 5  Quench  –  NVT cooling ramp          │
+   │           T_melt → T-low                       │
+   └─────┬──────────────────────────────────────────┘
+         │
+   ┌─────▼──────────────────────────────────────────┐
+   │  Stage 6  Low-T equilibration   T-low          │
+   └─────┬──────────────────────────────────────────┘
+         │
+   ┌─────▼──────────────────────────────────────────┐
+   │  Stage 7  Final optimisation (amorphous)       │
+   └─────┬──────────────────────────────────────────┘
+         │
+   N amorphous structures  (one per input)
+```
+
+> Hybrid is cheaper than full MQ: it skips the slow heat ramp (Stage 3) by starting from a disordered structure.
 
 ---
 

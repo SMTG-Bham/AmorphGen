@@ -4,12 +4,24 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "amorphgen"
-version = "1.0.0"
+version = "1.0.0rc1"
 description = "Amorphous structure generation via melt-quench MD and random placement"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "Chaiyawat Kaewmeechai"},
+    {name = "Chaiyawat Kaewmeechai", email = "chaiyawatkaewmeechai@gmail.com"},
+]
+keywords = [
+    "amorphous",
+    "molecular-dynamics",
+    "melt-quench",
+    "MLIP",
+    "MACE",
+    "CHGNet",
+    "SevenNet",
+    "ASE",
+    "materials-science",
+    "DFT",
 ]
 requires-python = ">=3.10"
 classifiers = [
@@ -92,6 +104,7 @@ docs = [
 
 [project.urls]
 Homepage = "https://github.com/SMTG-Bham/AmorphGen"
+Documentation = "https://smtg-bham.github.io/AmorphGen/"
 Repository = "https://github.com/SMTG-Bham/AmorphGen"
 Issues = "https://github.com/SMTG-Bham/AmorphGen/issues"
 

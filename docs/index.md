@@ -10,7 +10,7 @@
 Automated amorphous structure generation using machine-learning and classical interatomic potentials.
 </p>
 
-AmorphGen provides two routes to amorphous structures: **random placement** starting from just a chemical formula, or **melt-and-quench MD** starting from a crystal. Both are powered by universal machine-learning interatomic potentials (MACE, CHGNet, SevenNet) or classical force fields (Buckingham, Lennard-Jones).
+AmorphGen exposes three routes to amorphous structures: **random placement** from just a chemical formula, **melt-and-quench MD** from a crystal, and a **hybrid** workflow that anneals disordered inputs. All three are powered by universal machine-learning interatomic potentials (MACE, CHGNet, SevenNet) or classical force fields (Buckingham, Lennard-Jones).
 
 ```{image} images/main_Fig.png
 :alt: AmorphGen workflow: crystalline input or composition to amorphous structure
@@ -53,20 +53,39 @@ See the {doc}`getting-started/installation` and {doc}`getting-started/quickstart
 
 ## What it does
 
-::::{grid} 2
+AmorphGen exposes three workflows. Pick the one that matches your starting point:
+
+::::{grid} 3
 :gutter: 3
 
-:::{grid-item-card} Random Structure Generation
+:::{grid-item-card} 1. Random generation
 :text-align: center
 
-Place atoms into a cubic cell with automated minimum separations from Shannon ionic radii, then relax with any MLIP or classical potential.
+`--random-gen`
+
+Place atoms into a cubic cell with automated minimum separations, density, and target CN from Shannon ionic/metallic radii. Optional relax with any backend.
 :::
 
-:::{grid-item-card} Melt-and-Quench Pipeline
+:::{grid-item-card} 2. Melt-and-Quench (MQ)
 :text-align: center
 
-7-stage MD pipeline: (1) optimise, (2) equilibrate, (3) heat, (4) equilibrate, (5) cool, (6) equilibrate, (7) final optimise. One command.
+`--mq-ensemble` (or default)
+
+7-stage MD pipeline starting from a crystal: optimise → pre-eq → heat → high-T eq → quench → low-T eq → final optimise.
 :::
+
+:::{grid-item-card} 3. Hybrid
+:text-align: center
+
+`--hybrid-ensemble`
+
+Anneal a directory of disordered structures (e.g. random-gen outputs) through stages 4–7. Cheaper than MQ — skips the slow heat ramp.
+:::
+
+::::
+
+::::{grid} 2
+:gutter: 3
 
 :::{grid-item-card} MLIP and Classical Potentials
 :text-align: center
@@ -81,6 +100,106 @@ RDF, coordination numbers, bond angles, ring statistics, energy ranking. CLI or 
 :::
 
 ::::
+
+---
+
+## Pipeline overview
+
+### 1. Random generation (`--random-gen`)
+
+```text
+Composition  (e.g. "In2O3*16"  or  In=32,O=48)
+         │
+   ┌─────▼──────────────────────────────────────────┐
+   │  Auto-derive  minsep, density, target CN       │
+   │  from Shannon ionic / metallic radii           │
+   └─────┬──────────────────────────────────────────┘
+         │
+   ┌─────▼──────────────────────────────────────────┐
+   │  Random / coordination-aware placement         │
+   └─────┬──────────────────────────────────────────┘
+         │
+   ┌─────▼──────────────────────────────────────────┐
+   │  Optional relax  (--relax)                     │
+   └─────┬──────────────────────────────────────────┘
+         │
+   N amorphous structures  (.xyz / .vasp / .cif)
+```
+
+See {doc}`guides/random-generation`.
+
+### 2. Melt-quench (MQ)
+
+```text
+Crystalline input  (POSCAR / .xyz / .cif / .extxyz)
+         │
+   ┌─────▼──────────────────────────────────────────┐
+   │  Stage 1  Structure optimisation               │
+   │           optimizer + cell_filter              │
+   └─────┬──────────────────────────────────────────┘
+         │
+   ┌─────▼──────────────────────────────────────────┐
+   │  Stage 2  Pre-melt equilibration at T-low      │
+   │           NVT/NPT                              │
+   └─────┬──────────────────────────────────────────┘
+         │
+   ┌─────▼──────────────────────────────────────────┐
+   │  Stage 3  Melt  –  NPT/NVT heat ramp           │
+   │           T-low → T_melt                       │
+   └─────┬──────────────────────────────────────────┘
+         │
+   ┌─────▼──────────────────────────────────────────┐
+   │  Stage 4  High-T equilibration   T_melt        │
+   │           NVT/NPT                              │
+   └─────┬──────────────────────────────────────────┘
+         │
+   ┌─────▼──────────────────────────────────────────┐
+   │  Stage 5  Quench  –  NVT cooling ramp          │
+   │           T_melt → T-low                       │
+   └─────┬──────────────────────────────────────────┘
+         │
+   ┌─────▼──────────────────────────────────────────┐
+   │  Stage 6  Low-T equilibration   T-low          │
+   │           NVT/NPT                              │
+   └─────┬──────────────────────────────────────────┘
+         │
+   ┌─────▼──────────────────────────────────────────┐
+   │  Stage 7  Final optimisation (amorphous)       │
+   │           optimizer + cell_filter              │
+   └─────┬──────────────────────────────────────────┘
+         │
+   stage7_opt.cif  +  stage7_opt.xyz
+```
+
+`--mq-ensemble` extends MQ: stages 1–4 run once, then N independent quenches (stages 5–6–7) are launched from snapshots of the stage-4 trajectory. See {doc}`guides/pipeline` and {doc}`guides/mq-ensemble`.
+
+### 3. Hybrid: random → MQ stages 4-7 (`--hybrid-ensemble`)
+
+```text
+Directory of disordered structures  (e.g. --random-gen outputs)
+         │
+   ┌─────▼──────────────────────────────────────────┐
+   │  Stage 4  High-T equilibration   T_melt        │
+   │           NVT/NPT,  20+ ps                     │
+   └─────┬──────────────────────────────────────────┘
+         │
+   ┌─────▼──────────────────────────────────────────┐
+   │  Stage 5  Quench  –  NVT cooling ramp          │
+   │           T_melt → T-low                       │
+   └─────┬──────────────────────────────────────────┘
+         │
+   ┌─────▼──────────────────────────────────────────┐
+   │  Stage 6  Low-T equilibration   T-low          │
+   └─────┬──────────────────────────────────────────┘
+         │
+   ┌─────▼──────────────────────────────────────────┐
+   │  Stage 7  Final optimisation (amorphous)       │
+   └─────┬──────────────────────────────────────────┘
+         │
+   N amorphous structures  (one per input)
+```
+
+See {doc}`guides/hybrid-workflow`.
 
 ---
 
