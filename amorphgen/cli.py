@@ -47,7 +47,7 @@ import os
 def _get_parser():
     """Build and return the argument parser (without parsing)."""
     p = argparse.ArgumentParser(
-        description="AmorphGen: amorphous structure generation via melt-quench MD and random placement with universal MLIPs",
+        description="AmorphGen: amorphous structure generation via melt-quench MD and random placement",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     return _add_arguments(p)
