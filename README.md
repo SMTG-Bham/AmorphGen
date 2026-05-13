@@ -1,8 +1,12 @@
 # AmorphGen
 
 [![CI](https://github.com/SMTG-Bham/AmorphGen/actions/workflows/test.yml/badge.svg)](https://github.com/SMTG-Bham/AmorphGen/actions/workflows/test.yml)
+[![Docs](https://img.shields.io/badge/docs-online-blue)](https://smtg-bham.github.io/AmorphGen/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **AmorphGen: Amorphous structure generation via melt-quench MD and random placement with universal MLIPs (MACE, CHGNet, SevenNet).**
+
+📚 **Documentation:** [smtg-bham.github.io/AmorphGen](https://smtg-bham.github.io/AmorphGen/)
 
 ---
 
@@ -763,6 +767,8 @@ and the foundation model(s) you used.
   url    = {https://github.com/SMTG-Bham/AmorphGen}
 }
 ```
+
+A Zenodo DOI for tagged releases will be added on first stable release.
 
 **Foundation potentials (cite the one you used):**
 
