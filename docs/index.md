@@ -10,17 +10,17 @@
 Automated amorphous structure generation using machine-learning and classical interatomic potentials.
 </p>
 
- 13 +<p align="center">                                                                                        
-      14 +  <a href="https://github.com/SMTG-Bham/AmorphGen"><img src="https://img.shields.io/badge/GitHub-SMTG--Bha
+<p align="center">                                                                                        
+  <a href="https://github.com/SMTG-Bham/AmorphGen"><img src="https://img.shields.io/badge/GitHub-SMTG--Bha
          +m%2FAmorphGen-181717?logo=github" alt="GitHub"></a>                                                       
-      15 +  <a href="https://pypi.org/project/amorphgen/"><img src="https://img.shields.io/pypi/v/amorphgen?label=Py
+  <a href="https://pypi.org/project/amorphgen/"><img src="https://img.shields.io/pypi/v/amorphgen?label=Py
          +PI" alt="PyPI"></a>                                                                                       
-      16 +  <a href="https://github.com/SMTG-Bham/AmorphGen/blob/main/LICENSE"><img src="https://img.shields.io/badg
+  <a href="https://github.com/SMTG-Bham/AmorphGen/blob/main/LICENSE"><img src="https://img.shields.io/badg
          +e/License-MIT-yellow.svg" alt="License: MIT"></a>                                                         
-      17 +  <a href="https://github.com/SMTG-Bham/AmorphGen/issues"><img src="https://img.shields.io/badge/Issues-Re
+  <a href="https://github.com/SMTG-Bham/AmorphGen/issues"><img src="https://img.shields.io/badge/Issues-Re
          +port%20a%20bug-blue?logo=github" alt="Issues"></a>                                                        
-      18 +</p>                                                                                                      
-      19 +                                                                                                          
+</p>                                                                                                      
+                                                                                                         
 AmorphGen exposes three routes to amorphous structures: **random placement** from just a chemical formula, **melt-and-quench MD** from a crystal, and a **hybrid** workflow that anneals disordered inputs. All three are powered by universal machine-learning interatomic potentials (MACE, CHGNet, SevenNet) or classical force fields (Buckingham, Lennard-Jones).
 
 ```{image} images/main_Fig.png
