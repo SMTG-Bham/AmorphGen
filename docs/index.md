@@ -235,8 +235,7 @@ amorphgen --list-models   # see all 20+ model variants
 
 ## Citing AmorphGen
 
-If you use AmorphGen in your research, please cite the JOSS paper (in
-preparation) and the GitHub repository:
+If you use AmorphGen in your research, please cite the GitHub repository:
 
 ```bibtex
 @misc{amorphgen,
