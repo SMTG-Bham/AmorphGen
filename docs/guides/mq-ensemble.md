@@ -215,7 +215,6 @@ Example slurm scripts for BlueBEAR and Sulis ship in the AmorphGen repo under `e
 
 ## Validation
 
-For a defensible JOSS/paper-quality validation, pair `--mq-ensemble` with the analysis mode and a reference YAML containing literature ranges:
 
 ```bash
 amorphgen --analyse --input-dir ga2o3_mq/final/ \
