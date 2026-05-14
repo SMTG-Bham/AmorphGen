@@ -767,12 +767,9 @@ AmorphGen/
 │       ├── calculators.py          ← multi-backend calculator factory
 │       ├── radii.py                ← Shannon/metallic radii, minsep, density estimation
 │       └── common.py               ← dynamics builder, logger, trajectory writer
-├── paper/
-│   ├── paper.md                    ← JOSS draft
-│   └── paper.bib
-├── test/                           ← 114 tests (4 skipped without --run-mace)
+├── test/                           
 ├── pyproject.toml
-├── LICENSE                         ← MIT
+├── LICENSE                       
 └── README.md
 ```
 
