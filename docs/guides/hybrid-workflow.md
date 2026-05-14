@@ -101,7 +101,6 @@ opt:
 | Stages run | 1-2-3-4 + N×(5-6-7) | N×(4-5-6-7) |
 | Crystal melt time | Yes (long stage 3) | No |
 | Cost per structure | High | Medium |
-| Defensibility for JOSS | Gold standard, matches DFT melt-quench protocols | Cheaper alternative; document the methodology deviation |
 
 For tightly comparing to published DFT melt-quench results, use `--mq-ensemble`. For rapidly generating large ensembles for screening, use `--hybrid-ensemble`.
 
