@@ -869,4 +869,10 @@ A Zenodo DOI for tagged releases will be added on first stable release.
 
 MIT
 
+## Development notes
 
+Parts of this codebase were developed with assistance from an AI tool,
+Anthropic's Claude (Opus 4.7), for code drafting, refactoring, and
+documentation. All AI-assisted code was reviewed, tested, and validated
+by the authors, who take full responsibility for the contents of this
+repository.
