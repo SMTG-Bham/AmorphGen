@@ -46,7 +46,7 @@ The bond classifier is exposed as `amorphgen.utils.radii.classify_bond(sym_a, sy
 
 #### Edge cases at the classifier boundary
 
-The Δχ = 1.0 threshold sits exactly where chemistry genuinely gets ambiguous — bonds with Δχ in the ~0.85–1.15 band have mixed ionic/covalent character. Testing the 50-system JOSS validation set, 54 of 55 cation–anion pairs (98%) agree between the per-pair Pauling classifier and the per-composition material-class radii bucket. The disagreement, and a few other compounds outside the 50-set that sit at the boundary, are listed below:
+The Δχ = 1.0 threshold sits exactly where chemistry genuinely gets ambiguous — bonds with Δχ in the ~0.85–1.15 band have mixed ionic/covalent character. Testing the 50-system of validation set, 54 of 55 cation–anion pairs (98%) agree between the per-pair Pauling classifier and the per-composition material-class radii bucket. The disagreement, and a few other compounds outside the 50-set that sit at the boundary, are listed below:
 
 | System | Pair | Δχ | Material class expects | Pauling rule says | Reality |
 |---|---|---|---|---|---|
