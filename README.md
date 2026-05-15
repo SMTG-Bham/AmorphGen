@@ -873,7 +873,7 @@ A Zenodo DOI for tagged releases will be added on first stable release.
   **Bug reports / feature requests:** 
   Open an [issue on GitHub](https://github.com/SMTG-Bham/AmorphGen/issues).                                          
   For research collaborations or scientific questions, please email the maintainer above.
----
+
 
 ## License
 
