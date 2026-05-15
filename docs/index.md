@@ -236,6 +236,19 @@ amorphgen --list-models   # see all 20+ model variants
 ```
 
 ---
+
+## Authors & Contact
+
+**Maintainer:** [Chaiyawat Kaewmeechai](https://cywkmc21.github.io/), University of Birmingham
+
+**Email:** `c[dot]kaewmeechai[at]bham[dot]ac[dot]uk`
+
+**Bug reports / feature requests:** [Open an issue on GitHub](https://github.com/SMTG-Bham/AmorphGen/issues).
+
+For research collaborations or scientific questions, please email the maintainer above.
+
+---
+
 ## Citing AmorphGen
 
 If you use AmorphGen in your research, please cite the GitHub repository:
@@ -307,15 +320,6 @@ api/utils
 
 contributing
 ```
-
-## Authors & Contact
-  **Maintainer:** [Chaiyawat Kaewmeechai](https://cywkmc21.github.io/), University of Birmingham.··
-  **Email:** `c[dot]kaewmeechai[at]bham[dot]ac[dot]uk`
-  **Bug reports / feature requests:** [Open an issue on GitHub](https://github.com/SMTG-Bham/AmorphGen/issues).··
-  For research collaborations or scientific questions, please email the maintainer above.
-
----
-
 
 ## Indices and tables
 
