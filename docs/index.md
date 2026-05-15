@@ -158,7 +158,7 @@ Crystalline input  (POSCAR / .xyz / .cif / .extxyz)
    └─────┬──────────────────────────────────────────┘
          │
    ┌─────▼──────────────────────────────────────────┐
-   │  Stage 5  Quench  –  NVT cooling ramp          │
+   │  Stage 5  Quench  –  NPT/NVT cooling ramp      │
    │           T_melt → T-low                       │
    └─────┬──────────────────────────────────────────┘
          │
@@ -188,7 +188,7 @@ Directory of disordered structures  (e.g. --random-gen outputs)
    └─────┬──────────────────────────────────────────┘
          │
    ┌─────▼──────────────────────────────────────────┐
-   │  Stage 5  Quench  –  NVT cooling ramp          │
+   │  Stage 5  Quench  –  NPT/NVT cooling ramp      │
    │           T_melt → T-low                       │
    └─────┬──────────────────────────────────────────┘
          │
