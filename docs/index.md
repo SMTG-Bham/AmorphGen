@@ -239,12 +239,10 @@ amorphgen --list-models   # see all 20+ model variants
 
 ## Authors & Contact
 
-**Maintainer:** [Chaiyawat Kaewmeechai](https://cywkmc21.github.io/), University of Birmingham
-
+**Maintainer:** [Chaiyawat Kaewmeechai](https://cywkmc21.github.io/), University of Birmingham<br>
 **Email:** `c[dot]kaewmeechai[at]bham[dot]ac[dot]uk`
 
-**Bug reports / feature requests:** [Open an issue on GitHub](https://github.com/SMTG-Bham/AmorphGen/issues).
-
+**Bug reports / feature requests:** [Open an issue on GitHub](https://github.com/SMTG-Bham/AmorphGen/issues).<br>
 For research collaborations or scientific questions, please email the maintainer above.
 
 ---
