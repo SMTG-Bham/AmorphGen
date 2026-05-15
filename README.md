@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <strong>AmorphGen: Amorphous structure generation via melt-quench MD and random placement.</strong>
+  <strong>Amorphous structure generation via melt-quench MD and random placement.</strong>
 </p>
 
 <p align="center">
