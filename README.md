@@ -867,7 +867,7 @@ A Zenodo DOI for tagged releases will be added on first stable release.
 
  ## Authors & Contact
                                                                                                    
-  **Maintainer:** Chaiyawat Kaewmeechai — University of Birmingham           
+  **Maintainer:** [Chaiyawat Kaewmeechai](https://cywkmc21.github.io/) University of Birmingham           
   Email: c[dot]kaewmeechai[at]bham[dot]ac[dot]uk
                                                                                                    
   **Bug reports / feature requests:** 
