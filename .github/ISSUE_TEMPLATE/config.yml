@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question / scientific discussion
+    url: mailto:c.kaewmeechai@bham.ac.uk
+    about: For research-collaboration or scientific-discussion questions, please email the maintainer rather than open an issue.
+  - name: Documentation
+    url: https://smtg-bham.github.io/AmorphGen/
+    about: Check the docs first — installation, quickstart, tutorials, API reference.
