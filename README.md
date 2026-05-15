@@ -112,6 +112,7 @@ Directory of disordered structures  (e.g. --random-gen outputs)
          │
    ┌─────▼──────────────────────────────────────────┐
    │  Stage 6  Low-T equilibration   T-low          │
+   │           NVT/NPT                              │
    └─────┬──────────────────────────────────────────┘
          │
    ┌─────▼──────────────────────────────────────────┐
