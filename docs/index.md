@@ -312,7 +312,7 @@ contributing
 ## Authors & Contact
 
 **Maintainer:** [Chaiyawat Kaewmeechai](https://cywkmc21.github.io/), University of Birmingham<br>
-**Email:** `c[dot]kaewmeechai[at]bham[dot]ac[dot]uk`<br>
+**Email:** `c.kaewmeechai[at]bham.ac.uk`<br>
 **Bug reports / feature requests:** [Open an issue on GitHub](https://github.com/SMTG-Bham/AmorphGen/issues).<br>
 For research collaborations or scientific questions, please email the maintainer above.
 
