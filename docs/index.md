@@ -14,7 +14,7 @@ Automated amorphous structure generation using machine-learning and classical in
   <a href="https://github.com/SMTG-Bham/AmorphGen"><img src="https://img.shields.io/badge/GitHub-source-181717?logo=github" alt="GitHub"></a>                   
 </p>                                                                                                      
                                                                                                          
-AmorphGen exposes three routes to amorphous structures: **random placement** from just a chemical formula, **melt-and-quench MD** from a crystal, and a **hybrid** workflow that anneals disordered inputs. All three are powered by universal machine-learning interatomic potentials (MACE, CHGNet, SevenNet) or classical force fields (Buckingham, Lennard-Jones).
+AmorphGen provides three routes to amorphous structures: **random placement** from just a chemical formula, **melt-and-quench MD** from a crystal, and a **hybrid** workflow that anneals disordered inputs. All three are powered by universal machine-learning interatomic potentials (MACE, CHGNet, SevenNet) or classical force fields (Buckingham, Lennard-Jones).
 
 ```{image} images/main_Fig.png
 :alt: AmorphGen workflow: crystalline input or composition to amorphous structure
