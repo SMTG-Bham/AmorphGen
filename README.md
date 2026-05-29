@@ -869,7 +869,7 @@ A Zenodo DOI for tagged releases will be added on first stable release.
  ## Authors & Contact
                                                                                                    
   **Maintainer:** [Chaiyawat Kaewmeechai](https://cywkmc21.github.io/) University of Birmingham           
-  Email: c[dot]kaewmeechai[at]bham[dot]ac[dot]uk
+  Email: c.kaewmeechai[at]bham.ac.uk
                                                                                                    
   **Bug reports / feature requests:** 
   Open an [issue on GitHub](https://github.com/SMTG-Bham/AmorphGen/issues).                                          
