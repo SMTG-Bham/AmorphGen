@@ -12,7 +12,7 @@ Jupyter notebook tutorials demonstrating AmorphGen workflows.
 
 | Tutorial | Description | Backend | System |
 |----------|-------------|---------|--------|
-| [Tutorial 2: Zero-config random gen](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T2_automated_random_gen/tutorial_2_automated_random_gen.ipynb) | Composition is the only input; auto minsep / density / target CN / oxidation state; CHGNet relax + save each structure | CHGNet | Si, SiO₂, In₂O₃, CdTe, AlN, LiCl, TiO₂, Cu |
+| [Tutorial 2: Random structure generation](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T2_automated_random_gen/tutorial_2_automated_random_gen.ipynb) | Composition is the only input; auto minsep / density / target CN / oxidation state; CHGNet relax + save each structure | CHGNet | Si, SiO₂, In₂O₃, CdTe, AlN, LiCl, TiO₂, Cu |
 | [Tutorial 3: Explicit control + ensemble analysis](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T3_random_gen/tutorial_3_random_generation.ipynb) | The opposite end of T2: explicit minsep (from crystal-phase bond lengths) + explicit target density (from cited amorphous-thin-film references). 5-structure ensembles per system; quantitative RDF / energy / CN / bond-angle analysis vs the crystalline reference | MACE | In₂O₃, TiO₂, Al₂O₃, Ga₂O₃ |
 | [Tutorial 4: Melt-and-quench](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T4_MQ_via_7_steps/tutorial_4_melt_quench.ipynb) | Full 7-stage pipeline | CHGNet (CPU) / MACE (GPU) | SiO₂ |
 | [Tutorial 5: Hybrid batch quench](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T5_mix_random_MQ/tutorial_5_batch_quench.ipynb) | Random gen → equilibrate → batch quench | CHGNet | TiO₂ |
