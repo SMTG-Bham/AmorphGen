@@ -83,15 +83,6 @@ amorphgen --batch-quench \
 A full SLURM array template ships with the package at
 `examples/run_quench_array_bluebear.slurm`.
 
-## Choosing protocol parameters — a note on methodology
-
-The defaults below match the common DFT-MD melt-quench protocol used in much of the amorphous-oxide literature (e.g. Kaewmeechai *et al.*, *Phys. Rev. B* 111, 035203, 2025), with one substitution forced by computational cost:
-
-- **Heating rate (Stage 3).** DFT melt-quench studies typically use **0.5–1 K/ps** heating ramps. With foundation MLIPs (chgnet, MACE, SevenNet) on a single GPU, that translates to days of wall time per ramp. The default below uses **100 K/ps**, which is ~100× faster while still producing fully thermalised liquid configurations after the long Stage-4 equilibration. **If you are publishing a comparison to DFT melt-quench, document the heating-rate substitution explicitly in your methods section.**
-- **Cooling rate (Stage 5).** **100 K/ps** matches the upper end of the cooling rates used in published DFT melt-quench studies of oxides (typical range 0.5–100 K/ps). Defensible without methodology notes.
-- **High-T anneal duration (Stage 4).** **100 ps** matches typical DFT MD high-T equilibration. Long enough that snapshots taken at uniform intervals are statistically independent samples of the liquid.
-- **Melt temperature (Stage 4).** AmorphGen's default is **3000 K** (`eq_high.T: 3000`), inside the training window of all supported MLIPs. The example YAML below sets **4000 K** as a deliberate override matching the protocol of Kaewmeechai *et al.* (PRB 111, 035203, 2025): well above oxide melting points (~2000 K typical) but **outside chgnet's training window**. MACE and SevenNet handle 4000 K reliably for most systems; with chgnet, drop back to 3000 K if you see instability or non-physical behaviour.
-- **Ensemble.** **NPT throughout** lets the cell volume relax to the equilibrium liquid density at high T, then back to amorphous-solid density on cooling. NVT is an alternative if you trust the input cell volume and want to constrain it; matches AmorphGen's `examples/hybrid_airss_mq.yaml` template.
 
 ## Recommended `mq.yaml` for an oxide
 
