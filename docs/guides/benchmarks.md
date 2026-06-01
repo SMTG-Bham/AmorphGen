@@ -7,9 +7,9 @@ available in AmorphGen, tested on SiO₂, Si, and Li₂ZrCl₆.
 
 | Method | Description | Typical time (48-72 atoms, Mac M-series) |
 |--------|-------------|----------------------------------------|
-| **SC+opt** | SC random placement → static optimisation | ~2 min |
-| **CHGNet MQ** | SC random → hybrid melt-quench (CHGNet, MPS) | ~8-20 min |
-| **MACE MQ** | SC random → hybrid melt-quench (MACE, CPU) | ~1-2 hours |
+| **Random gen+opt** |  random placement → static optimisation | ~2 min |
+| **CHGNet MQ** |  random → hybrid melt-quench (CHGNet, MPS) | ~8-20 min |
+| **MACE MQ** |  random → hybrid melt-quench (MACE, CPU) | ~1-2 hours |
 
 The hybrid melt-quench (MQ) workflow skips the melt stage (stages 2-3)
 since the random structure is already disordered:
@@ -57,21 +57,18 @@ network formation.
 | CHGNet MQ (NVT) | 1.76 | 5.8 | 75% | 4.4 | 0% |
 | CHGNet MQ (dense) | 1.82 | 5.5 | 50% | 4.6 | 6% |
 | **MACE MQ** | **2.40** | **6.0** | **100%** | **5.4** | **56%** |
-| Experiment | 2.39 | 6.0 | 100% | 6.0 | 100% |
+| Experiment |   | |   |   |  |
 
-**Key finding:** MACE is dramatically better for chloride systems —
-correct density (2.40 vs 1.76), perfect Zr octahedra (100% CN=6),
-and much improved Li coordination (56% vs 0-6% CN=6). CHGNet
-significantly underestimates the density of chloride systems.
+**Key finding:**  
 
 ## Recommendations
 
 | System type | Recommended method | Notes |
 |-------------|-------------------|-------|
-| **Oxides** (SiO₂, In₂O₃, Ga₂O₃) | CHGNet MQ on MPS/GPU | Fast, accurate CN and angles |
-| **Pure elements** (Si, Ge) | CHGNet MQ (long) on MPS/GPU | Need slow cooling for CN=4 |
-| **Chlorides** (Li₂MCl₆) | **MACE MQ on CUDA** | CHGNet fails on density; MACE essential |
-| **Quick screening** | SC+opt (any backend) | 2 min, gives ~85% correct CN |
+| **Oxides** (SiO₂, In₂O₃, Ga₂O₃) |   | Fast, accurate CN and angles |
+| **Pure elements** (Si, Ge) |  | Need slow cooling for CN=4 |
+| **Chlorides** (Li₂MCl₆) |  |   |
+| **Quick screening** | Random gen+opt (any backend) |   |
 
 ## Reproduction
 
@@ -245,7 +242,4 @@ report = convergence_report(
 ```
 
 Key convergence criteria:
-- **Energy drift** < 0.001 eV/atom/ps
-- **Block average test** PASSED (block means within 2× SEM)
-- **MSD** linear (liquid) at high T, plateau (glass) at low T
-- **RDF** overlapping across time windows
+ 
