@@ -1,10 +1,10 @@
 # Random structure generation
 
-Generate ensembles of amorphous structures by constrained random sequential placement with automated minimum separation distances derived from Shannon ionic radii.
+Generate ensembles of amorphous structures by constrained random sequential placement with automated minimum separation distances derived from atomic radii.
 
 ## How it works
 
-Atoms are placed sequentially into a cubic cell. Each atom must satisfy pair-specific minimum interatomic distances computed automatically from Shannon ionic radii and bonding-type classification. No manual parameter tuning is required.
+Atoms are placed sequentially into a cubic cell. Each atom must satisfy pair-specific minimum interatomic distances computed automatically from Shannon ionic radii and bonding-type classification.  
 
 ### Automated minsep
 
@@ -76,7 +76,7 @@ Use `--target-density` for more accurate results when the experimental density i
 
 With `--target-cn`, atoms are placed near under-coordinated sites within a bonding shell, producing structures with better short-range order. Disable with `--no-sc` (legacy flag name).
 
-### Transparency: the auto-derive log line
+### random-gen log file
 
 Every `--random-gen` run writes a single one-line summary at the top of `random_gen.log` capturing every chemistry-informed decision the auto chain made — so you can see *why* a particular minsep / density / target CN was used without reading the code. Example for Ga₂O₃:
 
@@ -84,17 +84,6 @@ Every `--random-gen` run writes a single one-line summary at the top of `random_
 [auto-derive] Ga16O24 → metal_oxide, OS{Ga:+3}, CN{Ga:5}, minsep{Ga-Ga:2.43 metallic | Ga-O:1.62 ionic Δχ=1.63 | O-O:2.24 anion-pack}, ρ=4.44 g/cm³ L=8.25 Å
 ```
 
-Each field:
-
-| Field | What it means |
-|---|---|
-| `Ga16O24 → metal_oxide` | Composition routed to the `metal_oxide` material class |
-| `OS{Ga:+3}` | Cation oxidation state inferred from charge balance against the anion |
-| `CN{Ga:5}` | Target coordination auto-detected per cation |
-| `minsep{pair:value class [Δχ=val]}` | Per-pair: bond class + Pauling Δχ (shown only when the ionic classification is at stake) + minsep value in Å |
-| `ρ=… g/cm³  L=… Å` | Auto-estimated mass density and cubic cell length |
-
-The line is grep-friendly: `grep "auto-derive" random_gen.log` retrieves it as a single line per generation run. Bond classes shown are `ionic`, `covalent`, `metallic`, and `anion-pack` (same-element nonmetal pairs use a separate anion-packing scale factor — see "Bond-type classifier" above).
 
 ## CLI examples
 
