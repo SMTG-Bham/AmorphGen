@@ -6,7 +6,7 @@ Jupyter notebook tutorials demonstrating AmorphGen workflows.
 
 | Tutorial | Description | Backend | System |
 |----------|-------------|---------|--------|
-| [Tutorial 1: Quick-start tutorial](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T1_5min_intro/tutorial_1_5min_intro.ipynb) | Orientation: what AmorphGen does, the three workflows, decision tree, one live demo | CHGNet | a-SiO₂ |
+| [Tutorial 1: Quick-start tutorial](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T1_5min_intro/tutorial_1_5min_intro.ipynb) | Orientation: what AmorphGen does, the three workflows | CHGNet | a-SiO₂ |
 
 **Workflow tutorials** — each tutorial reports its own measured wall time on the CPU it was validated on:
 
