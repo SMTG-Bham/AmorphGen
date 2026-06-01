@@ -1,6 +1,6 @@
-# Melt-and-quench pipeline
+# Melt-and-quench (MQ) pipeline
 
-The melt-and-quench pipeline is a 7-stage molecular dynamics workflow that transforms a crystalline input into a realistic amorphous structure.
+The melt-and-quench pipeline is a 7-stage molecular dynamics workflow that transforms a crystalline input into an amorphous structure.
 
 ## Overview
 
