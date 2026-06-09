@@ -32,7 +32,7 @@ AmorphGen simplifies amorphous structure generation by combining machine-learnin
 
 The output is a relaxed amorphous structure, the full MD trajectory, and built-in structure analysis tools. Outputs are written in VASP, CIF, and extended XYZ formats, ready as input for DFT property calculations (electronic structure, optical, mechanical) or as a starting point for further structural relaxation at higher levels of theory.
 
-**Designed for** researchers interested in modelling amorphous systems, including oxides, glasses, chalcogenides, nitrides, halides, and other disordered solids. Typical uses include preparing structures for DFT calculations, screening across compositions, and direct property prediction. The package has been applied to oxides (e.g. SiO₂, In₂O₃, TiO₂, Ga₂O₃, Al₂O₃, InGaZnO₄), halides (e.g. LiF, Li₂ZrCl₆), pnictides (e.g. GaAs), group-IV semiconductors (e.g. Si), nitrides (e.g. GaN, BN) and other compositions.
+**Designed for** researchers interested in modelling amorphous systems, including oxides, glasses, chalcogenides, nitrides, halides, and other disordered solids. Typical uses include preparing structures for DFT calculations, screening across compositions, and direct property prediction. The package has been applied to oxides (e.g. SiO₂, In₂O₃, TiO₂, Ga₂O₃, Al₂O₃, InGaZnO₄), halides, pnictides (e.g. GaAs), group-IV semiconductors (e.g. Si), nitrides (e.g. GaN, BN) and other compositions.
 
 ---
 
