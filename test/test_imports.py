@@ -13,7 +13,10 @@ class TestPackageImports:
     def test_top_level_import(self):
         import amorphgen
         assert hasattr(amorphgen, "__version__")
-        assert amorphgen.__version__ == "1.0.0"
+        # Accept any 1.0.0 family version (1.0.0, 1.0.0rc2, 1.0.0.post1, ...)
+        # so the test doesn't break on every release-candidate bump.
+        assert isinstance(amorphgen.__version__, str)
+        assert amorphgen.__version__.startswith("1.0.0")
 
     def test_pipeline_import(self):
         from amorphgen import MeltQuenchPipeline
