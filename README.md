@@ -738,7 +738,7 @@ pipe = MeltQuenchPipeline(
 
 | Tutorial | Description |
 |----------|-------------|
-| [Tutorial 7](Tutorials/T7_application_dimer_dissociation/tutorial_7_dimer_dissociation.ipynb) | Defect chemistry: O–O peroxide dimer dissociation kinetics in amorphous In₂O₃, with Arrhenius temperature scan |
+| [Tutorial 7](Tutorials/T7_application_dimer_dissociation/tutorial_7_dimer_dissociation.ipynb) | Defect chemistry: O–O peroxide dimer dissociation kinetics in amorphous In₂O₃ |
 
 ---
 
