@@ -5,8 +5,8 @@
 project = "AmorphGen"
 copyright = "2026, Chaiyawat Kaewmeechai"
 author = "Chaiyawat Kaewmeechai"
-version = "1.0.0"
-release = "1.0.0"
+version = "1.0.0rc2"
+release = "1.0.0rc2"
 
 # -- General configuration ---------------------------------------------------
 extensions = [

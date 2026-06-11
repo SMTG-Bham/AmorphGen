@@ -749,7 +749,7 @@ AmorphGen/
 ├── .github/workflows/
 │   └── test.yml                    ← CI (pytest on 3.10/3.11/3.12)
 ├── amorphgen/
-│   ├── __init__.py                 ← v1.0.0
+│   ├── __init__.py                 ← v1.0.0rc2
 │   ├── cli.py                      ← CLI entry point (amorphgen command)
 │   ├── configs/
 │   │   ├── default_config.py       ← all default parameters

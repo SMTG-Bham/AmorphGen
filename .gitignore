@@ -113,3 +113,4 @@ random_*/
 *.png
 !docs/**/*.png
 test_mace_overnight.py
+Tutorials/
