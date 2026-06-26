@@ -1,10 +1,10 @@
 # Validation
 
-AmorphGen has been benchmarked against a DFT-PBE0 melt-quench reference for
+AmorphGen has been benchmarked against a DFT-PBE0 reference for
 amorphous Ga₂O₃. The results below come from running the **hybrid workflow**
 (`--hybrid-ensemble`) — random placement followed by stages 4-7 (high-T
-anneal → quench → low-T eq → final relax) with CHGNet on GPU, NPT throughout —
-alongside Random and Full melt-quench ensembles for comparison.
+anneal → quench → low-T eq → final relax) with CHGNet, NVT
+alongside Random and Full NPT melt-quench ensembles for comparison.
 
 All ensembles are **N = 20 structures**. Plots and reports below come
 from the built-in analysis (`amorphgen --analyse`) so they exactly match
@@ -14,13 +14,7 @@ what you would see if you re-ran this workflow yourself.
 **Analysis cutoff convention.** All coordination and bond-angle numbers
 on this page are produced with the default `--cutoff auto-rdf`, which
 finds the first minimum of each partial RDF and is the standard
-convention in neutron-diffraction analysis of glasses and liquids. The
-legacy `--cutoff auto` (minsep-based) is kept for the
-placement / repair stages of `--random-gen` but **should not be used
-for analysis** of materials with broad first-shell distributions — it
-systematically truncates the first peak and under-counts coordination.
-This was the default in AmorphGen v1.0.0rc1 and earlier; from v1.0.0 the
-analysis default is `auto-rdf`.
+convention in neutron-diffraction analysis of glasses and liquids.
 ```
 
 ## a-Ga₂O₃
@@ -34,12 +28,12 @@ analysis default is `auto-rdf`.
 
 **System:** Ga₁₆₀O₂₄₀ supercell (400 atoms), N=20 structures per ensemble
 
-**Reference:** DFT-PBE0 melt-quench ensemble from
+**Reference:** DFT-PBE0 ensemble from
 [Kaewmeechai, Strand & Shluger, *Phys. Rev. B* **111**, 035203 (2025)](https://doi.org/10.1103/PhysRevB.111.035203)
 
 **Workflow:** Four ensembles compared — DFT-PBE0 (PRB 2025), AmorphGen
-Random + CHGNet relax, AmorphGen Hybrid (Stages 4-7), AmorphGen Full MQ
-(Stages 1-7, NPT throughout).
+Random + CHGNet relax, AmorphGen Hybrid (Stages 4-7), AmorphGen Full MQ to 3000K
+(Stages 1-7, NPT).
 :::
 
 :::{grid-item}
@@ -68,9 +62,9 @@ Random + CHGNet relax, AmorphGen Hybrid (Stages 4-7), AmorphGen Full MQ
 Local structure (bond, coordination, angles) matches the PBE0 reference
 across all three AmorphGen workflows. Density agreement varies: Random
 and Hybrid stay closer to PBE0 because their cells are constrained near
-the auto-estimated density; the Full MQ workflow (NPT throughout)
-exposes CHGNet's preferred equilibrium density, which is ~9% lower than
-PBE0 — a known limitation of MPtrj-trained MLIPs for oxide glasses.
+the auto-estimated density; the Full MQ workflow (NPT)
+exposes preferred equilibrium density, which is ~9% lower than
+PBE0, This is noted as a limitation of MPtrj-trained MLIPs, that may not capture the liquid stuuctures.
 ```
 
 ### Validation figure
@@ -126,9 +120,7 @@ neutron/EXAFS data for automatic match/concern/fail scoring.
 ## Data availability
 
 A representative a-Ga₂O₃ structure ships with AmorphGen at
-`examples/validation/ga2o3/example_final.xyz`. The full 20-structure
-ensemble will be archived on Zenodo at the first stable release (v1.0.0);
-a DOI link will be added here.
+`examples/validation/ga2o3/example_final.xyz`.
 
 ## Reference data sources
 
