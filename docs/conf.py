@@ -30,6 +30,8 @@ myst_enable_extensions = [
     "fieldlist",         # Field lists
     "substitution",      # |variable| substitution
     "tasklist",          # - [ ] checkboxes
+    "dollarmath",        # $...$ and $$...$$ as math (MathJax)
+    "amsmath",           # \begin{equation} ... \end{equation} blocks
 ]
 myst_heading_anchors = 3
 
@@ -85,6 +87,15 @@ html_css_files = ["custom.css"]
 html_logo = "_static/logo.svg"
 html_favicon = "_static/favicon.png"
 html_title = "AmorphGen"
+
+# "Edit on GitHub" link on every page (sphinx_rtd_theme)
+html_context = {
+    "display_github": True,
+    "github_user": "SMTG-Bham",
+    "github_repo": "AmorphGen",
+    "github_version": "main",
+    "conf_py_path": "/docs/",
+}
 
 # -- Source suffix ------------------------------------------------------------
 source_suffix = {

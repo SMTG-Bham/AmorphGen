@@ -73,7 +73,10 @@ class TestRandomGenMode:
             "-o", str(out_dir),
             "--format", "vasp",
         ], monkeypatch)
-        files = sorted(out_dir.glob("random_*.vasp"))
+        # v1.0.0rc2: initial structures land in random_initial/ subdir
+        initial_dir = out_dir / "random_initial"
+        assert initial_dir.is_dir()
+        files = sorted(initial_dir.glob("random_*.vasp"))
         assert len(files) == 2
         for f in files:
             atoms = read(f)

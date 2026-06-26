@@ -10,15 +10,8 @@
 #   atoms = pipe.run()
 
 model: mace-mpa-0
-# Device: "cuda" (NVIDIA), "cpu", "mps" (Apple Silicon), or "auto" (auto-detect).
-# This file defaults to cuda for HPC; override on the CLI for other systems:
-#   amorphgen POSCAR --config full_pipeline.yaml --device mps
 device: cuda
 default_dtype: float64
-# All MD stages below set timestep: 1.0 fs. Safe for typical oxides with chgnet
-# / MACE foundation models. The DEFAULT_CONFIG default is 0.5 fs (more
-# conservative for heavy elements / unusual chemistries). Reduce here if you
-# see energy drift or high T-fluctuations during equilibration.
 
 # ── Stage 1 & 7: Structure optimisation ──
 opt:
@@ -38,16 +31,27 @@ eq_premelt:
 # ── Stage 3: Heating ramp ──
 melt:
   ensemble: NPT
+  npt_method: berendsen  # robust during 300 -> 3000 K ramp; only NPT
+                         # option that survives rapid temperature changes
   T_start: 300           # K
   T_end: 3000            # K
   T_step: 100            # K per segment
   rate: 100              # K/ps (auto-calculates steps_per_T)
   timestep: 1.0          # fs
+  # Optional Berendsen stability knobs (uncomment to tighten volume control
+  # during the heating ramp — useful for stiff oxides such as a-Ga2O3, a-HfO2):
+  #   taup_factor: 30.0           # 3x slower barostat
+  #   compressibility_GPa: 200.0  # stiffer reference (oxide bulk modulus)
 
 
 # ── Stage 4: High-temperature equilibration ──
 eq_high:
-  ensemble: NVT
+  # New default: NPT with Nose-Hoover-chain MTK integrator gives true
+  # canonical fluctuations at the equilibration plateau, replacing the
+  # constant-volume NVT default. Set ensemble: NVT to restore the
+  # previous fixed-cell behaviour.
+  ensemble: NPT
+  npt_method: mtk
   T: 3000                # K (match melt T_end)
   steps: 50000           # 50 ps
   timestep: 1.0          # fs

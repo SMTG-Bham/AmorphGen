@@ -50,10 +50,17 @@ def make_cubic(atoms):
 # MD dynamics builder
 # ═════════════════════════════════════════════════════════════════════════════
 
+_VALID_NPT_METHODS = ("berendsen", "mtk", "parrinello-rahman")
+
+
 def build_md_dynamics(atoms, ensemble: str = "NVT", T: float = 300.0,
                       timestep: float = 1.0, friction: float = 0.01,
                       ttime: float = 25.0, pfactor: float | None = None,
-                      external_stress: float = 0.0, **kwargs):
+                      external_stress: float = 0.0,
+                      npt_method: str = "berendsen",
+                      taup_factor: float = 10.0,
+                      compressibility_GPa: float = 100.0,
+                      **kwargs):
     """
     Create an NVT or NPT ASE dynamics object.
 
@@ -70,11 +77,56 @@ def build_md_dynamics(atoms, ensemble: str = "NVT", T: float = 300.0,
     friction : float
         Langevin friction coefficient (for NVT).
     ttime : float
-        Thermostat time constant in fs (for NPT Nose-Hoover).
+        Thermostat time constant in fs.  For ``"berendsen"`` it is
+        ``taut``; for ``"mtk"`` and ``"parrinello-rahman"`` it is the
+        Nose-Hoover-chain time constant (``ttime`` in the ASE API).
     pfactor : float, optional
-        Barostat coupling (for NPT).  If None, auto-calculated.
+        Barostat coupling factor for ``"mtk"`` and ``"parrinello-rahman"``.
+        If ``None``, defaults to ``(ttime * taup_factor fs)**2 *
+        compressibility_GPa GPa``, giving a barostat ``taup_factor``
+        times slower than the thermostat (same spirit as the Berendsen
+        ``taup``).  Ignored by ``"berendsen"``.
     external_stress : float
-        External pressure in GPa (for NPT).
+        External pressure in GPa (for NPT). For ``"mtk"`` and
+        ``"parrinello-rahman"`` this is converted to an isotropic
+        stress tensor.
+    npt_method : {"berendsen", "mtk", "parrinello-rahman"}
+        NPT integrator to use when ``ensemble == "NPT"``.
+
+        * ``"berendsen"`` (default) — weak-coupling Berendsen barostat
+          and thermostat (``ase.md.nptberendsen.NPTBerendsen``).
+          Robust during 300 K -> 3000 K melt ramps; does **not**
+          produce true canonical fluctuations, so heat capacities and
+          isothermal compressibilities derived from fluctuations are
+          incorrect.  Averages are correct.
+
+        * ``"mtk"`` — Martyna-Tobias-Klein Nose-Hoover-chain NPT
+          (``ase.md.nose_hoover_chain.IsotropicMTKNPT``).  Produces
+          true canonical fluctuations.  Recommended for the
+          equilibration stages (2, 4, 6); may become unstable during
+          rapid temperature ramps (stages 3, 5).
+
+        * ``"parrinello-rahman"`` — Nose-Hoover + Parrinello-Rahman
+          flexible-cell NPT (``ase.md.npt.NPT``).  Allows the cell
+          shape (not just volume) to change; useful for anisotropic
+          glasses but requires upper-triangular cell.
+
+        Ignored when ``ensemble == "NVT"``.
+    taup_factor : float, default 10.0
+        Ratio of barostat coupling time to thermostat coupling time,
+        i.e. ``taup = taup_factor * ttime``.  Larger values give a
+        slower, more stable barostat — useful for damping cell-volume
+        excursions during the 300 K -> 3000 K melt ramp.  Applied to
+        the Berendsen ``taup`` and to the MTK / Parrinello-Rahman
+        barostat-time defaults.
+    compressibility_GPa : float, default 100.0
+        Reference isothermal compressibility used by the Berendsen
+        barostat as ``1/(compressibility_GPa * GPa)``.  The default
+        (100 GPa) is intentionally soft and gives liquid-like
+        responsiveness; for stiffer oxides (a-In2O3, a-Ga2O3, a-HfO2,
+        bulk modulus ~150-300 GPa) using 200 GPa gives more realistic
+        and more stable volume control.  Ignored by ``"mtk"`` and
+        ``"parrinello-rahman"``.
     **kwargs
         Extra arguments forwarded to the ASE dynamics class.
 
@@ -89,8 +141,21 @@ def build_md_dynamics(atoms, ensemble: str = "NVT", T: float = 300.0,
     if ensemble.upper() == "NVT":
         dyn = Langevin(atoms, timestep=dt, temperature_K=T,
                        friction=friction / units.fs, **kwargs)
-    elif ensemble.upper() == "NPT":
-        # Use NPTBerendsen — more stable than Nose-Hoover for melt-quench
+        return dyn
+
+    if ensemble.upper() != "NPT":
+        raise ValueError(f"Unknown ensemble '{ensemble}'. Use 'NVT' or 'NPT'.")
+
+    method = npt_method.lower()
+    if method not in _VALID_NPT_METHODS:
+        raise ValueError(
+            f"Unknown npt_method '{npt_method}'. "
+            f"Choose from: {', '.join(_VALID_NPT_METHODS)}."
+        )
+
+    if method == "berendsen":
+        # Weak-coupling Berendsen — more stable than Nose-Hoover for
+        # the 300 K -> 3000 K melt-quench ramp; this is the default.
         from ase.md.nptberendsen import NPTBerendsen
         dyn = NPTBerendsen(
             atoms,
@@ -98,12 +163,45 @@ def build_md_dynamics(atoms, ensemble: str = "NVT", T: float = 300.0,
             temperature_K=T,
             taut=ttime * units.fs,
             pressure_au=external_stress * units.GPa,
-            taup=ttime * 10 * units.fs,
-            compressibility_au=1.0 / (100 * units.GPa),
+            taup=ttime * taup_factor * units.fs,
+            compressibility_au=1.0 / (compressibility_GPa * units.GPa),
             **kwargs,
         )
-    else:
-        raise ValueError(f"Unknown ensemble '{ensemble}'. Use 'NVT' or 'NPT'.")
+    elif method == "mtk":
+        # Martyna-Tobias-Klein Nose-Hoover-chain NPT (isotropic cell).
+        # True canonical fluctuations; recommended for equilibration
+        # stages, can be unstable in rapid temperature ramps.
+        from ase.md.nose_hoover_chain import IsotropicMTKNPT
+        if pfactor is None:
+            pfactor = (ttime * taup_factor * units.fs) ** 2 * compressibility_GPa * units.GPa
+        dyn = IsotropicMTKNPT(
+            atoms,
+            timestep=dt,
+            temperature_K=T,
+            pressure_au=external_stress * units.GPa,
+            tdamp=ttime * units.fs,
+            pdamp=ttime * taup_factor * units.fs,
+            **kwargs,
+        )
+    else:  # parrinello-rahman
+        # Nose-Hoover + Parrinello-Rahman flexible-cell NPT
+        # (Melchionna integrator).  Requires an upper-triangular
+        # cell; ASE will raise if not.
+        try:
+            from ase.md.melchionna import MelchionnaNPT as _NPT
+        except ImportError:  # pragma: no cover — older ASE
+            from ase.md.npt import NPT as _NPT
+        if pfactor is None:
+            pfactor = (ttime * taup_factor * units.fs) ** 2 * compressibility_GPa * units.GPa
+        dyn = _NPT(
+            atoms,
+            timestep=dt,
+            temperature_K=T,
+            externalstress=external_stress * units.GPa,
+            ttime=ttime * units.fs,
+            pfactor=pfactor,
+            **kwargs,
+        )
     return dyn
 
 
@@ -262,15 +360,21 @@ def merge_config(defaults: dict, overrides: dict | None) -> dict:
 # Snapshot extraction
 # ═════════════════════════════════════════════════════════════════════════════
 
-_FORMAT_EXT = {"xyz": "xyz", "extxyz": "xyz",
-               "vasp": "vasp", "cif": "cif"}
+# Map output_format -> (file extension, ASE write format).
+_SNAPSHOT_FORMAT_MAP = {
+    "extxyz": (".xyz", "extxyz"),
+    "xyz":    (".xyz", "extxyz"),
+    "vasp":   (".vasp", "vasp"),
+    "cif":    (".cif", "cif"),
+    "traj":   (".traj", "traj"),
+}
 
 
 def extract_snapshots(traj_file: str, n_snapshots: int = 20,
                       select: str = "uniform",
                       output_dir: str = "snapshots",
                       burn_in_frames: int = 0,
-                      output_format: str = "xyz") -> list[str]:
+                      output_format: str = "extxyz") -> list[str]:
     """
     Extract snapshot frames from a trajectory file.
 
@@ -286,67 +390,63 @@ def extract_snapshots(traj_file: str, n_snapshots: int = 20,
     output_dir : str
         Directory for output files.
     burn_in_frames : int, default 0
-        Number of leading frames to discard before sampling. Useful for
-        skipping the non-equilibrated portion of an MD trajectory (e.g.
-        the first ~50 ps of a 100 ps high-T equilibration). The reported
-        frame indices in the output filenames remain absolute (relative
-        to the original trajectory) so the provenance of each snapshot
-        is preserved.
-    output_format : str, default ``"xyz"``
-        File format for written snapshots. One of ``xyz`` / ``extxyz``
-        (extxyz with full metadata), ``vasp`` (POSCAR, sorted by species),
-        or ``cif``.  All formats are ASE-readable round-trip.
+        Number of leading frames to skip before sampling.  Useful for
+        discarding the equilibration period at the start of an MD
+        trajectory.  Sampling indices run over the closed interval
+        ``[burn_in_frames, n_frames - 1]``.  Raises ``ValueError`` if
+        ``burn_in_frames >= n_frames``.
+    output_format : str, default ``"extxyz"``
+        Output file format.  Accepted values: ``"extxyz"``, ``"xyz"``
+        (both write extended XYZ with a ``.xyz`` extension), ``"vasp"``
+        (POSCAR-style), ``"cif"``, ``"traj"``.
 
     Returns
     -------
     list of str
         Paths to extracted snapshot files.
     """
-    if output_format not in _FORMAT_EXT:
-        raise ValueError(
-            f"Unknown output_format '{output_format}'. "
-            f"Supported: {sorted(_FORMAT_EXT)}"
-        )
-    ext = _FORMAT_EXT[output_format]
-    ase_fmt = "extxyz" if output_format in ("xyz", "extxyz") else output_format
     frames = read(traj_file, index=":")
-    n_frames_total = len(frames)
+    n_frames = len(frames)
 
     if burn_in_frames < 0:
-        raise ValueError(f"burn_in_frames must be >= 0, got {burn_in_frames}.")
-    if burn_in_frames >= n_frames_total:
         raise ValueError(
-            f"burn_in_frames={burn_in_frames} >= trajectory length "
-            f"{n_frames_total}; nothing left to sample.")
-    n_frames = n_frames_total - burn_in_frames
+            f"burn_in_frames must be >= 0, got {burn_in_frames}."
+        )
+    if burn_in_frames >= n_frames:
+        raise ValueError(
+            f"burn_in_frames ({burn_in_frames}) must be smaller than the "
+            f"trajectory length ({n_frames})."
+        )
 
-    if n_snapshots > n_frames:
+    available = n_frames - burn_in_frames
+    if n_snapshots > available:
         print(f"Warning: requested {n_snapshots} snapshots but only "
-              f"{n_frames} frames available after burn-in. Using all.")
-        n_snapshots = n_frames
+              f"{available} frames are available after burn-in. "
+              f"Using all available frames.")
+        n_snapshots = available
 
     if select == "uniform":
-        indices = np.linspace(burn_in_frames, n_frames_total - 1,
-                              n_snapshots, dtype=int)
+        indices = np.linspace(burn_in_frames, n_frames - 1, n_snapshots,
+                              dtype=int)
     elif select == "last":
-        indices = list(range(max(burn_in_frames, n_frames_total - n_snapshots),
-                             n_frames_total))
+        indices = list(range(max(burn_in_frames, n_frames - n_snapshots),
+                             n_frames))
     else:
         raise ValueError(f"Unknown selection strategy '{select}'.")
 
-    if burn_in_frames > 0:
-        print(f"  Burn-in: skipping first {burn_in_frames} frames "
-              f"(sampling from frame {burn_in_frames}-{n_frames_total - 1})")
+    if output_format not in _SNAPSHOT_FORMAT_MAP:
+        raise ValueError(
+            f"Unknown output_format '{output_format}'. "
+            f"Choose from: {', '.join(sorted(_SNAPSHOT_FORMAT_MAP))}."
+        )
+    ext, ase_fmt = _SNAPSHOT_FORMAT_MAP[output_format]
 
     os.makedirs(output_dir, exist_ok=True)
     paths = []
     for i, idx in enumerate(indices):
         fname = os.path.join(output_dir,
-                             f"snapshot_{i:04d}_frame{idx:05d}.{ext}")
-        if ase_fmt == "vasp":
-            write(fname, frames[idx], format=ase_fmt, sort=True)
-        else:
-            write(fname, frames[idx], format=ase_fmt)
+                             f"snapshot_{i:04d}_frame{idx:05d}{ext}")
+        write(fname, frames[idx], format=ase_fmt)
         paths.append(fname)
 
     print(f"Extracted {len(paths)} snapshots → {output_dir}/")

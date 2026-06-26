@@ -1,10 +1,10 @@
 # Random structure generation
 
-Generate ensembles of amorphous structures by constrained random sequential placement with automated minimum separation distances derived from atomic radii.
+Generate ensembles of amorphous structures by constrained random sequential placement with automated minimum separation distances derived from Shannon ionic radii.
 
 ## How it works
 
-Atoms are placed sequentially into a cubic cell. Each atom must satisfy pair-specific minimum interatomic distances computed automatically from Shannon ionic radii and bonding-type classification.  
+Atoms are placed sequentially into a cubic cell. Each atom must satisfy pair-specific minimum interatomic distances computed automatically from Shannon ionic radii and bonding-type classification. No manual parameter tuning is required.
 
 ### Automated minsep
 
@@ -46,7 +46,7 @@ The bond classifier is exposed as `amorphgen.utils.radii.classify_bond(sym_a, sy
 
 #### Edge cases at the classifier boundary
 
-The Δχ = 1.0 threshold sits exactly where chemistry genuinely gets ambiguous — bonds with Δχ in the ~0.85–1.15 band have mixed ionic/covalent character. Testing the 50-system of validation set, 54 of 55 cation–anion pairs (98%) agree between the per-pair Pauling classifier and the per-composition material-class radii bucket. The disagreement, and a few other compounds outside the 50-set that sit at the boundary, are listed below:
+The Δχ = 1.0 threshold sits exactly where chemistry genuinely gets ambiguous — bonds with Δχ in the ~0.85–1.15 band have mixed ionic/covalent character. Testing the 50-system JOSS validation set, 54 of 55 cation–anion pairs (98%) agree between the per-pair Pauling classifier and the per-composition material-class radii bucket. The disagreement, and a few other compounds outside the 50-set that sit at the boundary, are listed below:
 
 | System | Pair | Δχ | Material class expects | Pauling rule says | Reality |
 |---|---|---|---|---|---|
@@ -59,24 +59,56 @@ These disagreements are **benign**: the bond classifier governs which radii prod
 
 ### Automated density
 
-Cell volume is estimated automatically:
+Cell volume is estimated by **class-aware sphere packing**: the composition is
+classified into a material class, each element is given a radius from the table
+appropriate to that class's bonding (Shannon ionic, Cordero covalent, or
+Goldschmidt metallic), and the cell is sized so the spheres fill it to the
+class's packing factor. Cation oxidation states — needed to select the right
+Shannon radius — are assigned automatically by charge balance, using a joint
+solver that resolves multivalent cations in mixed-cation / mixed-anion
+compounds (e.g. FeTiO3 -> Fe2+/Ti4+, SrTiO3 -> Sr2+/Ti4+) and sums the balance
+over every anion-former (oxynitrides, oxyfluorides).
 
-| Material class | Method | Packing factor |
-|----------------|--------|----------------|
-| Group IV, pnictide, chalcogenide, carbide, boride, alloy | Elemental density * 0.80 | -- |
-| Covalent oxide (SiO2, GeO2, B2O3) | Shannon CN=6 sphere packing | 0.50 |
-| Metal oxide (In2O3, TiO2, Al2O3) | Shannon CN=6 sphere packing | 0.52 |
-| Halide (Li2ZrCl6, NaCl, LiF) | Shannon CN=6 sphere packing | 0.58 |
-| Nitride (AlN, GaN, Si3N4) | Shannon CN=6 sphere packing | 0.52 |
-| Hydride (LiH, MgH2) | Shannon CN=6 sphere packing | 0.55 |
+| Material class | Radius source | Packing factor | Examples |
+|----------------|---------------|----------------|----------|
+| `rutile_dioxide` | Shannon ionic CN6 | 0.66 | TiO2, SnO2, RuO2, IrO2 |
+| `fluorite_dioxide` | Shannon ionic CN6 | 0.63 | ZrO2, HfO2, CeO2, ThO2, UO2 |
+| `small_cation_nitride` | Shannon ionic CN6 | 0.62 | AlN, GaN, Si3N4, TiN |
+| `high_valent_oxide` | Shannon ionic CN6 | 0.60 | V2O5, Nb2O5, MoO3, WO3 (OS ≥ 5) |
+| `transition_metal_carbide` | Goldschmidt (cation) + Cordero (C) | 0.60 | TiC, WC, ZrC |
+| `alloy` | Goldschmidt metallic | 0.60 | NiTi, CuZr, brass, pure metals |
+| `halide` | Shannon ionic CN6 | 0.58 | LiF, NaCl, Li2ZrCl6 |
+| `hydride` | Shannon ionic CN6 | 0.55 | LiH, MgH2, NaAlH4 |
+| `metal_oxide` | Shannon ionic CN6 | 0.52 | In2O3, Al2O3, Ga2O3, MgO, ZnO |
+| `nitride` | Shannon ionic CN6 | 0.52 | ZrN, HfN, ScN (large cation) |
+| `covalent_oxide` | Shannon ionic CN6 | 0.50 | SiO2, GeO2, B2O3 |
+| `boride` | Cordero covalent | 0.50 | TiB2, MgB2, ZrB2 |
+| `covalent_network_oxide` | Cordero covalent | 0.35 | BeO (small polarizing cation) |
+| `pnictide` | Cordero covalent | 0.32 | GaAs, InP, InAs |
+| `covalent_carbide` | Cordero covalent | 0.32 | SiC, B4C |
+| `group_iv` | Cordero covalent | 0.30 | Si, Ge, C |
+| `chalcogenide` | Cordero covalent | 0.30 | ZnS, CdTe, GeTe |
+| `elemental_semiconductor` | Cordero covalent | 0.28 | a-Se, a-Te, a-As, a-Sb, a-P |
 
-Use `--target-density` for more accurate results when the experimental density is known.
+The dioxide split (rutile vs fluorite) and the small- vs large-cation nitride
+split are decided by a cation-radius rule; `high_valent_oxide` is gated on
+oxidation state ≥ 5. Compositions that match no specific class fall back to a
+generic packing factor of 0.52 (Shannon ionic).
 
-### Coordination-aware placement (optional)
+Density is the weakest-calibrated part of the auto chain — it sizes a sensible
+starting cell, but a subsequent MLIP cell relaxation will correct it. Use
+`--target-density` to set the density explicitly when the experimental value is
+known.
 
-With `--target-cn`, atoms are placed near under-coordinated sites within a bonding shell, producing structures with better short-range order. Disable with `--no-sc` (legacy flag name).
+### Coordination-aware placement — "SC" (optional)
 
-### random-gen log file
+With `--target-cn`, AmorphGen uses **SC ("Seed-Coordinate")** placement: each new atom is added as a bonded neighbour of an existing *under-coordinated* site — the **seed** — by placing it within that seed's bonding shell (`minsep ≤ d ≤ dmax`), which **coordinates** it. Over-coordinating a neighbour is rejected. This builds short-range order directly into the placement instead of relying on relaxation alone, giving more physical structures.
+
+**Where the name comes from.** SC is the placement half of the **Seed-Coordinate-Anneal (SCA)** algorithm of Youn et al., *Comput. Mater. Sci.* (2014). AmorphGen factors the *Anneal* step out into its own stages — the MLIP geometry optimisation (`--relax`) and the melt-quench / hybrid workflow — so the placement step is just **Seed-Coordinate** (hence "SC", not "SCA").
+
+Disable with `--no-sc` to fall back to plain random rejection sampling (no coordination bias).
+
+### Transparency: the auto-derive log line
 
 Every `--random-gen` run writes a single one-line summary at the top of `random_gen.log` capturing every chemistry-informed decision the auto chain made — so you can see *why* a particular minsep / density / target CN was used without reading the code. Example for Ga₂O₃:
 
@@ -84,6 +116,17 @@ Every `--random-gen` run writes a single one-line summary at the top of `random_
 [auto-derive] Ga16O24 → metal_oxide, OS{Ga:+3}, CN{Ga:5}, minsep{Ga-Ga:2.43 metallic | Ga-O:1.62 ionic Δχ=1.63 | O-O:2.24 anion-pack}, ρ=4.44 g/cm³ L=8.25 Å
 ```
 
+Each field:
+
+| Field | What it means |
+|---|---|
+| `Ga16O24 → metal_oxide` | Composition routed to the `metal_oxide` material class |
+| `OS{Ga:+3}` | Cation oxidation state inferred from charge balance against the anion |
+| `CN{Ga:5}` | Target coordination auto-detected per cation |
+| `minsep{pair:value class [Δχ=val]}` | Per-pair: bond class + Pauling Δχ (shown only when the ionic classification is at stake) + minsep value in Å |
+| `ρ=… g/cm³  L=… Å` | Auto-estimated mass density and cubic cell length |
+
+The line is grep-friendly: `grep "auto-derive" random_gen.log` retrieves it as a single line per generation run. Bond classes shown are `ionic`, `covalent`, `metallic`, and `anion-pack` (same-element nonmetal pairs use a separate anion-packing scale factor — see "Bond-type classifier" above).
 
 ## CLI examples
 

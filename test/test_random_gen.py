@@ -176,6 +176,22 @@ class TestGenerateRandom:
         )
         assert len(atoms) == 80
 
+    def test_auto_expand_dense_covalent_network(self):
+        """BeO (covalent_network_oxide) is too dense to place at its full
+        equilibrium density with physical minseps; generate_random should
+        auto-expand the cell and succeed for every seed, WITHOUT shrinking the
+        (physical) O-O minimum separation."""
+        from amorphgen.utils.radii import default_minsep, estimate_cell_length
+        # O-O minsep must stay physical (Shannon ionic ~2.24 A), not covalent
+        oo = default_minsep(["Be"] * 16 + ["O"] * 16)["O-O"]
+        assert oo > 2.0, f"O-O minsep should stay physical, got {oo:.2f}"
+        base_L = estimate_cell_length({"Be": 16, "O": 16})
+        for seed in range(2):
+            atoms = generate_random({"Be": 16, "O": 16}, seed=seed)
+            assert len(atoms) == 32
+            # cell was expanded beyond the (too-dense) base density estimate
+            assert atoms.cell[0, 0] >= base_L - 1e-6
+
 
 class TestBatchRandom:
 
@@ -416,6 +432,25 @@ class TestSCPlacement:
         dmax = _auto_dmax(minsep, target_cn, factor=1.5)
         key = list(dmax.keys())[0]
         assert abs(dmax[key] - 1.6 * 1.5) < 0.01
+
+    def test_auto_dmax_suppresses_cation_cation_covalent(self):
+        """A covalent pair between two cations is NOT a bond when an anion is
+        present (Si-Al in SiAlON): the cations coordinate the anions, not each
+        other. Mirrors the metallic M-M suppression."""
+        minsep = {"Si-O": 1.6, "Al-O": 1.6, "Si-N": 1.4, "Al-N": 1.6,
+                  "Al-Si": 2.1, "O-O": 2.2, "N-N": 2.3}
+        target_cn = {"Si": 4, "Al": 5}
+        dmax = _auto_dmax(minsep, target_cn)
+        assert "Al-Si" not in dmax and "Si-Al" not in dmax  # suppressed
+        assert "Si-O" in dmax or "O-Si" in dmax             # ionic bond kept
+        assert "Al-N" in dmax or "N-Al" in dmax
+
+    def test_auto_dmax_keeps_covalent_when_no_anion(self):
+        """Si-Ge in a-SiGe (no anion) is the primary covalent bond -> kept."""
+        minsep = {"Si-Ge": 2.3, "Si-Si": 2.3, "Ge-Ge": 2.4}
+        target_cn = {"Si": 4, "Ge": 4}
+        dmax = _auto_dmax(minsep, target_cn)
+        assert "Si-Ge" in dmax or "Ge-Si" in dmax
 
 
 class TestMinsepBondTypes:

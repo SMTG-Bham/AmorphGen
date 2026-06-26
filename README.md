@@ -1,16 +1,16 @@
 <p align="center">
-  <img src="docs/_static/logo_hero.png" alt="AmorphGen" width="500">
+  <img src="https://raw.githubusercontent.com/SMTG-Bham/AmorphGen/main/docs/_static/logo_hero.png" alt="AmorphGen" width="500">
 </p>
 
 <p align="center">
-  <a href="https://github.com/SMTG-Bham/AmorphGen/actions/workflows/test.yml"><img src="https://github.com/SMTG-Bham/AmorphGen/actions/workflows/test.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/SMTG-Bham/AmorphGen/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/SMTG-Bham/AmorphGen/test.yml?branch=main&label=CI" alt="CI"></a>
   <a href="https://smtg-bham.github.io/AmorphGen/"><img src="https://img.shields.io/badge/docs-online-blue" alt="Docs"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="https://pypi.org/project/amorphgen/"><img src="https://img.shields.io/pypi/v/amorphgen?label=PyPI" alt="PyPI"></a>
 </p>
 
 <p align="center">
-  <strong>Amorphous structure generation via melt-quench MD and random placement.</strong>
+  <strong>AmorphGen: Amorphous structure generation via melt-quench MD and random placement.</strong>
 </p>
 
 <p align="center">
@@ -76,7 +76,7 @@ Crystalline input  (POSCAR / .xyz / .cif / .extxyz)
    └─────┬──────────────────────────────────────────┘
          │
    ┌─────▼──────────────────────────────────────────┐
-   │  Stage 5  Quench  –  NVT/NPT cooling ramp      │
+   │  Stage 5  Quench  –  NVT cooling ramp          │
    │           T_melt → T-low                       │
    └─────┬──────────────────────────────────────────┘
          │
@@ -106,13 +106,12 @@ Directory of disordered structures  (e.g. --random-gen outputs)
    └─────┬──────────────────────────────────────────┘
          │
    ┌─────▼──────────────────────────────────────────┐
-   │  Stage 5  Quench  –  NVT/NPT cooling ramp      │
+   │  Stage 5  Quench  –  NVT cooling ramp          │
    │           T_melt → T-low                       │
    └─────┬──────────────────────────────────────────┘
          │
    ┌─────▼──────────────────────────────────────────┐
    │  Stage 6  Low-T equilibration   T-low          │
-   │           NVT/NPT                              │
    └─────┬──────────────────────────────────────────┘
          │
    ┌─────▼──────────────────────────────────────────┐
@@ -738,7 +737,7 @@ pipe = MeltQuenchPipeline(
 
 | Tutorial | Description |
 |----------|-------------|
-| [Tutorial 7](Tutorials/T7_application_dimer_dissociation/tutorial_7_dimer_dissociation.ipynb) | Defect chemistry: O–O peroxide dimer dissociation kinetics in amorphous In₂O₃ |
+| [Tutorial 7](Tutorials/T7_application_dimer_dissociation/tutorial_7_dimer_dissociation.ipynb) | Defect chemistry: O–O peroxide dimer dissociation kinetics in amorphous In₂O₃, with Arrhenius temperature scan |
 
 ---
 
@@ -768,9 +767,12 @@ AmorphGen/
 │       ├── calculators.py          ← multi-backend calculator factory
 │       ├── radii.py                ← Shannon/metallic radii, minsep, density estimation
 │       └── common.py               ← dynamics builder, logger, trajectory writer
-├── test/                           
+├── paper/
+│   ├── paper.md                    ← JOSS draft
+│   └── paper.bib
+├── test/                           ← 114 tests (4 skipped without --run-mace)
 ├── pyproject.toml
-├── LICENSE                       
+├── LICENSE                         ← MIT
 └── README.md
 ```
 
@@ -866,16 +868,6 @@ A Zenodo DOI for tagged releases will be added on first stable release.
 
 ---
 
- ## Authors & Contact
-                                                                                                   
-  **Maintainer:** [Chaiyawat Kaewmeechai](https://cywkmc21.github.io/) University of Birmingham           
-  Email: c.kaewmeechai[at]bham.ac.uk
-                                                                                                   
-  **Bug reports / feature requests:** 
-  Open an [issue on GitHub](https://github.com/SMTG-Bham/AmorphGen/issues).                                          
-  For research collaborations or scientific questions, please email the maintainer above.
-
-
 ## License
 
 MIT
@@ -883,7 +875,9 @@ MIT
 ## Development notes
 
 Parts of this codebase were developed with assistance from an AI tool,
-Anthropic's Claude (Opus 4.7), for code drafting, refactoring, and
+Anthropic's Claude (Opus 4.8), for code drafting, refactoring, and
 documentation. All AI-assisted code was reviewed, tested, and validated
 by the authors, who take full responsibility for the contents of this
 repository.
+
+

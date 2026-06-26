@@ -4,6 +4,89 @@ orphan: true
 
 # Changelog
 
+## v1.0.0rc2 (2026-05-22)
+
+### Changed (breaking)
+
+- **`--random-gen` output layout.** Initial structures are now written to
+  `<work_dir>/random_initial/` and relaxed structures to
+  `<work_dir>/random_opt/` (was: both flat in `<work_dir>/`). This makes
+  `amorphgen --analyse --input-dir <work_dir>/random_opt/` work without
+  any `*_opt.vasp` filtering. The per-structure `random_NNNN_opt.log`
+  file moved into `random_opt/` alongside its structure.
+  - **Migration**: to restore the old flat layout, post-process with
+    `mv <work_dir>/random_*/* <work_dir>/`.
+- **Default analysis cutoff** changed from `"auto"` (minsep-based) to
+  `"auto-rdf"` (first-RDF-minimum). This is the standard convention in
+  neutron-diffraction analysis of glasses, and avoids systematically
+  under-counting coordination for materials with broad first-shell
+  distributions (a-Si, a-HfO₂, chalcogenides). Legacy `"auto"` is still
+  accepted.
+- **`--default-dtype` default** changed from `"float64"` to `"auto"`,
+  which resolves per-backend: `float32` for CHGNet (its only supported
+  dtype) and classical potentials; `float64` for MACE and SevenNet.
+  Previously, users running CHGNet had to remember to pass
+  `--default-dtype float32` explicitly, otherwise the run crashed with
+  ``NotImplementedError`` from `_load_chgnet`. Explicit `float32` or
+  `float64` flags continue to work as before.
+- **`--dtype` is the new short form** of `--default-dtype`.
+  ``--default-dtype`` is still accepted as a legacy alias, so existing
+  scripts and YAML configs (which use the underlying ``default_dtype``
+  key) are unaffected.
+- **Single-snapshot `--batch-quench` / `--hybrid-ensemble` runs**
+  no longer nest an extra ``run_0000/`` subdirectory. When the work-dir
+  contains exactly one snapshot (typical of SLURM array workflows where
+  each task processes a single input), outputs land directly under
+  ``work_dir/`` instead of ``work_dir/run_0000/``. Multi-snapshot runs
+  still write to ``work_dir/run_NNNN/`` per run.
+  - **Old layout**: ``hybrid_runs/task_0000/run_0000/final_amorphous.xyz``
+  - **New layout**: ``hybrid_runs/task_0000/final_amorphous.xyz``
+
+### Added
+
+- **`weighting` parameter on `structure_factor()`**: ``"unweighted"``
+  (default, current behaviour — a single FFT of the all-atom g(r)),
+  ``"xray"`` (Faber-Ziman partial sum with Z² weights), or
+  ``"neutron"`` (same but with tabulated coherent scattering lengths
+  for ~50 common elements). The X-ray weighting recovers the
+  first-sharp-diffraction peak (FSDP) in amorphous oxides that
+  cancels in the unweighted sum.
+- **`structure_factor_direct()`** — new method that computes S(q)
+  directly from atomic positions via the Debye formula evaluated at
+  reciprocal-lattice q-vectors:
+  $$ S(q) = \\frac{1}{N\\langle f\\rangle^2}\\left|\\sum_i f_i e^{i\\vec{q}\\cdot\\vec{r}_i}\\right|^2 $$
+  Bypasses the rmax truncation that under-estimates peak intensities
+  in the FT-of-g(r) method. For a-Ga₂O₃ the direct method gives FSDP
+  intensity S(q=2.4)=2.0 vs FT-of-g(r) S(q=2.4)=0.84, matching the
+  experimental value (Kaewmeechai et al., Phys. Rev. B 111, 035203,
+  2025, Fig. S2b) and the GAP_500 simulation in the same reference.
+  Slower than the FT method (~4-5× per ensemble); use for paper-
+  quality S(Q) comparison with experiment.
+- **`amorphgen.analysis.compare_ensembles()`** and `EnsembleSpec`:
+  multi-ensemble overlay plots (RDF, coordination, bond angles, density)
+  with one call. Used by the new Validation docs page.
+- **Per-structure density violin** in `--analyse --save-plot`: new
+  `analysis_density.{png,pdf,csv}` output alongside the existing RDF /
+  CN / angles plots, matching the comparison-plot aesthetic.
+- **Validation docs page** (`/validation/`) with four sub-tabs
+  (a-Ga₂O₃, a-SiO₂, a-HfO₂, a-Si). Each tab includes results-vs-reference
+  table, structure render, validation figure, and reproduce-it
+  commands.
+
+### Fixed
+
+- **Spurious M-M-M triplets** in bond-angle analysis of binary oxides.
+  In a multi-element compound with at least one ionic pair (e.g. HfO₂),
+  same-element metallic pairs (Hf-Hf) are second-shell contacts
+  mediated by the anion, not real first-shell bonds; they are now
+  excluded from `compute_all_angles`. Pure-metal alloy systems
+  (NiTi, CuZr) keep their X-X first-shell bonds as before.
+- **Per-structure E/atom column** in `--analyse --per-structure` was
+  always `N/A` for structure files that don't carry energy in their
+  header (VASP, CIF). The analyser now falls back to parsing the
+  sibling `random_gen.log` (using the existing `rank_from_log` parser)
+  to fill in the E/atom column when the file-level lookup fails.
+
 ## v1.0.0 (Unreleased)
 
 ### Added
@@ -35,3 +118,6 @@ orphan: true
 - **`make_cubic` reshape moved from start of stage 3 (melt) to start of stage 4 (eq_high).** Reshaping a fully molten liquid is benign (atoms diffuse and lose memory of the deformation in <1 ps); reshaping a still-crystalline structure at the start of stage 3 caused a small unphysical jolt at low T. The flag is now read from the `eq_high:` block, falling back to `melt.make_cubic` for one release as a backwards-compat bridge. Default behaviour is unchanged (cubic reshape on by default).
 
 ### Removed
+
+- **M3GNet backend (via matgl).** Loader code and registry kept in place; install pipeline removed from `[all]` extra. Currently broken upstream (DGL drops Mac wheels; matgl 2.x model paths return 401 from HuggingFace). Will be reinstated when matgl/DGL packaging stabilises. Use **SevenNet** as the recommended drop-in replacement (similar architecture, no DGL dependency).
+- **Experimental placement-algorithm subpackage** (`amorphgen/pipeline/placement/`) and the `--placement-algorithm` CLI flag. We tested four alternatives (Voronoi-CRN, WWW + Keating, Metropolis repair, ARTn-lite) on Si64 + CHGNet and found the existing default coordination-aware placement matched or outperformed all of them. The 70% CN=4 ceiling is set by CHGNet's energy landscape, not by placement quality, so a more sophisticated placement does not help unless paired with a Si-specific potential (which is outside AmorphGen's general-purpose scope). Modules and a full carry-forward report are archived locally (and gitignored) under `experiments/cn_fix_2026-05/` for any future revival.

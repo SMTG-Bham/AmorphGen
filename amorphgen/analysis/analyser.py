@@ -5,7 +5,7 @@ Usage
 -----
     from amorphgen.analysis import StructureAnalyser
 
-    sa = StructureAnalyser("output_dir/", cutoff="auto")
+    sa = StructureAnalyser("output_dir/")            # default cutoff="auto-rdf"
     sa.summary()
     sa.plot(output_dir="plots/")
 """
@@ -42,11 +42,18 @@ class StructureAnalyser:
     cutoff : float, dict, or str
         - float: single cutoff (A) for all pairs
         - dict: pair-specific, e.g. {"Si-O": 2.2}
-        - "auto": from bonding radii (fast)
-        - "auto-rdf": from RDF first minimum (accurate)
+        - "auto-rdf": from RDF first minimum (default — physically correct
+          first coordination shell, matches the standard convention in
+          neutron-diffraction analysis of glasses/liquids)
+        - "auto": from bonding radii (fast; can truncate the first peak
+          for systems with broad bond distributions such as a-Si, a-HfO2,
+          chalcogenides — prefer "auto-rdf" unless you have a specific
+          reason)
     """
 
-    def __init__(self, source, cutoff="auto"):
+    _file_list: list  # populated by _load; used by log-energy lookup
+
+    def __init__(self, source, cutoff="auto-rdf"):
         """
         Parameters
         ----------
@@ -55,12 +62,28 @@ class StructureAnalyser:
             a list of file paths, or a list of ASE Atoms objects.
         cutoff : float, dict, or str
             Neighbour cutoff for CN, bond distances, and angles.
+
             - float: single cutoff (A) for all pairs
-            - dict: pair-specific, e.g. {"Si-O": 2.2, "O-O": 2.8}
-            - "auto": from bonding radii (fast, default)
-            - "auto-rdf": from RDF first minimum (more accurate)
+            - dict: pair-specific, e.g. ``{"Si-O": 2.2, "O-O": 2.8}``
+            - ``"auto-rdf"`` (default): first minimum of the partial RDF —
+              the standard physical definition of the first coordination
+              shell. Robust across material classes; prefer this for
+              published numbers.
+            - ``"auto"``: derived from Shannon/Cordero/Goldschmidt radii
+              (minsep). Fast but can under-count coordination for
+              systems with broad first-shell distributions (a-Si,
+              a-HfO2, chalcogenides). Kept for backward compatibility
+              and for the placement-stage workflows where no RDF is
+              available yet.
+
+        Notes
+        -----
+        Changed in v1.0.0: default switched from ``"auto"`` to
+        ``"auto-rdf"`` to match neutron-diffraction analysis convention
+        and to avoid systematically under-counting coordination for
+        materials with broad bond-length distributions.
         """
-        self.atoms_list = self._load(source)
+        self.atoms_list, self._file_list = self._load(source)
         if not self.atoms_list:
             raise ValueError("No structures loaded. Check the source path.")
 
@@ -93,11 +116,14 @@ class StructureAnalyser:
 
     @staticmethod
     def _load(source):
+        """Return (atoms_list, file_paths). file_paths may be [] if the
+        caller passed in-memory Atoms objects rather than disk paths."""
         from ase import Atoms
         if isinstance(source, list):
             if source and isinstance(source[0], Atoms):
-                return source
-            return [read(f) for f in source]
+                return source, []
+            file_list = list(source)
+            return [read(f) for f in file_list], file_list
         if os.path.isdir(source):
             files = sorted(
                 glob.glob(os.path.join(source, "*.xyz"))
@@ -107,8 +133,8 @@ class StructureAnalyser:
             )
             if not files:
                 raise FileNotFoundError(f"No structure files in {source}/")
-            return [read(f) for f in files]
-        return [read(source)]
+            return [read(f) for f in files], files
+        return [read(source)], [source]
 
     def _get_cutoff(self, s1, s2):
         if isinstance(self.cutoff, (int, float)):
@@ -211,26 +237,66 @@ class StructureAnalyser:
         """
         return compute_rdf(self.atoms_list, pair, rmax, nbins, sigma=sigma)
 
-    def structure_factor(self, pair=None, qmax=15.0, nq=300, rmax=None):
+    def structure_factor(self, pair=None, qmax=15.0, nq=300, rmax=None,
+                         weighting="unweighted"):
         """Compute the structure factor S(q) from g(r) via Fourier transform.
 
         Parameters
         ----------
         pair : str, optional
-            Pair to analyse. If None, total S(q).
+            Pair to analyse, e.g. ``"Ga-O"``. If ``None``, computes
+            the total S(q). The ``weighting`` argument only affects the
+            total case; specific partials are always returned as their
+            own Faber-Ziman S_AB(q).
         qmax : float
-            Maximum q in 1/A (default 15.0).
+            Maximum q in inverse-Angstrom (default 15.0).
         nq : int
             Number of q points (default 300).
         rmax : float, optional
-            Maximum radius for RDF used in the transform.
+            Max radius for the underlying g(r). ``None`` = auto (half cell).
+        weighting : {"unweighted", "xray", "neutron"}, default ``"unweighted"``
+            How partials are combined into the total. ``"xray"`` uses
+            atomic-number-squared weighting (Faber-Ziman); ``"neutron"``
+            uses tabulated coherent scattering lengths. Pick ``"xray"``
+            for direct comparison with X-ray diffraction experiments
+            (recovers the FSDP that cancels in the unweighted sum).
 
         Returns
         -------
         dict
-            {"q": list[float], "s_q": list[float]}
+            ``{"q": list[float], "s_q": list[float]}``.
         """
-        return compute_structure_factor(self.atoms_list, pair, qmax, nq, rmax)
+        return compute_structure_factor(self.atoms_list, pair, qmax, nq,
+                                        rmax, weighting=weighting)
+
+    def structure_factor_direct(self, qmax=15.0, nq=300,
+                                weighting="xray"):
+        """Compute S(q) directly from atomic positions via the Debye
+        formula at reciprocal-lattice q-vectors.
+
+        Avoids the rmax truncation that damps the FSDP in the FT-of-g(r)
+        method. Q-resolution is limited only by the cell size
+        (q_min ~ 2*pi/L). Slower than :meth:`structure_factor` but
+        gives correct peak intensities.
+
+        Parameters
+        ----------
+        qmax : float
+            Maximum q in inverse-Angstrom.
+        nq : int
+            Number of q-bins for spherical averaging.
+        weighting : {"xray", "neutron", "unweighted"}, default ``"xray"``
+            Per-element scattering factors. See
+            :func:`compute_structure_factor` for details.
+
+        Returns
+        -------
+        dict
+            ``{"q": list[float], "s_q": list[float], "n_per_bin": list[int]}``.
+        """
+        from .rdf import compute_structure_factor_direct
+        return compute_structure_factor_direct(self.atoms_list, qmax, nq,
+                                               weighting=weighting)
 
     def averaged_rdf(self, pair=None, rmax=None, nbins=200):
         """Compute RDF per structure with mean and standard deviation.
@@ -448,6 +514,51 @@ class StructureAnalyser:
         print(text)
         return text
 
+    def _lookup_log_energies(self) -> dict[int, float]:
+        """Locate the random_gen.log next to these structures and return a
+        ``{file_index: e_per_atom_eV}`` map. Empty dict if no log found.
+
+        Searches the directory of the first file path, plus its parent
+        (handles ``random_opt/`` and ``random_initial/`` subdirs in the
+        v1.0.0rc2 layout). The log's `random_NNNN` indices map to the
+        sorted file list positionally (i.e. the i-th file → i-th log
+        entry by index).
+        """
+        if not self._file_list:
+            return {}
+        from .energy import rank_from_log
+
+        # Search in current dir and one level up
+        first_dir = os.path.dirname(os.path.abspath(self._file_list[0]))
+        candidates = [
+            os.path.join(first_dir, "random_gen.log"),
+            os.path.join(os.path.dirname(first_dir), "random_gen.log"),
+        ]
+        log_path = next((p for p in candidates if os.path.isfile(p)), None)
+        if log_path is None:
+            return {}
+
+        try:
+            result = rank_from_log(log_path)
+        except Exception:
+            return {}
+
+        # rank_from_log returns rows of (idx, e_total, e_per_atom, fmax, n, status)
+        log_by_idx = {row[0]: row[2] for row in result.get("rows", [])}
+        if not log_by_idx:
+            return {}
+
+        # Map structure-position -> log index by parsing "random_NNNN" out
+        # of each file name. Fall back to positional if no match.
+        import re
+        out = {}
+        for pos, path in enumerate(self._file_list):
+            m = re.search(r"random_(\d+)", os.path.basename(path))
+            log_idx = int(m.group(1)) if m else pos
+            if log_idx in log_by_idx:
+                out[pos] = log_by_idx[log_idx]
+        return out
+
     def per_structure_summary(self) -> str:
         """
         Analyse each structure individually and produce a comparison table.
@@ -497,6 +608,13 @@ class StructureAnalyser:
         all_energies = []
         all_cns = {p: [] for p in bonding_pairs[:3]}
 
+        # v1.0.0rc2: if the structure files were produced by --random-gen
+        # (which writes per-step energies into random_gen.log) and the
+        # files themselves don't carry energy in their headers (e.g. VASP
+        # format strips energy on write), scan the sibling log so the
+        # report's "E/atom" column isn't full of N/A.
+        log_energies = self._lookup_log_energies()
+
         for i, atoms in enumerate(self.atoms_list):
             sa_single = StructureAnalyser([atoms], cutoff=self.cutoff)
 
@@ -520,7 +638,13 @@ class StructureAnalyser:
                     all_energies.append(e)
                     e_str = f"{e:.4f}"
                 except Exception:
-                    e_str = "N/A"
+                    # Final fallback: random_gen.log
+                    e = log_energies.get(i)
+                    if e is not None:
+                        all_energies.append(e)
+                        e_str = f"{e:.4f}"
+                    else:
+                        e_str = "N/A"
 
             # CN for bonding pairs
             cn = sa_single.coordination()

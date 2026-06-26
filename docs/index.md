@@ -10,11 +10,14 @@
 Automated amorphous structure generation using machine-learning and classical interatomic potentials.
 </p>
 
-<p align="center">                                                                                        
-  <a href="https://github.com/SMTG-Bham/AmorphGen"><img src="https://img.shields.io/badge/GitHub-source-181717?logo=github" alt="GitHub"></a>                   
-</p>                                                                                                      
-                                                                                                         
-AmorphGen provides three routes to amorphous structures: **random placement** from just a chemical formula, **melt-and-quench MD** from a crystal, and a **hybrid** workflow that anneals disordered inputs. All three are powered by universal machine-learning interatomic potentials (MACE, CHGNet, SevenNet) or classical force fields (Buckingham, Lennard-Jones).
+<p align="center">
+  <a href="https://github.com/SMTG-Bham/AmorphGen"><img src="https://img.shields.io/badge/GitHub-source-181717?style=flat&logo=github" alt="GitHub source"></a>
+  <a href="https://pypi.org/project/amorphgen/"><img src="https://img.shields.io/pypi/v/amorphgen?label=PyPI&style=flat" alt="PyPI"></a>
+  <a href="https://github.com/SMTG-Bham/AmorphGen/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-yellow?style=flat" alt="License: MIT"></a>
+  <a href="https://github.com/SMTG-Bham/AmorphGen/issues"><img src="https://img.shields.io/badge/issues-bug%20tracker-blue?style=flat&logo=github" alt="Issues"></a>
+</p>
+
+AmorphGen exposes three routes to amorphous structures: **random placement** from just a chemical formula, **melt-and-quench MD** from a crystal, and a **hybrid** workflow that anneals disordered inputs and quenches to low temperature. All three are powered by universal machine-learning interatomic potentials (MACE, CHGNet, SevenNet) or classical force fields (Buckingham, Lennard-Jones).
 
 ```{image} images/main_Fig.png
 :alt: AmorphGen workflow: crystalline input or composition to amorphous structure
@@ -26,13 +29,13 @@ AmorphGen provides three routes to amorphous structures: **random placement** fr
 
 ## Why AmorphGen?
 
-Amorphous materials play a key role in a wide range of technologies, including transparent conductors in displays, gate dielectrics in transistors, solid electrolytes in batteries, and chalcogenide phase-change memory. Generating realistic structural models of these materials usually requires writing custom MD scripts, choosing interatomic potential parameters for each new system, and managing a multi-stage simulation workflow. Existing tools force a trade-off: AIMD gives accuracy but is too expensive for screening; classical MD is fast but needs a fitted potential per composition; random-structure search tools were designed for crystalline systems rather than disordered solids.
+Amorphous materials play a key role in a wide range of technologies, including transparent conductors in displays, gate dielectrics in transistors, solid electrolytes in batteries, and chalcogenide phase-change memory. Generating realistic structural models of these materials usually requires writing custom MD scripts, choosing interatomic potential parameters for each new system, and managing a multi-stage simulation workflow. Existing tools force a trade-off: AIMD gives accuracy but is too expensive for screening; classical MD is fast but needs a fitted potential per composition.
 
 AmorphGen simplifies amorphous structure generation by combining machine-learning interatomic potentials with an automated workflow. Users can provide a chemical formula or a crystalline structure, and the package runs a random-placement plus relaxation workflow, or a 7-stage melt-quench protocol with minimal CLI call. Calculator backends include MACE, CHGNet, and SevenNet, and classical pair potentials (Lennard-Jones, Buckingham+Coulomb) for systems where a fitted potential is preferred. All parameters – including minimum separations, density, temperatures, and cooling rates – are set automatically but can be overridden via CLI flags or YAML configuration.
 
 The output is a relaxed amorphous structure, the full MD trajectory, and built-in structure analysis tools. Outputs are written in VASP, CIF, and extended XYZ formats, ready as input for DFT property calculations (electronic structure, optical, mechanical) or as a starting point for further structural relaxation at higher levels of theory.
 
-**Designed for** researchers interested in modelling amorphous systems, including oxides, glasses, chalcogenides, nitrides, halides, and other disordered solids. Typical uses include preparing structures for DFT calculations, screening across compositions, and direct property prediction. The package has been applied to oxides (e.g. SiO₂, In₂O₃, TiO₂, Ga₂O₃, Al₂O₃, InGaZnO₄), halides, pnictides (e.g. GaAs), group-IV semiconductors (e.g. Si), nitrides (e.g. GaN, BN) and other compositions.
+**Designed for** researchers interested in modelling amorphous systems, including oxides, glasses, chalcogenides, nitrides, halides, and other disordered solids. Typical uses include preparing structures for DFT calculations, screening across compositions, and direct property prediction. The package has been applied to oxides (e.g. SiO₂, In₂O₃, TiO₂, Ga₂O₃, Al₂O₃, InGaZnO₄), halides (e.g. LiF, Li₂ZrCl₆), pnictides (e.g. GaAs), group-IV semiconductors (e.g. Si), nitrides (e.g. GaN, BN) and other compositions.
 
 ---
 
@@ -158,7 +161,7 @@ Crystalline input  (POSCAR / .xyz / .cif / .extxyz)
    └─────┬──────────────────────────────────────────┘
          │
    ┌─────▼──────────────────────────────────────────┐
-   │  Stage 5  Quench  –  NPT/NVT cooling ramp      │
+   │  Stage 5  Quench  –  NVT cooling ramp          │
    │           T_melt → T-low                       │
    └─────┬──────────────────────────────────────────┘
          │
@@ -188,13 +191,12 @@ Directory of disordered structures  (e.g. --random-gen outputs)
    └─────┬──────────────────────────────────────────┘
          │
    ┌─────▼──────────────────────────────────────────┐
-   │  Stage 5  Quench  –  NPT/NVT cooling ramp      │
+   │  Stage 5  Quench  –  NVT cooling ramp          │
    │           T_melt → T-low                       │
    └─────┬──────────────────────────────────────────┘
          │
    ┌─────▼──────────────────────────────────────────┐
    │  Stage 6  Low-T equilibration   T-low          │
-   │           NVT/NPT                              │
    └─────┬──────────────────────────────────────────┘
          │
    ┌─────▼──────────────────────────────────────────┐
@@ -238,9 +240,20 @@ amorphgen --list-models   # see all 20+ model variants
 
 ---
 
+## Authors & Contact
+
+**Maintainer:** [Chaiyawat Kaewmeechai](https://SMTG-Bham.github.io/), University of Birmingham<br>
+**Email:** `c[dot]kaewmeechai[at]bham[dot]ac[dot]uk`
+
+**Bug reports / feature requests:** [Open an issue on GitHub](https://github.com/SMTG-Bham/AmorphGen/issues).<br>
+For research collaborations or scientific questions, please email the maintainer above.
+
+---
+
 ## Citing AmorphGen
 
-If you use AmorphGen in your research, please cite the GitHub repository:
+If you use AmorphGen in your research, please cite the JOSS paper (in
+preparation) and the GitHub repository:
 
 ```bibtex
 @misc{amorphgen,
@@ -276,6 +289,8 @@ guides/pipeline
 guides/mq-ensemble
 guides/batch-quench
 guides/hybrid-workflow
+guides/best-practices
+guides/analysis
 guides/backends
 guides/yaml-config
 guides/benchmarks
@@ -288,6 +303,13 @@ guides/hpc
 :caption: Tutorials
 
 tutorials/index
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: Validation
+
+validation/index
 ```
 
 ```{toctree}
@@ -309,19 +331,9 @@ api/utils
 
 contributing
 ```
-## Authors & Contact
-
-**Maintainer:** [Chaiyawat Kaewmeechai](https://cywkmc21.github.io/), University of Birmingham<br>
-**Email:** `c.kaewmeechai[at]bham.ac.uk`<br>
-**Bug reports / feature requests:** [Open an issue on GitHub](https://github.com/SMTG-Bham/AmorphGen/issues).<br>
-For research collaborations or scientific questions, please email the maintainer above.
-
----
 
 ## Indices and tables
 
 - {ref}`genindex`
 - {ref}`modindex`
 - {ref}`search`
-
-

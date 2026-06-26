@@ -1,0 +1,36 @@
+# Literature reference values for amorphous IrO2 (a-IrO2).
+# Pass to amorphgen via:
+#   amorphgen --analyse --input-dir DIR --reference examples/reference_a_IrO2.yaml
+#
+# Each "expected" range is a [low, high] interval. A computed value inside
+# the range is reported "match"; within ~5% of either bound is "concern";
+# otherwise "fail".
+#
+# The ranges are grounded in the rutile IrO2 crystal structure and the typical
+# density reduction of amorphous oxides relative to their crystal: crystalline
+# rutile IrO2 has density ~11.67 g/cm^3 with octahedral IrO6 (Ir-O ~1.96-2.0 A);
+# amorphous models fall ~10-15% below the crystal density while retaining
+# near-octahedral short-range order.
+
+system: a-IrO2
+
+density:
+  expected: [9.50, 10.70]     # ~10-15% below the rutile crystal (11.67 g/cm^3)
+  units: "g/cm^3"
+
+bond_distances:
+  Ir-O:
+    expected: [1.90, 2.02]    # octahedral IrO6 first shell (~1.96 A)
+    units: "A"
+  O-O:
+    expected: [2.68, 2.84]    # O-O first peak (~2.76 A)
+    units: "A"
+  Ir-Ir:
+    expected: [3.38, 3.58]    # Ir-Ir first peak (~3.48 A)
+    units: "A"
+
+coordination:
+  Ir-O:
+    mean_expected: [5.5, 6.0] # octahedral-dominated (rutile IrO2 is 6-coordinate)
+  O-Ir:
+    mean_expected: [2.7, 3.0]

@@ -19,7 +19,8 @@ Shannon ionic / Cordero covalent / Goldschmidt metallic radii, bonding-type
 classification, automatic minsep + density + target-CN derivation, and
 charge-balance oxidation-state inference (``amorphgen.utils.radii``).
 These helpers are exercised end-to-end in **Tutorial 2**
-("Zero-config random structure generation").
+("Zero-config random structure generation") and underpin the
+auto-derivation chain documented in the JOSS paper.
 
 ```{eval-rst}
 .. automodule:: amorphgen.utils.radii

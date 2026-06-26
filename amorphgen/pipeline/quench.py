@@ -62,6 +62,9 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
         timestep=cfg.get("timestep", 1.0),
         friction=cfg.get("friction", 0.01),
         ttime=cfg.get("ttime", 25.0),
+        npt_method=cfg.get("npt_method", "berendsen"),
+        taup_factor=cfg.get("taup_factor", 10.0),
+        compressibility_GPa=cfg.get("compressibility_GPa", 100.0),
     )
 
     logfile = cfg.get("log_file", "stage5_quench.log")

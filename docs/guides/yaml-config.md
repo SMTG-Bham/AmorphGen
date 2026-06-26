@@ -70,6 +70,7 @@ eq_premelt:
 
 melt:
   ensemble: NPT
+  npt_method: berendsen  # robust during the 300→3000 K ramp
   T_start: 300
   T_end: 3000
   T_step: 100
@@ -77,7 +78,8 @@ melt:
   timestep: 0.5
 
 eq_high:
-  ensemble: NVT
+  ensemble: NPT       # NEW default — was NVT
+  npt_method: mtk     # Nose-Hoover-chain canonical fluctuations
   T: 3000
   steps: 50000        # 50 ps
   timestep: 0.5
@@ -251,6 +253,49 @@ final_opt:
 ```
 
 When `final_opt:` is absent, Stage 7 silently falls back to `opt:`. This is fine for many workflows but worth knowing if you're producing publication-quality structures.
+
+## Selecting an NPT integrator
+
+Any stage with `ensemble: NPT` accepts a `npt_method:` key that picks among three ASE integrators:
+
+| `npt_method` | ASE class | When to use it |
+|---|---|---|
+| `berendsen` *(default)* | `NPTBerendsen` | Robust during the 300 → 3000 K heating ramp. Averages are correct; fluctuation-derived quantities (heat capacity, isothermal compressibility) are not. |
+| `mtk` | `IsotropicMTKNPT` | Martyna-Tobias-Klein Nose-Hoover-chain NPT. **True canonical fluctuations.** Default for `eq_high`. May become unstable during rapid temperature ramps. |
+| `parrinello-rahman` | `MelchionnaNPT` | Nose-Hoover + Parrinello-Rahman **flexible cell** (volume *and* shape evolve). Useful for anisotropic glasses. Requires upper-triangular cell — ASE will raise otherwise. |
+
+Recommended pattern: Berendsen on the heating and cooling ramps (stages 3, 5), MTK on the equilibration plateaux (stages 2, 4, 6). The current default config follows this for stages 3 and 4.
+
+### Tuning the Berendsen barostat
+
+If the melt ramp produces volume excursions that are too large, two knobs tighten the response without changing the integrator:
+
+| Key | Default | Effect |
+|---|---|---|
+| `taup_factor` | `10.0` | Ratio `taup / ttime`. Larger → slower, more stable barostat. Also applied to MTK `pdamp`. |
+| `compressibility_GPa` | `100.0` | Reference compressibility for Berendsen (`1/(compressibility_GPa × GPa)`). Default is liquid-like; oxides with bulk modulus 150–300 GPa benefit from 200 GPa. |
+
+**Example: oxide-tuned melt ramp**
+
+```yaml
+melt:
+  ensemble: NPT
+  npt_method: berendsen
+  taup_factor: 30.0              # slower barostat (3× default)
+  compressibility_GPa: 200.0     # stiffer, oxide-realistic
+```
+
+On a Cu/EMT benchmark at 1500 K over 300 fs, these settings reduce the maximum volume excursion by ~74 % compared with the defaults.
+
+**Example: restore the legacy NVT plateau**
+
+The new default for `eq_high` is NPT/MTK. To revert to constant-volume behaviour:
+
+```yaml
+eq_high:
+  ensemble: NVT
+  T: 3000
+```
 
 ## Tips
 

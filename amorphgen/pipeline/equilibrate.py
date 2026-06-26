@@ -14,8 +14,8 @@ from copy import deepcopy
 from ase.io import read, write
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 
-from ..utils import (get_calculator, build_md_dynamics,
-                     attach_outputs, merge_config, make_cubic)
+from ..utils import (get_calculator, make_cubic, build_md_dynamics,
+                     attach_outputs, merge_config)
 from ..configs import DEFAULT_CONFIG
 
 
@@ -57,21 +57,13 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high", **kwargs):
         atoms = deepcopy(atoms_or_file)
         print(f"[Stage {stage_label}] Using provided Atoms object")
 
-    # Stage 4 (eq_high) reshapes the molten cell to a cube of equal volume
-    # before high-T equilibration. Reshaping a fully melted liquid is
-    # benign (atoms diffuse and lose memory of the deformation in <1 ps),
-    # whereas reshaping a still-crystalline structure (the previous
-    # behaviour, executed at start of stage 3) causes a small unphysical
-    # jolt at low T. The flag is honoured under either eq_high.make_cubic
-    # or melt.make_cubic for one release as a backwards-compat bridge.
-    if stage == "high":
-        make_cubic_flag = cfg.get(
-            "make_cubic",
-            global_cfg.get("melt", {}).get("make_cubic", True),
-        )
-        if make_cubic_flag:
-            atoms = make_cubic(atoms)
-            print(f"[Stage {stage_label}] Cell reshaped to cubic")
+    # Optional cell cubification (default: off — preserve the input shape).
+    # Useful at the high-T equilibration plateau when the heat ramp has
+    # left the cell anisotropic and the user wants to restart from an
+    # isotropic supercell.
+    if cfg.get("make_cubic", False):
+        atoms = make_cubic(atoms)
+        print(f"[Stage {stage_label}] Reshaped cell to cubic (make_cubic)")
 
     if calc is None:
         device = global_cfg.get("device", "cuda")
@@ -94,15 +86,13 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high", **kwargs):
         timestep=cfg.get("timestep", 1.0),
         friction=cfg.get("friction", 0.01),
         ttime=cfg.get("ttime", 25.0),
+        npt_method=cfg.get("npt_method", "berendsen"),
+        taup_factor=cfg.get("taup_factor", 10.0),
+        compressibility_GPa=cfg.get("compressibility_GPa", 100.0),
     )
 
     logfile = cfg.get("log_file", f"stage{stage_label}_eq.log")
-    # Distinct names for the running trajectory vs the final-state output.
-    # `stage{N}_eq_traj.xyz` accumulates frames during the run; the final
-    # single-frame `stage{N}_eq.xyz` is only written at successful completion.
-    # This is also what --resume checks, so partial trajectories no longer
-    # cause stage skipping when a job hits walltime mid-stage.
-    trajfile = cfg.get("traj_file", f"stage{stage_label}_eq_traj.xyz")
+    trajfile = cfg.get("traj_file", f"stage{stage_label}_eq.xyz")
     logger, traj = attach_outputs(dyn, atoms, logfile, trajfile,
                                   fmt=global_cfg.get("traj_format", "extxyz"))
 

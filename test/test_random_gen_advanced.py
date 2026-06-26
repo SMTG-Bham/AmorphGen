@@ -83,7 +83,7 @@ class TestClassifyCompound:
         ({"Ga": 16, "As": 16}, "pnictide"),
         ({"Si": 16, "C": 16}, "covalent_carbide"),
         ({"Zn": 16, "S": 16}, "chalcogenide"),
-        ({"Al": 16, "N": 16}, "nitride"),
+        ({"Al": 16, "N": 16}, "small_cation_nitride"),
         ({"Li": 16, "Cl": 16}, "halide"),
     ])
     def test_classification(self, comp, expected_class):

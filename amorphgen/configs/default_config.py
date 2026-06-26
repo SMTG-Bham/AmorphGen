@@ -14,7 +14,7 @@ DEFAULT_CONFIG = {
     # Foundation model short name — works across all backends:
     #   MACE:     "mace-mpa-0", "mace-mh-1", "mace-omat-0-medium", ...
     #   CHGNet:   "chgnet"
-    #   SevenNet: "sevennet", "7net-mf-ompa", "7net-l3i5", ...
+    #   M3GNet:   "m3gnet"
     "model": "mace-mpa-0",
 
     # Legacy alias — reads are redirected to "model" in the pipeline
@@ -31,10 +31,6 @@ DEFAULT_CONFIG = {
     "traj_format": "extxyz",
 
     # ── Stage 1 & 7: structure optimisation ───────────────────────────────────
-    # Stage 1 reads from `opt:`; Stage 7 reads from `final_opt:` and FALLS BACK
-    # to `opt:` when `final_opt:` is absent. To use different settings for
-    # the final amorphous opt (e.g. tighter fmax, FrechetCellFilter for cell
-    # relax), add a `final_opt:` block with the same schema.
     "opt": {
         "fmax":      0.01,   # eV/Å  force convergence
         "max_steps": 1000,
@@ -52,6 +48,10 @@ DEFAULT_CONFIG = {
     # ── Stage 3: melt (heating ramp) ─────────────────────────────────────────
     "melt": {
         "ensemble":     "NPT",
+        # NPT integrator. "berendsen" is the default for ramp stability.
+        # Switch to "mtk" or "parrinello-rahman" if you need true canonical
+        # fluctuations (NB: these can become unstable during rapid ramps).
+        "npt_method":   "berendsen",
         "T_start":      300,     # K
         "T_end":        3000,    # K
         "T_step":       100,     # K  per ramp segment
@@ -60,15 +60,31 @@ DEFAULT_CONFIG = {
         "timestep":     0.5,     # fs
         "friction":     0.01,    # 1/fs  (NVT Langevin)
         "ttime":        25.0,    # fs    (NPT thermostat)
+        # Barostat coupling: taup = taup_factor * ttime.  Larger ->
+        # slower, more stable barostat (recommended for the ramp).
+        "taup_factor":  10.0,
+        # Reference compressibility for Berendsen.  100 GPa is soft /
+        # liquid-like; oxides with bulk modulus 150-300 GPa benefit
+        # from 200 GPa here for less aggressive volume control.
+        "compressibility_GPa": 100.0,
     },
 
     # ── Stage 4: high-temperature equilibration ──────────────────────────────
     "eq_high": {
-        "ensemble":  "NVT",
-        "T":         3000,     # K  (should match melt T_end)
-        "steps":     20000,
-        "timestep":  0.5,
-        "friction":  0.01,
+        # NPT with Nose-Hoover-chain (MTK) for true canonical
+        # fluctuations at the equilibration plateau.  Stage 3 has
+        # already expanded the cell to the melt density; this stage
+        # lets it fluctuate physically around the equilibrium volume.
+        # Users who want the previous behaviour can set ensemble: NVT.
+        "ensemble":     "NPT",
+        "npt_method":   "mtk",
+        "T":            3000,    # K  (should match melt T_end)
+        "steps":        20000,
+        "timestep":     0.5,
+        "friction":     0.01,
+        "ttime":        25.0,
+        "taup_factor":  10.0,
+        "compressibility_GPa": 100.0,
     },
 
     # ── Stage 5: quench (cooling ramp) ───────────────────────────────────────

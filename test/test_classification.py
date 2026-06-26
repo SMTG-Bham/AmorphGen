@@ -14,6 +14,12 @@ from amorphgen.utils.radii import _classify_compound, auto_target_cn, default_mi
     ({"Si": 64}, "group_iv"),
     ({"Ge": 64}, "group_iv"),
     ({"Si": 32, "Ge": 32}, "group_iv"),
+    # Pure-element covalent / semimetal semiconductors (Cordero radii)
+    ({"Se": 64}, "elemental_semiconductor"),
+    ({"Te": 64}, "elemental_semiconductor"),
+    ({"As": 64}, "elemental_semiconductor"),
+    ({"Sb": 64}, "elemental_semiconductor"),
+    ({"P": 64}, "elemental_semiconductor"),
     # Pnictides (III-V)
     ({"Ga": 16, "As": 16}, "pnictide"),
     ({"In": 16, "P": 16}, "pnictide"),
@@ -32,18 +38,48 @@ from amorphgen.utils.radii import _classify_compound, auto_target_cn, default_mi
     # Metal oxides
     ({"Al": 16, "O": 24}, "metal_oxide"),
     ({"In": 16, "O": 24}, "metal_oxide"),
-    ({"Ti": 16, "O": 32}, "metal_oxide"),
     ({"Mg": 16, "O": 16}, "metal_oxide"),
     ({"Ca": 16, "O": 16}, "metal_oxide"),
     ({"Zn": 16, "O": 16}, "metal_oxide"),
+    # BeO: anomalous small-cation covalent oxide (wurtzite network), not ionic
+    ({"Be": 16, "O": 16}, "covalent_network_oxide"),
+    # ...but a mixed Be cation oxide (chrysoberyl-like) stays ionic metal_oxide
+    ({"Be": 4, "Al": 8, "O": 16}, "metal_oxide"),
+    # Rutile-type dioxides (MO2, small metal cation) → denser rutile_dioxide
+    ({"Ti": 16, "O": 32}, "rutile_dioxide"),  # light 3d rutile
+    ({"Sn": 8, "O": 16}, "rutile_dioxide"),
+    ({"V": 8, "O": 16}, "rutile_dioxide"),
+    ({"Mn": 8, "O": 16}, "rutile_dioxide"),
+    ({"Ir": 8, "O": 16}, "rutile_dioxide"),
+    ({"Ru": 8, "O": 16}, "rutile_dioxide"),
+    ({"Os": 8, "O": 16}, "rutile_dioxide"),
+    ({"Pt": 8, "O": 16}, "rutile_dioxide"),
+    ({"Pb": 8, "O": 16}, "rutile_dioxide"),  # covalent exception (PbO2)
+    # Fluorite/baddeleyite dioxides (large cation, r(M4+) >= cutoff)
+    ({"Zr": 8, "O": 16}, "fluorite_dioxide"),  # baddeleyite
+    ({"Hf": 8, "O": 16}, "fluorite_dioxide"),  # baddeleyite
+    ({"Ce": 8, "O": 16}, "fluorite_dioxide"),  # fluorite
+    # Actinide dioxides (An4+ now tabulated) → fluorite, not metal_oxide
+    ({"Th": 8, "O": 16}, "fluorite_dioxide"),  # ThO2
+    ({"U": 8, "O": 16}, "fluorite_dioxide"),   # UO2
+    ({"Pu": 8, "O": 16}, "fluorite_dioxide"),  # PuO2
+    # High-valent oxides (cation OS >= 5) → high_valent_oxide
+    ({"Re": 8, "O": 24}, "high_valent_oxide"),  # ReO3, Re(VI)
+    ({"V": 16, "O": 40}, "high_valent_oxide"),  # V2O5, V(V)
+    ({"Nb": 16, "O": 40}, "high_valent_oxide"), # Nb2O5
+    ({"W": 16, "O": 48}, "high_valent_oxide"),  # WO3, W(VI)
+    ({"Sb": 16, "O": 40}, "high_valent_oxide"), # Sb2O5 (metalloid cation)
     # Halides
     ({"Na": 16, "Cl": 16}, "halide"),
     ({"Li": 8, "Zr": 4, "Cl": 24}, "halide"),
     ({"Li": 16, "F": 16}, "halide"),
-    # Nitrides
-    ({"Al": 16, "N": 16}, "nitride"),
-    ({"Ga": 16, "N": 16}, "nitride"),
-    ({"Si": 12, "N": 16}, "nitride"),
+    # Nitrides — small-cation -> small_cation_nitride; large-cation -> nitride
+    ({"Al": 16, "N": 16}, "small_cation_nitride"),
+    ({"Ga": 16, "N": 16}, "small_cation_nitride"),
+    ({"Si": 12, "N": 16}, "small_cation_nitride"),
+    ({"Ti": 16, "N": 16}, "small_cation_nitride"),
+    ({"Zr": 16, "N": 16}, "nitride"),   # large cation r(Zr)>=cutoff
+    ({"Hf": 16, "N": 16}, "nitride"),   # large cation
     # Carbides — split by cation chemistry (2026-05-11):
     # main-group / metalloid + C  → covalent_carbide (SiC, B4C)
     # d-block transition metal + C → transition_metal_carbide (TiC, WC, ZrC)
@@ -67,6 +103,60 @@ def test_classify_compound(composition, expected):
     assert _classify_compound(composition) == expected
 
 
+@pytest.mark.parametrize("composition,crystal_rho", [
+    ({"Th": 8, "O": 16}, 10.0),    # ThO2
+    ({"U": 8, "O": 16}, 10.97),    # UO2
+    ({"Pu": 8, "O": 16}, 11.5),    # PuO2
+])
+def test_actinide_dioxide_density(composition, crystal_rho):
+    """Actinide dioxides route to fluorite and land within ~15% of the crystal
+    density (regression: they previously fell to metal_oxide with an oversized
+    Cordero radius, under-predicting by ~60%)."""
+    from amorphgen.utils.radii import estimate_cell_length
+    from ase.data import atomic_numbers, atomic_masses
+    L = estimate_cell_length(composition)
+    m = sum(atomic_masses[atomic_numbers[s]] * n for s, n in composition.items())
+    rho = m * 1.66053906660 / L ** 3
+    assert abs(rho - crystal_rho) / crystal_rho < 0.15
+
+
+@pytest.mark.parametrize("composition,sym,expected", [
+    # Multivalent cation resolved once the partner is pinned
+    ({"Fe": 8, "Ti": 8, "O": 24}, "Fe", 2),   # ilmenite: Ti4+ forces Fe2+
+    ({"Fe": 8, "Ti": 8, "O": 24}, "Ti", 4),
+    ({"Sr": 8, "Ti": 8, "O": 24}, "Sr", 2),   # perovskite (was None)
+    ({"Sr": 8, "Ti": 8, "O": 24}, "Ti", 4),
+    ({"Ba": 8, "Ti": 8, "O": 24}, "Ti", 4),
+    ({"Li": 8, "Nb": 8, "O": 24}, "Li", 1),   # niobate (was None)
+    ({"Li": 8, "Nb": 8, "O": 24}, "Nb", 5),
+    ({"Mg": 8, "Al": 16, "O": 32}, "Al", 3),  # spinel (already worked)
+    # Mixed anions balance over every anion-former
+    ({"La": 8, "O": 8, "F": 8}, "La", 3),     # oxyfluoride LaOF
+    ({"Al": 23, "O": 27, "N": 5}, "Al", 3),   # oxynitride AlON
+    # Genuinely ambiguous two-variable system -> None (honest)
+    ({"Cu": 8, "Fe": 8, "O": 16}, "Cu", None),
+    ({"Cu": 8, "Fe": 8, "O": 16}, "Fe", None),
+    # Regression: cation absent from Shannon table still solves by balance
+    ({"Sb": 16, "O": 40}, "Sb", 5),
+    ({"In": 16, "O": 24}, "In", 3),
+])
+def test_infer_oxidation_state_mixed(composition, sym, expected):
+    from amorphgen.utils.radii import infer_oxidation_state
+    assert infer_oxidation_state(sym, composition) == expected
+
+
+def test_beo_covalent_density():
+    """BeO is a covalent network; its density should land near the measured
+    amorphous value (3.01 g/cm3), not the ~1.4 the ionic model gave."""
+    from amorphgen.utils.radii import estimate_cell_length
+    from ase.data import atomic_numbers, atomic_masses
+    comp = {"Be": 16, "O": 16}
+    L = estimate_cell_length(comp)
+    m = sum(atomic_masses[atomic_numbers[s]] * n for s, n in comp.items())
+    rho = m * 1.66053906660 / L ** 3
+    assert abs(rho - 3.01) / 3.01 < 0.10
+
+
 def test_classify_pure_sb_not_pnictide():
     """Pure Sb should not be classified as pnictide."""
     cls = _classify_compound({"Sb": 64})
@@ -74,8 +164,9 @@ def test_classify_pure_sb_not_pnictide():
 
 
 def test_classify_bn_is_nitride():
-    """BN should classify as nitride (N is nonmetal anion)."""
-    assert _classify_compound({"B": 16, "N": 16}) == "nitride"
+    """BN should classify as a nitride (N is nonmetal anion); B is a small
+    cation, so it routes to the small_cation_nitride sub-class."""
+    assert _classify_compound({"B": 16, "N": 16}) == "small_cation_nitride"
 
 
 def test_classify_default_fallback():

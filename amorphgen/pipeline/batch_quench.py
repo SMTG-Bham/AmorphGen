@@ -112,22 +112,31 @@ def run(snapshot_files: list[str],
     print(f"  Output: {work_dir}/")
     print(f"{bar}\n")
 
+    # v1.0.0rc2: when the caller passes exactly ONE snapshot (typical of
+    # SLURM array workflows where each task processes a single input),
+    # skip the per-run ``run_NNNN/`` subdir and write outputs directly
+    # to ``work_dir``. Multi-snapshot runs (typical local use) still get
+    # the ``run_NNNN/`` separation between runs.
+    single_run = len(selected) == 1
+
     results = []
     for i, snap_file in enumerate(selected):
         run_name = _run_dir_name(snap_file, fallback_idx=i)
-        run_dir = os.path.join(work_dir, run_name)
+        run_dir = work_dir if single_run else os.path.join(work_dir, run_name)
         final_output = os.path.join(run_dir, "final_amorphous.xyz")
         legacy_final = os.path.join(run_dir, "final_amorphous.extxyz")
 
         if resume and (os.path.isfile(final_output) or os.path.isfile(legacy_final)):
             existing = final_output if os.path.isfile(final_output) else legacy_final
-            print(f"  [{run_name}] Already complete -- skipping.")
+            label = work_dir if single_run else run_name
+            print(f"  [{label}] Already complete -- skipping.")
             results.append(read(existing))
             continue
 
         os.makedirs(run_dir, exist_ok=True)
+        target = work_dir if single_run else f"{run_name}/"
         print(f"\n  {'-' * 60}")
-        print(f"  Run {i+1:04d} / {len(selected)}  <-  {os.path.basename(snap_file)}  ->  {run_name}/")
+        print(f"  Run {i+1:04d} / {len(selected)}  <-  {os.path.basename(snap_file)}  ->  {target}")
         print(f"  {'-' * 60}")
 
         atoms = read(snap_file)

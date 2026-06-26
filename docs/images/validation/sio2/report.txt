@@ -1,0 +1,38 @@
+
+=================================================================
+  Structural Analysis: O32Si16 (48 atoms)
+  N structures: 20
+  Cutoff mode: auto (minsep)
+    O-O: 2.69 A
+    O-Si: 1.87 A
+    Si-Si: 2.44 A
+=================================================================
+
+  Density: 2.10 +/- 0.16 g/cm3
+
+  Bond distances:
+  Pair         Mean (A)      Std      Min      Max    Count
+  ------------------------------------------------------
+  O-O             2.610   0.060    2.349    2.688     2274
+  O-Si            1.640   0.024    1.525    1.864     2556
+  Si-Si           2.354   0.028    2.284    2.398       32
+
+  Bonding coordination numbers:
+  O-Si: mean=2.0 +/- 0.1 [1,3]
+    Distribution: CN=1: 0.6%, CN=2: 99.1%
+  Si-O: mean=4.0 +/- 0.1 [3,4]
+    Distribution: CN=3: 0.6%, CN=4: 99.4%
+
+  Non-bonded contacts:
+  O-O: mean=3.6 +/- 1.2 [0,7]
+    Distribution: CN=0: 0.6%, CN=1: 3.9%, CN=2: 13.8%, CN=3: 28.4%, CN=4: 33.3%, CN=5: 15.0%, CN=6: 4.5%, CN=7: 0.5%
+  Si-Si: mean=0.1 +/- 0.3 [0,2]
+    Distribution: CN=0: 90.3%, CN=1: 9.4%
+
+  Bond angles:
+  Triplet      Mean (deg)      Std    Count
+  ------------------------------------------
+  O-Si-O            109.5     6.3     1914
+  Si-O-Si           135.6    18.0      640
+
+=================================================================

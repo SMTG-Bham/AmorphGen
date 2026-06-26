@@ -3,15 +3,11 @@
 # For pre-generated amorphous structures (e.g. from --random-gen).
 # Skips stages 2 & 3 (heating) since structures are already disordered.
 #
-# Usage (single structure):
+# Usage:
 #   amorphgen structure.xyz --config hybrid_airss_mq.yaml --stages 1 4 5 6 7
-#
-# Usage (ensemble — recommended):
-#   amorphgen --hybrid-ensemble --input-dir random_inputs/ \
-#       --config hybrid_airss_mq.yaml -o hybrid_run/
+#   amorphgen structure.xyz --config hybrid_airss_mq.yaml --stages 1 4 5 6 7 --resume
 
 model: mace-mpa-0
-# Override --device on the CLI for non-CUDA systems (e.g. --device mps on Mac).
 device: cuda
 default_dtype: float64
 

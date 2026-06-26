@@ -115,9 +115,17 @@ def _add_arguments(p):
     g_calc.add_argument("-d", "--device", default="auto",
                         choices=["auto", "cuda", "cpu", "mps"],
                         help="Device.")
-    g_calc.add_argument("--default-dtype", default="float64",
-                        choices=["float32", "float64"],
-                        help="MLIP precision (float32 ~2x faster MD).")
+    g_calc.add_argument("--dtype", "--default-dtype",
+                        dest="default_dtype",
+                        default="auto",
+                        choices=["auto", "float32", "float64"],
+                        help="MLIP precision. 'auto' (default) picks the "
+                             "right value per backend: float32 for CHGNet "
+                             "(only option it supports) and classical "
+                             "potentials; float64 for MACE and SevenNet. "
+                             "Explicit 'float32' is ~2x faster MD but may "
+                             "fail for backends that require float64. "
+                             "(``--default-dtype`` accepted as legacy alias.)")
 
     # ── Optimisation (stages 1, 7; also random-gen --relax) ───────────────────
     g_opt = p.add_argument_group("optimisation")
@@ -131,7 +139,10 @@ def _add_arguments(p):
     g_opt.add_argument("-C", "--cell-filter", default="FrechetCellFilter",
                        choices=["FrechetCellFilter", "UnitCellFilter",
                                 "ExpCellFilter", "StrainFilter", "cubic", "none"],
-                       help="Cell filter ('cubic' = isotropic V; 'none' = fixed cell).")
+                       help="Cell filter ('cubic' = isotropic V; 'none' = fixed "
+                            "cell). Amorphous-input modes (--random-gen, "
+                            "--hybrid-ensemble, --batch-opt) default to 'cubic'; "
+                            "the melt-quench pipeline defaults to FrechetCellFilter.")
 
     # ── Melt-quench pipeline ──────────────────────────────────────────────────
     g_pipe = p.add_argument_group(
@@ -210,7 +221,8 @@ def _add_arguments(p):
                         help="Target CNs for coordination-aware placement, "
                              "e.g. Si=4,O=2 (auto-detected if omitted).")
     g_rand.add_argument("--no-sc", action="store_true",
-                        help="Disable coordination-aware placement.")
+                        help="Disable SC (Seed-Coordinate) coordination-aware "
+                             "placement; use plain random rejection sampling.")
     g_rand.add_argument("--dmax", default=None, metavar="SPEC",
                         help="Per-pair bonding cutoffs (auto: minsep * dmax-factor).")
     g_rand.add_argument("--dmax-factor", type=float, default=1.5,
@@ -256,8 +268,11 @@ def _add_arguments(p):
 
     # ── Analysis ──────────────────────────────────────────────────────────────
     g_an = p.add_argument_group("analyse", "Used with --analyse.")
-    g_an.add_argument("--cutoff", default="auto",
-                      help="Cutoff: number (A), 'auto', or 'auto-rdf'.")
+    g_an.add_argument("--cutoff", default="auto-rdf",
+                      help="Cutoff: number (A), 'auto-rdf' (default — first "
+                           "RDF minimum), or 'auto' (minsep from radii table; "
+                           "may truncate first peak for a-Si, a-HfO2, "
+                           "chalcogenides).")
     g_an.add_argument("--per-structure", action="store_true",
                       help="Per-structure comparison table.")
     g_an.add_argument("--save-report", default=None, metavar="FILE",
@@ -591,6 +606,39 @@ def _build_override(args, parser, explicit_only: bool = False) -> dict:
     return mapping
 
 
+def _apply_amorphous_cubic_default(args, override, ff_default):
+    """Default the cell filter to ``cubic`` for amorphous-input modes.
+
+    ``--hybrid-ensemble`` and ``--batch-opt`` operate on disordered/amorphous
+    structures, which are isotropic and should relax under a cubic (hydrostatic)
+    constraint rather than the anisotropic ``FrechetCellFilter`` parser default.
+    This mirrors the cubic default already applied to ``--random-gen``. The
+    7-stage melt-quench pipeline is intentionally *not* covered here, because it
+    starts from a (possibly non-cubic) crystal that a cubic constraint would
+    distort.
+
+    An explicit ``-C`` on the CLI, or a non-default ``cell_filter`` in YAML, is
+    preserved. Mutates and returns ``override``.
+    """
+    if not (getattr(args, "hybrid_ensemble", False)
+            or getattr(args, "batch_opt", False)):
+        return override
+    if args.cell_filter != ff_default:
+        return override  # user set -C explicitly -> respect it
+    if not isinstance(override, dict):
+        return override
+    for section in ("opt", "final_opt"):
+        sec = override.get(section)
+        if isinstance(sec, dict):
+            # None/absent (YAML didn't set) or the FrechetCellFilter parser
+            # default (no-YAML path) -> cubic; a real YAML choice is kept.
+            if sec.get("cell_filter") in (None, ff_default):
+                sec["cell_filter"] = "cubic"
+        else:
+            override[section] = {"cell_filter": "cubic"}
+    return override
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Convert mode (--convert)
 # ═════════════════════════════════════════════════════════════════════════════
@@ -869,6 +917,10 @@ def main():
         override = merge_config(yaml_cfg, cli_override)
     else:
         override = _build_override(args, _get_parser())
+
+    # Amorphous-input modes default to a cubic (isotropic) cell filter.
+    override = _apply_amorphous_cubic_default(
+        args, override, _get_parser().get_default("cell_filter"))
 
     # ── Rank structures from a random-gen log file ────────────────────────────
     if args.rank_from_log:

@@ -287,3 +287,48 @@ class TestConvertMode:
 
         _run_convert(A(), yaml_cfg=yaml_cfg)
         assert sorted(out_dir.glob("*.vasp"))
+
+
+class TestAmorphousCubicDefault:
+    """Amorphous-input modes (--hybrid-ensemble, --batch-opt) default the cell
+    filter to cubic; the melt-quench pipeline keeps FrechetCellFilter."""
+
+    FF = "FrechetCellFilter"
+
+    def _args(self, **kw):
+        from types import SimpleNamespace
+        base = dict(hybrid_ensemble=False, batch_opt=False, cell_filter=self.FF)
+        base.update(kw)
+        return SimpleNamespace(**base)
+
+    def _ov(self, opt=None, fin=None):
+        return {"opt": {"cell_filter": opt or self.FF},
+                "final_opt": {"cell_filter": fin or self.FF}}
+
+    def _apply(self, args, ov):
+        from amorphgen.cli import _apply_amorphous_cubic_default
+        return _apply_amorphous_cubic_default(args, ov, self.FF)
+
+    def test_hybrid_defaults_to_cubic(self):
+        r = self._apply(self._args(hybrid_ensemble=True), self._ov())
+        assert r["opt"]["cell_filter"] == "cubic"
+        assert r["final_opt"]["cell_filter"] == "cubic"
+
+    def test_batch_opt_defaults_to_cubic(self):
+        r = self._apply(self._args(batch_opt=True), self._ov())
+        assert r["opt"]["cell_filter"] == "cubic"
+
+    def test_explicit_cli_filter_is_respected(self):
+        r = self._apply(self._args(hybrid_ensemble=True, cell_filter="none"),
+                        self._ov(opt="none", fin="none"))
+        assert r["opt"]["cell_filter"] == "none"
+
+    def test_pipeline_mode_unchanged(self):
+        # neither hybrid nor batch-opt -> keep FrechetCellFilter default
+        r = self._apply(self._args(), self._ov())
+        assert r["opt"]["cell_filter"] == self.FF
+
+    def test_yaml_choice_preserved(self):
+        r = self._apply(self._args(hybrid_ensemble=True),
+                        self._ov(opt="ExpCellFilter", fin="ExpCellFilter"))
+        assert r["opt"]["cell_filter"] == "ExpCellFilter"

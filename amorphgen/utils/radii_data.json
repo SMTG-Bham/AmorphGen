@@ -2,9 +2,20 @@
   "description": "AmorphGen radii and bonding data for random structure generation",
   "sources": {
     "shannon_ionic_radii": "Shannon, R.D. Acta Cryst. A32, 751-767 (1976)",
-    "metallic_radii": "Greenwood & Earnshaw, Chemistry of the Elements (1997)",
-    "pauling_en": "Pauling, L. The Nature of the Chemical Bond (1960)",
-    "elemental_densities": "CRC Handbook of Chemistry and Physics"
+    "metallic_radii": "Greenwood & Earnshaw, Chemistry of the Elements, 2nd ed. (1997) — Appendix 4, CN=12 metallic radii (Goldschmidt convention)",
+    "pauling_en": "Allred, A. L. J. Inorg. Nucl. Chem. 17, 215-221 (1961) — revised Pauling electronegativity scale",
+    "elemental_densities": "CRC Handbook of Chemistry and Physics, 104th edition (2023)",
+    "element_classification": {
+      "convention": "Strict IUPAC (Red Book, 2005, Section IR-3)",
+      "nonmetals": "IUPAC, Nomenclature of Inorganic Chemistry (Red Book, 2005), Section IR-3 — H, He, C, N, O, F, Ne, P, S, Cl, Ar, Se, Br, Kr, I, Xe, At, Rn",
+      "metalloids": "IUPAC Red Book (2005), Section IR-3 — B, Si, Ge, As, Sb, Te",
+      "metals": "Implicit complement of NONMETALS and METALLOIDS — no stored list",
+      "borderline_notes": {
+        "Sn": "Treated as metal (IUPAC post-transition). a-Sn is metallic with liquid-like CN 6-8 (Bückel & Hilsch, Z. Phys. 138, 109 (1954); Bergmann, Phys. Rep. 27, 159 (1976)). alpha-Sn diamond-cubic semimetal only stable below 13 C and not a glass-former.",
+        "Se": "Treated as nonmetal (IUPAC). Chalcogenide covalency is handled by the Pauling-Δχ override in classify_bond and by the chalcogenide compound-class rule; metalloid promotion is redundant."
+      }
+    },
+    "covalent_radii_fallback": "Cordero, B. et al. Dalton Trans. 2008, 2832 — provided via ase.data.covalent_radii"
   },
   "shannon_ionic_radii": {
     "Li": [

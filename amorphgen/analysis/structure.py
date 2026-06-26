@@ -131,17 +131,36 @@ def compute_all_angles(atoms_list, max_cutoff, get_cutoff_fn,
 
         bonding_pairs = set()
         unique = sorted(set(atoms_list[0].get_chemical_symbols()))
-        # In multi-element systems we exclude same-element covalent
-        # pairs because those are anion-anion contacts (e.g.\ O-O in
-        # SiO2), not real bonds. In single-element systems (a-Si,
-        # a-C, a-Ge, ...) the same-element covalent pair *is* the
-        # bond, so we must keep it.
+        # Rules for which same-element pairs count as "bonded":
+        # - Single-element system (a-Si, a-C, a-Ge, Cu, ...): X-X IS
+        #   the bond (covalent or metallic), so keep it.
+        # - Multi-element system containing an anion (oxides, halides,
+        #   chalcogenides, ...): same-element pairs are second-shell
+        #   contacts mediated by the anion, NOT real first-shell bonds.
+        #   This excludes O-O in SiO2 (covalent same-element) AND
+        #   Hf-Hf in HfO2 (metallic same-element).
+        # - Pure-metal alloy (NiTi, CuZr, all elements metallic): X-X
+        #   IS a real bond (alloy chemistry), so keep it.
         single_element = len(unique) == 1
+        has_anion_bond = any(
+            _classify_bond(s1, s2) == "ionic"
+            for s1 in unique for s2 in unique if s1 != s2
+        )
         for s1 in unique:
             for s2 in unique:
                 bond_type = _classify_bond(s1, s2)
+                # Same-element pair in a multi-element system: keep
+                # only if pure-metal alloy (no anion to mediate
+                # second-shell contacts).
+                if s1 == s2 and not single_element:
+                    if bond_type == "metallic" and not has_anion_bond:
+                        bonding_pairs.add((s1, s2))
+                    # otherwise: skip (same-element non-bond in
+                    # an anion-containing compound)
+                    continue
+                # Different-element or single-element case:
                 if bond_type == "ionic" or bond_type == "metallic" or \
-                   (bond_type == "covalent" and (s1 != s2 or single_element)):
+                   bond_type == "covalent":
                     bonding_pairs.add((s1, s2))
                     bonding_pairs.add((s2, s1))
 

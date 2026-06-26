@@ -17,7 +17,10 @@ This module contains:
 
 from __future__ import annotations
 
+import itertools
 import logging
+from functools import lru_cache
+
 import numpy as np
 from ase.data import covalent_radii, atomic_numbers, atomic_masses
 
@@ -55,12 +58,22 @@ SHANNON_IONIC_RADII = {
     "Ti": {3: {6: 0.670}, 4: {4: 0.42, 6: 0.605}},
     "Zr": {4: {4: 0.59, 6: 0.720}},
     "Hf": {4: {4: 0.58, 6: 0.710}},
-    "V":  {3: {6: 0.640}, 5: {4: 0.355, 6: 0.540}},
-    "Nb": {5: {4: 0.48, 6: 0.640}},
+    "V":  {3: {6: 0.640}, 4: {6: 0.580}, 5: {4: 0.355, 6: 0.540}},
+    "Nb": {4: {6: 0.680}, 5: {4: 0.48, 6: 0.640}},
     "Ta": {5: {6: 0.640}},
-    "Cr": {3: {6: 0.615}, 6: {4: 0.26, 6: 0.440}},
+    "Cr": {3: {6: 0.615}, 4: {6: 0.550}, 6: {4: 0.26, 6: 0.440}},
     "Mo": {4: {6: 0.650}, 6: {4: 0.41, 6: 0.590}},
     "W":  {4: {6: 0.660}, 6: {4: 0.42, 6: 0.600}},
+    "Ir": {3: {6: 0.680}, 4: {6: 0.625}, 5: {6: 0.570}},
+    "Ru": {3: {6: 0.680}, 4: {6: 0.620}, 5: {6: 0.565}},
+    "Rh": {3: {6: 0.665}, 4: {6: 0.600}},
+    "Pd": {2: {4: 0.64, 6: 0.860}, 4: {6: 0.615}},
+    "Ag": {1: {6: 1.150}, 2: {6: 0.940}, 3: {6: 0.750}},
+    "Re": {4: {6: 0.630}, 6: {6: 0.550}, 7: {6: 0.530}},
+    "Os": {4: {6: 0.630}, 6: {6: 0.545}, 7: {6: 0.525}, 8: {6: 0.390}},
+    "Pt": {2: {4: 0.60, 6: 0.800}, 4: {6: 0.625}},
+    "Au": {3: {6: 0.850}, 5: {6: 0.570}},
+    "Hg": {2: {4: 0.96, 6: 1.020}},
     "Mn": {2: {4: 0.66, 6: 0.830}, 3: {6: 0.645}, 4: {4: 0.39, 6: 0.530}},
     "Fe": {2: {4: 0.63, 6: 0.780}, 3: {4: 0.49, 6: 0.645}},
     "Co": {2: {4: 0.58, 6: 0.745}, 3: {6: 0.610}},
@@ -71,8 +84,31 @@ SHANNON_IONIC_RADII = {
     "Y":  {3: {6: 0.900}},
     "La": {3: {6: 1.032}},
     "Ce": {3: {6: 1.010}, 4: {6: 0.870}},
+    # Lanthanides (Ln3+ CN6; plus Eu2+/Yb2+ and Pr4+/Tb4+ where relevant)
+    "Pr": {3: {6: 0.990}, 4: {6: 0.850}},
+    "Nd": {3: {6: 0.983}},
+    "Pm": {3: {6: 0.970}},
+    "Sm": {3: {6: 0.958}},
+    "Eu": {2: {6: 1.170}, 3: {6: 0.947}},
+    "Gd": {3: {6: 0.938}},
+    "Tb": {3: {6: 0.923}, 4: {6: 0.760}},
+    "Dy": {3: {6: 0.912}},
+    "Ho": {3: {6: 0.901}},
+    "Er": {3: {6: 0.890}},
+    "Tm": {3: {6: 0.880}},
+    "Yb": {2: {6: 1.020}, 3: {6: 0.868}},
+    "Lu": {3: {6: 0.861}},
     "Bi": {3: {6: 1.030}},
     "Sc": {3: {6: 0.745}},
+    # Actinide dioxide formers (An4+, Shannon CN6/CN8). Without these, ThO2 /
+    # UO2 / PuO2 had no tabulated 4+ radius, so (a) the MO2 dioxide test could
+    # not fire and they fell to metal_oxide, and (b) the radius fell back to the
+    # oversized Cordero value (Th 2.06 A) — together under-predicting their
+    # density by ~60%. With these entries they route to fluorite_dioxide (large
+    # 4+ cation) and use the proper ionic radius (ThO2  rho -> ~10.4 vs 10.0).
+    "Th": {4: {6: 0.940, 8: 1.050}},
+    "U":  {4: {6: 0.890, 8: 1.000}},
+    "Pu": {4: {6: 0.860, 8: 0.960}},
     # Metalloid in high oxidation state oxides (e.g. As2O5).
     # As(3+) is not tabulated by Shannon and Sb(III/V) Shannon radii
     # are too small (lone-pair distortion), giving unphysical sphere
@@ -83,7 +119,7 @@ SHANNON_IONIC_RADII = {
     "O":  {-2: {6: 1.400}},
     "S":  {-2: {6: 1.840}},
     "Se": {-2: {6: 1.980}},
-    "Te": {-2: {6: 2.210}},
+    "Te": {-2: {6: 2.210}, 4: {6: 0.970}, 6: {6: 0.560}},
     "F":  {-1: {6: 1.330}},
     "Cl": {-1: {6: 1.810}},
     "Br": {-1: {6: 1.960}},
@@ -105,7 +141,13 @@ METALLIC_RADII = {
     "Mo": 1.39, "W": 1.39, "Mn": 1.27, "Fe": 1.26, "Co": 1.25,
     "Ni": 1.24, "Cu": 1.28, "Zn": 1.37, "Cd": 1.52, "Y": 1.80,
     "La": 1.87, "Ce": 1.83, "Sc": 1.64, "Bi": 1.56, "Ge": 1.37,
-    "Si": 1.17,
+    "Si": 1.17, "Ir": 1.36,
+    "Ru": 1.34, "Rh": 1.34, "Pd": 1.37, "Ag": 1.44, "Re": 1.37,
+    "Os": 1.35, "Pt": 1.39, "Au": 1.44, "Hg": 1.51,
+    # Lanthanides (CN=12)
+    "Pr": 1.82, "Nd": 1.82, "Pm": 1.81, "Sm": 1.80, "Eu": 2.04,
+    "Gd": 1.80, "Tb": 1.78, "Dy": 1.77, "Ho": 1.77, "Er": 1.76,
+    "Tm": 1.75, "Yb": 1.94, "Lu": 1.72,
     # Metalloids (rhombohedral / metallic phase radii)
     "As": 1.39, "Sb": 1.59,
 }
@@ -130,7 +172,12 @@ PAULING_EN = {
     "Zr": 1.33, "Nb": 1.60, "Mo": 2.16, "Cd": 1.69, "In": 1.78,
     "Sn": 1.96, "Sb": 2.05, "Te": 2.10, "I": 2.66, "Cs": 0.79,
     "Ba": 0.89, "La": 1.10, "Ce": 1.12, "Hf": 1.30, "Ta": 1.50,
-    "W": 2.36, "Pb": 2.33, "Bi": 2.02, "Tl": 1.62,
+    "W": 2.36, "Pb": 2.33, "Bi": 2.02, "Tl": 1.62, "Ir": 2.20,
+    "Ru": 2.20, "Rh": 2.28, "Pd": 2.20, "Ag": 1.93, "Re": 1.90,
+    "Os": 2.20, "Pt": 2.28, "Au": 2.54, "Hg": 2.00,
+    "Pr": 1.13, "Nd": 1.14, "Pm": 1.13, "Sm": 1.17, "Eu": 1.20,
+    "Gd": 1.20, "Tb": 1.10, "Dy": 1.22, "Ho": 1.23, "Er": 1.24,
+    "Tm": 1.25, "Yb": 1.10, "Lu": 1.27,
 }
 
 # Conventional anion charges, used to infer the cation oxidation state
@@ -150,6 +197,91 @@ ANION_CHARGES = {
     "N":  -3,
     "H":  -1,  # treated as hydride; only valid for binary hydrides
 }
+
+
+# Cations that, although Shannon tabulates several oxidation states, take one
+# strongly dominant state in oxide / mixed-anion solids. Used ONLY to break a
+# tie when more than one charge-balanced assignment exists (never to force an
+# unbalanced one). Kept deliberately conservative: d0 / main-group cases with
+# little real ambiguity in compounds. Genuinely variable cations (Fe, Mn, Co,
+# Cu, Ce, Ag, ...) are omitted, so a compound with two such cations stays
+# ambiguous and resolves to None (honest) rather than guessing.
+_DOMINANT_OS = {
+    "Ti": 4, "Zr": 4, "Hf": 4, "Nb": 5, "Ta": 5, "V": 5,
+    "W": 6, "Mo": 6, "Cr": 3, "Sn": 4, "Pb": 2,
+    "Al": 3, "Ga": 3, "In": 3, "Sc": 3, "Y": 3,
+}
+
+
+@lru_cache(maxsize=512)
+def _solve_oxidation_states(comp_items: tuple) -> dict | None:
+    """Jointly assign integer oxidation states to every cation by charge
+    balance. Returns a {cation: state} dict, or None if the assignment is not
+    uniquely determined.
+
+    Works for arbitrary cation/anion mixtures: the anion charge is summed over
+    *all* anion-formers (so oxynitrides, oxyfluorides, oxysulfides balance the
+    same way as simple oxides). Cation states are enumerated from the Shannon
+    table; at most one cation may be absent from Shannon (it becomes the single
+    free variable solved by the remaining balance). When several assignments
+    balance, the one with the fewest :data:`_DOMINANT_OS` violations wins; if
+    that is still tied the system is genuinely ambiguous and None is returned.
+    """
+    composition = dict(comp_items)
+    total_neg = sum(n * ANION_CHARGES[s] for s, n in composition.items()
+                    if s in ANION_CHARGES)
+    if total_neg == 0:
+        return None
+    cation_charge = -total_neg  # total positive charge the cations must supply
+    cations = {s: n for s, n in composition.items() if s not in ANION_CHARGES}
+    if not cations:
+        return None
+
+    known, unknown = {}, []
+    for s in cations:
+        states = sorted(k for k in SHANNON_IONIC_RADII.get(s, {}) if k > 0)
+        if states:
+            known[s] = states
+        else:
+            unknown.append(s)
+    if len(unknown) > 1:
+        return None  # two un-tabulated cations -> underdetermined
+
+    known_syms = list(known)
+    sizes = 1
+    for s in known_syms:
+        sizes *= len(known[s])
+    if sizes > 20000:
+        return None  # guard against pathological enumeration
+
+    solutions = []
+    for combo in itertools.product(*(known[s] for s in known_syms)):
+        assign = dict(zip(known_syms, combo))
+        known_pos = sum(composition[s] * o for s, o in assign.items())
+        if unknown:
+            (u,) = unknown
+            rem = cation_charge - known_pos
+            if rem <= 0 or rem % composition[u] != 0:
+                continue
+            assign[u] = rem // composition[u]
+        elif known_pos != cation_charge:
+            continue
+        solutions.append(assign)
+
+    if not solutions:
+        return None
+    if len(solutions) == 1:
+        return solutions[0]
+
+    def penalty(sol):
+        viol = sum(1 for s, o in sol.items()
+                   if s in _DOMINANT_OS and o != _DOMINANT_OS[s])
+        return (viol, sum(sol.values()))
+
+    solutions.sort(key=penalty)
+    if penalty(solutions[0]) == penalty(solutions[1]):
+        return None  # still ambiguous after the dominant-state tie-break
+    return solutions[0]
 
 
 def infer_oxidation_state(sym: str, composition: dict) -> int | None:
@@ -187,41 +319,64 @@ def infer_oxidation_state(sym: str, composition: dict) -> int | None:
             return int(round(ox))
         return None
 
-    # Multi-cation case: try to assign a *unique* state for *sym* by
-    # subtracting fixed-state contributions from other cations whose
-    # Shannon table has only a single positive oxidation state.
-    fixed_pos = 0
-    unresolved = []
-    for s, n in cations.items():
-        states = SHANNON_IONIC_RADII.get(s, {})
-        positive = [k for k in states if k > 0]
-        if len(positive) == 1 and s != sym:
-            fixed_pos += n * positive[0]
-        elif s != sym:
-            unresolved.append(s)
-
-    if unresolved:
-        return None  # too ambiguous; let highest-positive fallback handle it
-
-    n_cat = cations[sym]
-    ox = (-total_neg - fixed_pos) / n_cat
-    if abs(ox - round(ox)) < 1e-6 and ox > 0:
-        return int(round(ox))
-    return None
+    # Multi-cation case: solve the whole system jointly. This resolves
+    # multivalent cations whose state is fixed once the other cations are
+    # pinned (FeTiO3 -> Fe2+/Ti4+, LiNbO3 -> Li+/Nb5+, SrTiO3 -> Sr2+/Ti4+),
+    # and handles mixed anions (oxynitrides, oxyfluorides) since the balance
+    # sums over every anion-former. Returns None when genuinely ambiguous.
+    solution = _solve_oxidation_states(tuple(sorted(composition.items())))
+    if solution is None:
+        return None
+    return solution.get(sym)
 
 
 # ==============================================================================
 # Element classification
 # ==============================================================================
+#
+# References for the three element-type sets used by ``classify_bond``:
+#
+#   IUPAC, "Nomenclature of Inorganic Chemistry — IUPAC Recommendations
+#       2005" (Red Book), RSC Publishing, ISBN 0-85404-438-8.  Section
+#       IR-3 — defines the standard nonmetal / metalloid / metal columns.
+#
+# AmorphGen follows IUPAC's classification exactly.  The METALS set is the
+# implicit complement of NONMETALS ∪ METALLOIDS — no separate list is
+# maintained, so any element outside those two sets (transition metals,
+# lanthanides, actinides, ...) is treated as metallic.
+#
+# Notes on borderline elements (intentionally NOT in METALLOIDS):
+#
+#   Sn  — IUPAC post-transition metal.  β-Sn (the room-T phase) is
+#         metallic.  Amorphous Sn is metallic with liquid-like CN ≈ 6–8
+#         and superconducting Tc ≈ 5–7 K, higher than crystalline β-Sn
+#         (Bückel & Hilsch, Z. Phys. 138, 109 (1954); Bergmann, Phys.
+#         Rep. 27, 159 (1976)).  α-Sn (diamond cubic, semimetal) only
+#         exists below 13 °C and is not a glass-former, so the metallic
+#         classification gives the correct behaviour for every case
+#         AmorphGen would generate (SnO2 rutile CN=6, β-Sn alloys,
+#         a-Sn).
+#   Se  — IUPAC nonmetal.  Although a-Se forms covalent chalcogenide
+#         chains, the Pauling-Δχ override in classify_bond already
+#         routes Ge–Se, As–Se etc. to "covalent" without requiring
+#         metalloid status; the chalcogenide compound-class rule
+#         likewise fires on the presence of S/Se/Te without checking
+#         metalloid membership.  Promoting Se to metalloid would be
+#         redundant.
 
+# Standard nonmetals + noble gases.  IUPAC Red Book (2005), Section IR-3.
+# Se is included here — although it sits on the chalcogen/metalloid border
+# and some textbooks promote it to metalloid, IUPAC's recommendation is
+# "nonmetal".  Se-Se covalency in trigonal Se and a-Se is handled by the
+# nonmetal-nonmetal rule in classify_bond (returns "covalent").
 NONMETALS = frozenset({
     "H", "He", "C", "N", "O", "F", "Ne", "P", "S", "Cl", "Ar",
-    "Br", "Kr", "I", "Xe", "At", "Rn",
+    "Se", "Br", "Kr", "I", "Xe", "At", "Rn",
 })
 
-# Source: IUPAC recognises B, Si, Ge, As, Sb, Te as metalloids.
-# Sn is included as it adopts tetrahedral bonding (alpha-Sn, SnO2).
-METALLOIDS = frozenset({"B", "Si", "Ge", "Sn", "As", "Sb", "Te", "Se"})
+# IUPAC's six recognised metalloids — B, Si, Ge, As, Sb, Te.
+# (IUPAC Red Book 2005, Section IR-3.)
+METALLOIDS = frozenset({"B", "Si", "Ge", "As", "Sb", "Te"})
 
 # Typical coordination numbers for coordination-aware placement.
 # Metalloids are always CN=4. For metals, CN depends on the anion context:
@@ -251,6 +406,39 @@ _TRANSITION_METAL_CARBIDE_CATIONS = frozenset({
     "Y",  "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd",         # 4d
     "Hf", "Ta", "W",  "Re", "Os", "Ir", "Pt",               # 5d
 })
+
+# Rutile-type dioxides (MO2 with a small, octahedrally-coordinated metal cation:
+# TiO2, VO2, CrO2, MnO2, NbO2, SnO2, RuO2, IrO2, OsO2, PtO2, ...) pack far more
+# densely than light oxides and get a higher packing factor (see
+# PACKING_FACTORS["rutile_dioxide"]).  They are identified *geometrically* by the
+# radius-ratio rule rather than an element list: a 4+ cation radius below
+# ~0.70 A (r/r_O < ~0.5) gives octahedral rutile/CaCl2-type packing, while larger
+# cations form 8-coordinate fluorite/baddeleyite oxides (ZrO2 0.72, HfO2 0.71,
+# CeO2 0.87) that stay `metal_oxide`.  Metalloid dioxides (SiO2, GeO2) are
+# excluded as covalent network formers; see _classify_compound.
+# Elements that form diatomic / small-molecule gases rather than covalent
+# solid networks — excluded from the pure-element semiconductor rule.
+_DIATOMIC_NONMETALS = frozenset({"H", "N", "O", "F", "Cl", "Br", "I"})
+
+_RUTILE_DIOXIDE_RMAX = 0.70      # A; Shannon 4+ CN6 cation-radius cutoff
+# Cation-radius cutoff (A) separating small-cation nitrides (denser packing,
+# placeable at higher pf) from large-cation nitrides (placement-limited by the
+# cation-cation distance, kept at the safe default pf).
+_SMALL_CATION_NITRIDE_RMAX = 0.70
+# Covalent rutile formers whose 4+ radius sits above the cutoff (lone-pair /
+# covalency), kept as explicit exceptions.
+_RUTILE_DIOXIDE_EXCEPTIONS = frozenset({"Pb"})
+
+# Cations whose oxide is a covalent tetrahedral network rather than an ionic
+# solid. Beryllium is the textbook case: Be2+ is so small and polarizing (and
+# not even tabulated by Shannon) that BeO is a covalent wurtzite network. The
+# ionic sphere model under-predicts its density by ~50% (1.42 vs the measured
+# amorphous 3.01 g/cm3); treating it with Cordero covalent radii for BOTH atoms
+# + an open-network packing factor recovers ~2.96. Kept as an explicit element
+# set (not a radius gate) so it cannot misfire on small-but-ionic cations such
+# as Al3+. Distinct from "covalent_oxide" (SiO2/GeO2/B2O3), whose metalloid
+# cations have usable small Shannon radii and stay on the ionic path.
+_COVALENT_OXIDE_CATIONS = frozenset({"Be"})
 
 
 def auto_target_cn(composition: dict) -> tuple[dict | None, int]:
@@ -339,6 +527,17 @@ def auto_target_cn(composition: dict) -> tuple[dict | None, int]:
         # Use CN=8 (BCC-like) with tolerance=2 for flexibility
         target_cn = {s: 8 for s in elems}
         return target_cn, 2
+
+    # Dioxides / high-valent oxides — use the crystallographic cation
+    # coordination (octahedral rutile, 8-coordinate fluorite) instead of the
+    # generic oxide CN=5. The anion CN follows from stoichiometry (e.g. Ir=6 in
+    # IrO2 gives O=3). Tolerance 1 allows the amorphous spread (e.g. Ir 5-6).
+    if cls == "rutile_dioxide":
+        return {s: 6 for s in cations}, 1   # octahedral MO2: TiO2, IrO2, RuO2...
+    if cls == "fluorite_dioxide":
+        return {s: 8 for s in cations}, 1   # 8-coordinate MO2: ZrO2, HfO2, CeO2
+    if cls == "high_valent_oxide":
+        return {s: 6 for s in cations}, 1   # octahedral M(V)/M(VI): Nb2O5, WO3...
 
     if not anions:
         # Pure metals — typical CN=12 (FCC/HCP) or 8 (BCC)
@@ -830,15 +1029,29 @@ def estimate_density(composition: dict, amorphous_factor: float = 0.80) -> float
 PACKING_FACTORS = {
     # Ionic — Shannon ionic radii
     "covalent_oxide":  0.50,  # SiO2, GeO2, B2O3 (network formers)
-    "metal_oxide":     0.52,  # In2O3, TiO2, Al2O3, Ga2O3
+    "metal_oxide":     0.52,  # In2O3, Al2O3, Ga2O3 (and fluorite ZrO2/HfO2/CeO2)
+    "rutile_dioxide":  0.66,  # TiO2, SnO2, RuO2, IrO2, OsO2 — dense rutile-type MO2
+    "fluorite_dioxide": 0.63,  # ZrO2, HfO2, CeO2 — 8/7-coordinate fluorite/baddeleyite MO2
+    "high_valent_oxide": 0.60,  # V2O5, Nb2O5, Ta2O5, Sb2O5, MoO3, WO3 — cation OS>=5, dense
     "halide":          0.58,  # Li2ZrCl6, LiF
-    "nitride":         0.52,  # AlN, GaN, Si3N4
+    "nitride":         0.52,  # large-cation nitrides (ZrN, HfN, ScN). Kept low:
+                              # the cation-cation distance limits placement, so a
+                              # denser cell fails to generate. Densities run low;
+                              # use --target-density for these.
+    "small_cation_nitride":   0.62,  # small-cation nitrides (AlN, GaN, Si3N4, TiN) —
+                              # small cations fit the N sublattice, so they pack
+                              # denser and still place. Cation-radius-gated.
     "hydride":         0.55,  # LiH, MgH2, NaAlH4
     # Covalent — Cordero covalent radii
     "group_iv":        0.30,  # Si, Ge, C (tetrahedral covalent network)
+    "elemental_semiconductor": 0.28,  # a-Se, a-Te, a-As, a-Sb, a-P (chain/layer, Cordero)
     "pnictide":        0.32,  # GaAs, InP, InAs (III-V compounds)
     "chalcogenide":    0.30,  # ZnS, CdTe, GeTe (II-VI / IV-VI)
     "boride":          0.50,  # TiB2, MgB2, ZrB2
+    "covalent_network_oxide": 0.35,  # BeO — covalent wurtzite oxide network;
+                                     # Cordero radii for both atoms (Be 0.96,
+                                     # O 0.66) + 0.35 -> rho ~2.96 vs measured
+                                     # amorphous 3.01 g/cm3 (ionic model: 1.42)
     # Carbides split by cation chemistry (2026-05-11) — see
     # _TRANSITION_METAL_CARBIDE_CATIONS and _classify_compound for the routing.
     "covalent_carbide":     0.32,  # SiC, B4C — Cordero radii, open network
@@ -869,8 +1082,8 @@ def _classify_compound(composition: dict) -> str:
     Classify a compound by material class for packing factor selection.
 
     Returns one of: "group_iv", "pnictide", "chalcogenide",
-    "covalent_oxide", "metal_oxide", "halide", "nitride",
-    "carbide", "hydride", "boride", "alloy", "default".
+    "covalent_oxide", "covalent_network_oxide", "metal_oxide", "halide",
+    "nitride", "carbide", "hydride", "boride", "alloy", "default".
     """
     elems = set(composition.keys())
     has_metal = any(s not in NONMETALS and s not in METALLOIDS for s in elems)
@@ -884,6 +1097,18 @@ def _classify_compound(composition: dict) -> str:
     all_metalloid = all(s in METALLOIDS for s in elems)
     if all_metalloid and not chalcogens and not pnictogens:
         return "group_iv"
+
+    # Pure single-element covalent / semimetal solids that group-IV doesn't
+    # catch (a-Se, a-Te, a-As, a-Sb, a-P, a-S). A one-element system has no
+    # electronegativity difference, so it bonds covalently — it must use Cordero
+    # covalent radii, not the ionic "highest positive" fallback, which gives
+    # nonsense (e.g. pure As → As(5+) radius → ~150 g/cm3). This is the bonding
+    # analogue of the radius rule: ΔEN = 0 ⇒ covalent.
+    if len(elems) == 1:
+        (only_el,) = elems
+        if ((only_el in NONMETALS or only_el in METALLOIDS)
+                and only_el not in _DIATOMIC_NONMETALS):
+            return "elemental_semiconductor"
 
     # Pnictides: III-V compounds (GaAs, InP, InAs, GaSb)
     # Must have at least one non-pnictogen element (the group III metal)
@@ -900,6 +1125,45 @@ def _classify_compound(composition: dict) -> str:
 
     # Oxides
     if "O" in anions:
+        cations = elems - anions
+        # Anomalous small-cation covalent oxides (BeO): the cation is too small
+        # and polarizing for the ionic model, so the oxide is a covalent
+        # tetrahedral network. Routed before the ionic branches; uses Cordero
+        # radii (see _radius_for_density) + a low packing factor.
+        if cations and all(c in _COVALENT_OXIDE_CATIONS for c in cations):
+            return "covalent_network_oxide"
+        # High-valent oxides (all cations in oxidation state >= 5): V2O5, Nb2O5,
+        # Ta2O5, Sb2O5, MoO3, WO3, ... Small, highly-charged cations form short
+        # M-O bonds and pack denser than the generic oxide factor predicts, so
+        # they get a higher packing factor. Restricted to metal/metalloid
+        # cations (excludes molecular P2O5 / SO3 etc.).
+        if cations and all(c not in NONMETALS for c in cations):
+            os_list = [infer_oxidation_state(c, composition) for c in cations]
+            if os_list and all(o is not None and o >= 5 for o in os_list):
+                return "high_valent_oxide"
+        # Rutile-type dioxides (MO2) pack much denser than light oxides; route
+        # them to a higher packing factor. Identified by the radius-ratio rule:
+        # a metal MO2 whose 4+ cation radius is below the rutile/fluorite cutoff
+        # (or a known covalent exception, e.g. PbO2). Fluorite dioxides
+        # (ZrO2, HfO2, CeO2 — larger cations) and metalloid oxides (SiO2, GeO2)
+        # fall through to metal_oxide / covalent_oxide.
+        metal_cations = [c for c in cations
+                         if c not in NONMETALS and c not in METALLOIDS]
+        if cations and len(metal_cations) == len(cations):
+            n_cat = sum(composition[c] for c in cations)
+            if composition.get("O", 0) == 2 * n_cat:
+                # MO2 dioxide: split rutile (small cation, octahedral) vs
+                # fluorite/baddeleyite (large cation, 8/7-coordinate) by the 4+
+                # cation radius, with PbO2 as a covalent rutile exception.
+                r4 = {c: get_ionic_radius(c, cn=6, oxidation_state=4)
+                      for c in cations}
+                if all(c in _RUTILE_DIOXIDE_EXCEPTIONS or
+                       (r4[c] is not None and r4[c] < _RUTILE_DIOXIDE_RMAX)
+                       for c in cations):
+                    return "rutile_dioxide"
+                if all(r4[c] is not None and r4[c] >= _RUTILE_DIOXIDE_RMAX
+                       for c in cations):
+                    return "fluorite_dioxide"
         if has_metal:
             return "metal_oxide"
         elif has_metalloid:
@@ -909,8 +1173,19 @@ def _classify_compound(composition: dict) -> str:
     if anions & {"Cl", "Br", "I", "F"}:
         return "halide"
 
-    # Nitrides
+    # Nitrides — small-cation nitrides (AlN, GaN, Si3N4, TiN, ...) pack densely
+    # and tolerate a higher packing factor; large-cation nitrides (ZrN, HfN,
+    # ScN) are placement-limited by the cation-cation distance, so they keep the
+    # safe default. Gate on cation radius (the same radius-rule idea as the
+    # rutile/fluorite dioxide split).
     if "N" in anions:
+        cations = elems - anions
+        crs = [get_ionic_radius(c, cn=6,
+                                oxidation_state=infer_oxidation_state(c, composition))
+               for c in cations]
+        if cations and all(cr is not None and cr < _SMALL_CATION_NITRIDE_RMAX
+                           for cr in crs):
+            return "small_cation_nitride"
         return "nitride"
 
     # Carbides — split by cation chemistry
@@ -956,14 +1231,23 @@ def _radius_for_density(sym: str, cls: str,
     * Metallic alloys -> Goldschmidt metallic radii (close-packed
       atomic centres).
     """
-    ionic_classes = {"covalent_oxide", "metal_oxide", "halide",
-                     "nitride", "hydride"}
-    covalent_classes = {"group_iv", "pnictide", "chalcogenide",
-                        "boride", "covalent_carbide"}
+    ionic_classes = {"covalent_oxide", "metal_oxide", "rutile_dioxide",
+                     "fluorite_dioxide", "high_valent_oxide", "halide", "nitride",
+                     "small_cation_nitride", "hydride"}
+    covalent_classes = {"group_iv", "elemental_semiconductor", "pnictide",
+                        "chalcogenide", "boride", "covalent_carbide",
+                        "covalent_network_oxide"}
     # Infer oxidation state from charge balance when a composition is
     # supplied; falls back to "highest positive" inside get_ionic_radius
     # if inference returns None.
     ox = infer_oxidation_state(sym, composition) if composition else None
+    # Antimony is oxidation-state split: Sb(V) is d0 and octahedral with no lone
+    # pair, so it uses its small ionic radius like Nb(V)/Ta(V) (dense oxides such
+    # as Sb2O5). Sb(III) has a stereochemically active lone pair giving open
+    # structures (Sb2O3) where the small ionic radius badly over-predicts the
+    # density, so it falls back to the Cordero covalent radius.
+    if sym == "Sb":
+        return 0.60 if ox == 5 else covalent_radii[atomic_numbers["Sb"]]
     if cls in ionic_classes:
         r = get_ionic_radius(sym, cn=6, oxidation_state=ox)
         if r is None:

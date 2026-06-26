@@ -28,7 +28,7 @@ AmorphGen requires Python ≥ 3.10. Install all dependencies including test tool
 pip install -e ".[all,dev]"
 ```
 
-This installs all MLIP backends (MACE, CHGNet, SevenNet) plus pytest.
+This installs all MLFF backends (MACE, CHGNet, M3GNet) plus pytest.
 
 ## Running tests
 
@@ -59,7 +59,7 @@ Open an issue on GitHub with:
 - Steps to reproduce the issue
 - The full error traceback
 - Your Python version and OS
-- Which MLIP backend you are using (MACE, CHGNet, SevenNet)
+- Which MLFF backend you are using (MACE, CHGNet, M3GNet)
 
 ### Suggesting features
 
@@ -76,43 +76,17 @@ Open an issue on GitHub describing:
 4. Commit with a clear message describing the change
 5. Push to your fork and open a pull request against `main`
 
-### Adding a new MLIP backend
+### Adding a new MLFF backend
 
 AmorphGen is designed to be model-agnostic. To add a new backend:
 
-1. In `amorphgen/utils/calculators.py`:
-   - Add a `_load_<backend>(model, device, **kwargs)` function (see
-     the existing `_load_mace`, `_load_chgnet`, `_load_sevennet` for
-     reference).
-   - Wire it into the dispatch inside `get_calculator()`.
-   - Add model names to the appropriate registry constant (e.g.
-     `MACE_FOUNDATION_MODELS`, `SEVENNET_MODELS`).
-2. Add an optional dependency group in `pyproject.toml`.
-3. Add dispatch / smoke tests in `test/test_calculators.py` (see
-   `TestBackendRouting` for the pattern).
-4. Update the README with the new backend.
-
-### Tutorials
-
-Notebook tutorials live under `Tutorials/`. New tutorials should:
-
-- Use a clear `TN_<topic>/tutorial_N_<topic>.ipynb` directory layout.
-- Be self-contained (input files alongside the notebook).
-- Run end-to-end on CPU within ~15 minutes where possible, or document
-  the GPU / wall-time requirement at the top of the notebook.
-
-### Documentation
-
-Sphinx docs live under `docs/`. To build locally:
-
-```bash
-cd docs
-make html
-# output in docs/_build/html/
-```
-
-User-facing changes (new flags, new modes) should be reflected in the
-relevant guide (`docs/guides/*.md`).
+1. Add a new section in `amorphgen/utils/calculators.py`:
+   - Add the backend to `_detect_backend()`
+   - Create a `_get_<backend>_calculator()` function
+   - Add model names to the appropriate registry
+2. Add an optional dependency group in `pyproject.toml`
+3. Add tests in `test/test_utils.py` for backend detection
+4. Update the README and `paper.md` with the new backend
 
 ## Project structure
 
@@ -120,31 +94,18 @@ relevant guide (`docs/guides/*.md`).
 amorphgen/
 ├── cli.py                  ← command-line interface
 ├── configs/
-│   ├── default_config.py   ← all default parameters
-│   └── yaml_config.py      ← YAML loader + schema validation
+│   └── default_config.py   ← all default parameters
 ├── pipeline/
 │   ├── run_pipeline.py     ← MeltQuenchPipeline orchestrator
 │   ├── opt_cell.py         ← Stages 1 & 7 (optimisation)
 │   ├── equilibrate.py      ← Stages 2, 4, 6 (equilibration)
 │   ├── melt_cell.py        ← Stage 3 (heat ramp)
 │   ├── quench.py           ← Stage 5 (cool ramp)
-│   ├── batch_quench.py     ← batch / hybrid / MQ-ensemble runner
+│   ├── batch_quench.py     ← batch quench workflow
 │   └── random_gen.py       ← random structure placement
-├── analysis/
-│   ├── analyser.py         ← StructureAnalyser entry point
-│   ├── rdf.py              ← radial distribution functions
-│   ├── structure.py        ← coordination, bond angles
-│   ├── rings.py            ← ring statistics
-│   ├── voronoi.py          ← Voronoi tessellation
-│   └── energy.py           ← per-structure energy ranking
 └── utils/
     ├── calculators.py      ← multi-backend calculator factory
-    ├── classical.py        ← Lennard-Jones, Buckingham+Coulomb
-    ├── radii.py            ← Shannon / Cordero / Goldschmidt radii,
-    │                          bond + material-class classifiers,
-    │                          minsep + density estimators
-    ├── common.py           ← MD-dynamics builder, trajectory I/O
-    └── equilibration.py    ← block-average convergence diagnostics
+    └── common.py           ← shared utilities
 ```
 
 ## Code of conduct

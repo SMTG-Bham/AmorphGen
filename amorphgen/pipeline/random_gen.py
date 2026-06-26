@@ -43,6 +43,16 @@ from ..utils.radii import (
 
 logger = logging.getLogger(__name__)
 
+# Auto-expand on placement failure. Random sequential placement cannot reach the
+# highest equilibrium densities (a dense covalent network such as BeO sits above
+# the random-close-packing limit for hard-sphere placement at its crystal
+# density). Rather than shrink the physically-correct minimum separations, the
+# generator expands the cell a few percent and retries; a subsequent MLIP
+# relaxation densifies back to the target. Mirrors batch_random's cell-expansion
+# retry so the bare generate_random API is robust too.
+_MAX_EXPAND_RETRIES = 4
+_EXPAND_FACTOR = 1.05            # cell-edge growth per retry (~14% density drop / 3x)
+
 
 # ==============================================================================
 # Internal helpers
@@ -149,9 +159,20 @@ def _auto_dmax(minsep: dict, target_cn: dict, factor: float = 1.5) -> dict:
             continue
 
         bond_type = _classify_bond(s1, s2)
-        if bond_type == "ionic" or bond_type == "covalent":
-            # Primary bonding (M-O, M-Cl, Si-Ge)
+        if bond_type == "ionic":
+            # Primary ionic bonding (M-O, M-N, M-Cl)
             dmax[pair] = dist * factor
+        elif bond_type == "covalent":
+            # Covalent cross-element bonds are primary bonds and count toward
+            # CN in covalent networks/semiconductors (Si-Ge in a-SiGe, Ga-As in
+            # GaAs, Si-C in SiC). But when an anion is present, a covalent pair
+            # between two *cations* (e.g. Si-Al in SiAlON, both centring O/N
+            # polyhedra) is not a real bond — the cations coordinate the anions,
+            # not each other — so suppress it, exactly as metallic M-M is
+            # suppressed in ionic compounds.
+            both_cations = s1 not in NONMETALS and s2 not in NONMETALS
+            if not (has_anion and both_cations):
+                dmax[pair] = dist * factor
         elif bond_type == "metallic" and not has_anion:
             # M-M bonds in alloys/pure metals (no anion context)
             # Don't add M-M dmax in ionic compounds (In-In in In2O3)
@@ -324,6 +345,144 @@ def _repair_undercoordination(
     return final_under
 
 
+def _repair_min_cn(
+    positions: np.ndarray,
+    n_placed: int,
+    placed_type_idx: np.ndarray,
+    cn_array: np.ndarray,
+    floor_arr: np.ndarray,
+    target_cn_arr: np.ndarray,
+    cn_tolerance: int,
+    minsep_sq_table: np.ndarray,
+    dmax_sq_table: np.ndarray,
+    L: float,
+    pbc: bool,
+    max_iter: int,
+    rng: np.random.Generator,
+) -> int:
+    """Post-placement repair targeting the hard CN *floor* (no dangling bonds).
+
+    Distinct from :func:`_repair_undercoordination`, which drives atoms toward
+    their *target* CN. Here the objective is only to eliminate atoms below
+    their ``floor_arr`` value (e.g. anions < 2, cations < 3), while the
+    over-coordination guard still uses the real ``target_cn_arr`` so the move
+    cannot push a neighbour past its target + tolerance.
+
+    Greedy single-atom relocation: each iteration moves one below-floor atom
+    into the bonding shell of an atom that can still accept a bond, accepting
+    the move only if the total below-floor count strictly drops. Returns the
+    final below-floor count.
+    """
+    def _below(cn):
+        return int(np.sum(cn[:n_placed] < floor_arr[placed_type_idx[:n_placed]]))
+
+    def _attained(cn):
+        # Atoms at or above their target CN (or target+0; target is the goal).
+        return int(np.sum(cn[:n_placed] >= np.minimum(
+            target_cn_arr[placed_type_idx[:n_placed]], 999)))
+
+    minsep_table = np.sqrt(minsep_sq_table)
+    dmax_table = np.sqrt(dmax_sq_table)
+    target_dist_table = 0.5 * (minsep_table + dmax_table)
+
+    initial = _below(cn_array)
+    if initial == 0:
+        return 0
+
+    all_idx = np.arange(n_placed)
+    accepted = 0
+    attempts_per_atom = 2500
+    # Atoms that have failed their budget in `_STUCK_AFTER` separate passes are
+    # skipped thereafter — truly saturated environments, not worth re-searching.
+    _STUCK_AFTER = 3
+    fail_count = {}
+
+    # Up to `max_iter` passes over the below-floor set. Each below-floor atom
+    # gets a budgeted search for a position bonded to >= floor acceptors.
+    for _pass in range(max_iter):
+        below_idx = np.where(
+            cn_array[:n_placed] < floor_arr[placed_type_idx[:n_placed]])[0]
+        below_idx = [i for i in below_idx
+                     if fail_count.get(int(i), 0) < _STUCK_AFTER]
+        if len(below_idx) == 0:
+            break
+        improved = False
+
+        for idx in below_idx:
+            if cn_array[idx] >= floor_arr[placed_type_idx[idx]]:
+                continue  # already fixed earlier this pass
+            floor_i = int(floor_arr[placed_type_idx[idx]])
+            others = all_idx[all_idx != idx]
+            dm_sq = dmax_sq_table[placed_type_idx[idx], placed_type_idx[others]]
+            ms_sq = minsep_sq_table[placed_type_idx[idx], placed_type_idx[others]]
+
+            # Acceptor seeds: atoms that can still take a bond to idx's type.
+            can_accept = (cn_array[others]
+                          < target_cn_arr[placed_type_idx[others]] + cn_tolerance)
+            seed_pool = others[(dm_sq > 0) & can_accept]
+            if len(seed_pool) == 0:
+                continue
+
+            # Old bonded set (whose CN to decrement once idx moves).
+            d_vec_o = positions[idx] - positions[others]
+            if pbc:
+                d_vec_o -= L * np.round(d_vec_o / L)
+            old_bonded = (dm_sq > 0) & (np.sum(d_vec_o * d_vec_o, axis=1) <= dm_sq)
+
+            for _att in range(attempts_per_atom):
+                partner = int(rng.choice(seed_pool))
+                p_type = placed_type_idx[partner]
+                ms = float(np.sqrt(minsep_sq_table[placed_type_idx[idx], p_type]))
+                dm = float(dmax_table[placed_type_idx[idx], p_type])
+                d = rng.standard_normal(3)
+                d /= np.linalg.norm(d)
+                new_pos = positions[partner] + d * rng.uniform(ms, dm)
+                new_pos = new_pos - L * np.floor(new_pos / L) if pbc else new_pos
+
+                d_vec = new_pos - positions[others]
+                if pbc:
+                    d_vec -= L * np.round(d_vec / L)
+                d_sq = np.sum(d_vec * d_vec, axis=1)
+                if np.any(d_sq < ms_sq):
+                    continue
+                new_bonded = (dm_sq > 0) & (d_sq <= dm_sq)
+                if int(np.sum(new_bonded)) < floor_i:
+                    continue  # still below floor — keep searching
+
+                cn_trial = cn_array.copy()
+                cn_trial[others[old_bonded]] -= 1
+                cn_trial[others[new_bonded]] += 1
+                cn_trial[idx] = int(np.sum(new_bonded))
+
+                nbr_t = target_cn_arr[placed_type_idx[others[new_bonded]]]
+                if np.any(cn_trial[others[new_bonded]] > nbr_t + cn_tolerance):
+                    continue
+                if cn_trial[idx] > target_cn_arr[placed_type_idx[idx]] + cn_tolerance:
+                    continue
+                if _below(cn_trial) >= _below(cn_array):
+                    continue  # don't create a new floor violation elsewhere
+                if _attained(cn_trial) < _attained(cn_array):
+                    continue  # don't drop a neighbour below its target CN
+
+                positions[idx] = new_pos
+                cn_array[:] = cn_trial
+                accepted += 1
+                improved = True
+                break
+            else:
+                # Budget exhausted without a fix this pass — count it; after a
+                # few failed passes the atom is treated as saturated and skipped.
+                fail_count[int(idx)] = fail_count.get(int(idx), 0) + 1
+
+        if not improved:
+            break
+
+    final = _below(cn_array)
+    logger.info("  Floor-repair: %d moves accepted; below-floor %d -> %d",
+                accepted, initial, final)
+    return final
+
+
 # ==============================================================================
 # Structure generation
 # ==============================================================================
@@ -343,6 +502,9 @@ def generate_random(
     cn_tolerance: int | None = None,
     dmax_factor: float = 1.5,
     repair_iters: int = 0,
+    min_cn: int | dict[str, int] | None = None,
+    repair_floor: bool = True,
+    _expand_attempt: int = 0,
 ) -> Atoms:
     """
     Generate a single random structure.
@@ -403,6 +565,17 @@ def generate_random(
         networks (a-Si, a-Ge) where greedy placement leaves many atoms
         below target CN.  Default 0 (off).  See
         :func:`_repair_undercoordination` for caveats.
+    min_cn : int or dict, optional
+        Hard *minimum* coordination floor enforced during placement — no
+        atom should end up with fewer than this many bonds (avoids dangling
+        bonds / terminal atoms). Placement uses best-candidate acceptance:
+        the first position that gives the new atom >= its floor is taken,
+        otherwise the most-coordinated valid position is kept (so placement
+        never fails more often than before). ``int`` applies one floor to
+        all elements; ``dict`` sets per-element floors. If ``None`` (default),
+        auto-assigns **anions -> 2, cations -> 3** (each capped at the
+        element's target CN). Only active in coordination-aware mode
+        (``target_cn`` set / not ``--no-sc``).
 
     Returns
     -------
@@ -440,7 +613,10 @@ def generate_random(
         minsep = _default_minsep(symbols, scale=minsep_scale,
                                 target_cn=target_cn)
 
-    # Coordination-aware mode: auto-generate dmax from minsep if not provided
+    # Coordination-aware mode ("SC" = Seed-Coordinate): place each atom in the
+    # bonding shell of an under-coordinated seed (Youn et al., Comput. Mater.
+    # Sci. 2014 "Seed-Coordinate-Anneal"; the Anneal step is AmorphGen's
+    # separate relax / melt-quench stage). Auto-generate dmax from minsep here.
     use_sc = target_cn is not None
     if use_sc and dmax is None:
         dmax = _auto_dmax(minsep, target_cn, factor=dmax_factor)
@@ -481,6 +657,26 @@ def generate_random(
         for s, cn_val in target_cn.items():
             if s in _sym_to_idx:
                 _target_cn_arr[_sym_to_idx[s]] = cn_val
+
+    # Minimum-CN floor table (hard lower bound, avoids dangling bonds).
+    # Auto: anions -> 2, cations -> 3; each capped at the element's target CN.
+    _min_cn_arr = np.zeros(_n_types, dtype=int)
+    if use_sc:
+        for s in unique_syms:
+            idx = _sym_to_idx[s]
+            if isinstance(min_cn, dict):
+                floor = int(min_cn.get(s, 0))
+            elif min_cn is not None:
+                floor = int(min_cn)
+            else:                                   # auto default
+                floor = 2 if s in NONMETALS else 3
+            # never demand more than the target CN (e.g. CN-2 cations)
+            tgt = _target_cn_arr[idx]
+            if tgt < 999:
+                floor = min(floor, int(tgt))
+            _min_cn_arr[idx] = max(0, floor)
+        logger.info("Min-CN floor per element: %s",
+                    {s: int(_min_cn_arr[_sym_to_idx[s]]) for s in unique_syms})
 
     # Track integer type index for each placed atom
     placed_type_idx = np.empty(n_atoms, dtype=int)
@@ -622,10 +818,44 @@ def generate_random(
                 break
 
         if not placed:
+            # Auto-expand the cell and retry rather than fail outright. Dense
+            # covalent networks (BeO) cannot be placed at their full equilibrium
+            # density with physical hard-sphere minseps; expanding a few percent
+            # makes room while keeping the minseps physical. A later relaxation
+            # densifies back to the target. (See _MAX_EXPAND_RETRIES note above.)
+            if _expand_attempt < _MAX_EXPAND_RETRIES:
+                new_L = L * _EXPAND_FACTOR
+                logger.info(
+                    "  [auto-expand] placement stalled at L=%.2f A "
+                    "(%d/%d placed); retrying at L=%.2f A "
+                    "(physical minsep kept; relaxation densifies)",
+                    L, n_placed, n_atoms, new_L,
+                )
+                return generate_random(
+                    composition,
+                    cell_length_ang=new_L,
+                    target_density=None,
+                    density_scale=density_scale,
+                    minsep=minsep,
+                    minsep_scale=minsep_scale,
+                    seed=seed,
+                    max_attempts_per_atom=max_attempts_per_atom,
+                    pbc=pbc,
+                    # Preserve SC on/off: a dict keeps it on; {} keeps --no-sc off.
+                    target_cn=target_cn if target_cn is not None else {},
+                    dmax=dmax,
+                    cn_tolerance=cn_tolerance,
+                    dmax_factor=dmax_factor,
+                    repair_iters=repair_iters,
+                    min_cn=min_cn,
+                    repair_floor=repair_floor,
+                    _expand_attempt=_expand_attempt + 1,
+                )
             raise RuntimeError(
                 f"Could not place atom {i+1}/{n_atoms} ({sym}) after "
-                f"{max_attempts_per_atom} attempts.\n"
-                f"  Cell: {L:.2f} A, placed {n_placed}/{n_atoms} atoms so far.\n"
+                f"{max_attempts_per_atom} attempts and {_MAX_EXPAND_RETRIES} "
+                f"cell expansions (final cell {L:.2f} A, "
+                f"{n_placed}/{n_atoms} placed).\n"
                 f"  Suggestions:\n"
                 f"    1. Use --target-density with a lower value\n"
                 f"    2. Reduce minsep via --minsep flag\n"
@@ -640,7 +870,30 @@ def generate_random(
             elapsed = _now - _t_start
             logger.info("  Placed %d/%d atoms (%.1f s)", n_placed, n_atoms, elapsed)
 
-    # Optional repair pass for under-coordinated atoms (experimental).
+    # Hard-floor repair: eliminate dangling bonds (CN below the per-species
+    # floor). On by default; cheap and targeted (only relocates below-floor
+    # atoms). Skipped if every atom already meets its floor.
+    if use_sc and repair_floor and np.any(_min_cn_arr > 0):
+        n_below = int(np.sum(
+            cn_array[:n_placed] < _min_cn_arr[placed_type_idx[:n_placed]]))
+        if n_below > 0:
+            _repair_min_cn(
+                positions=positions,
+                n_placed=n_placed,
+                placed_type_idx=placed_type_idx,
+                cn_array=cn_array,
+                floor_arr=_min_cn_arr,
+                target_cn_arr=_target_cn_arr,
+                cn_tolerance=cn_tolerance,
+                minsep_sq_table=_minsep_sq_table,
+                dmax_sq_table=_dmax_sq_table,
+                L=L,
+                pbc=pbc,
+                max_iter=12,         # passes over the below-floor set
+                rng=rng,
+            )
+
+    # Optional repair pass toward *target* CN (experimental, off by default).
     if use_sc and repair_iters > 0:
         _repair_undercoordination(
             positions=positions,
@@ -767,6 +1020,14 @@ def batch_random(
     ase_format, ext = _FORMAT_MAP[output_format]
 
     os.makedirs(output_dir, exist_ok=True)
+    # v1.0.0rc2: initial and optimised structures now live in their own
+    # subdirectories so that `amorphgen --analyse --input-dir
+    # random_structures/random_opt` works without any *_opt.vasp filter.
+    initial_dir = os.path.join(output_dir, "random_initial")
+    opt_dir     = os.path.join(output_dir, "random_opt")
+    os.makedirs(initial_dir, exist_ok=True)
+    if relax:
+        os.makedirs(opt_dir, exist_ok=True)
     paths = []
 
     # ── Resume support: scan for existing completed structures ──
@@ -795,14 +1056,15 @@ def batch_random(
             except Exception:
                 pass  # corrupted metadata, proceed anyway
 
-        # Scan for completed files
+        # Scan for completed files (resume against the new subdir layout
+        # introduced in v1.0.0rc2)
         for idx in range(n_structures):
             if relax:
                 check_file = os.path.join(
-                    output_dir, f"random_{idx:04d}_opt{ext}")
+                    opt_dir, f"random_{idx:04d}_opt{ext}")
             else:
                 check_file = os.path.join(
-                    output_dir, f"random_{idx:04d}{ext}")
+                    initial_dir, f"random_{idx:04d}{ext}")
             if os.path.isfile(check_file) and os.path.getsize(check_file) > 0:
                 # Validate ASE can read it
                 try:
@@ -927,6 +1189,7 @@ def batch_random(
         failures = 0
         retry_level = 0
         current_minsep = dict(kwargs.get("minsep") or minsep_log)
+        base_density_scale = float(kwargs.get("density_scale", 1.0))
 
         def _reduce_mm_minsep(ms, reduction):
             """Reduce same-element minsep values by a factor."""
@@ -989,23 +1252,23 @@ def batch_random(
             except RuntimeError:
                 failures += 1
                 if failures >= max_retries:
-                    if retry_level < 3:
-                        retry_level += 1
-                        reduction = 0.05 * retry_level
-                        new_minsep = _reduce_mm_minsep(current_minsep, reduction)
-                        kwargs["minsep"] = new_minsep
-                        changed = []
-                        for pair in sorted(new_minsep):
-                            s1, s2 = pair.split("-")
-                            if s1 == s2 and s1 not in NONMETALS:
-                                changed.append(f"{pair}={new_minsep[pair]:.2f}")
-                        _log(f"  [Auto-retry] Reducing M-M minsep by "
-                             f"{reduction*100:.0f}%: {', '.join(changed)}", lf)
-                        failures = 0
+                    failures = 0
+                    retry_level += 1
+                    # Escalation ladder. Cell expansion comes first — a failed
+                    # placement usually means the auto-density estimate is too
+                    # tight (e.g. size-mismatched alloys like CuZr), and giving
+                    # atoms more room is more physical than squeezing them.
+                    # Only then fall back to reducing M-M minsep.
+                    if retry_level <= 3:
+                        factor = [0.92, 0.85, 0.78][retry_level - 1]
+                        kwargs["density_scale"] = base_density_scale * factor
+                        _log(f"  [Auto-retry] Expanding cell "
+                             f"(density_scale x{factor:.2f} -> "
+                             f"{kwargs['density_scale']:.3f}); cell ~"
+                             f"{(1.0/factor)**(1/3.0)*100-100:.0f}% larger", lf)
                         continue
-                    elif retry_level < 4:
-                        retry_level += 1
-                        reduction = 0.05 * retry_level
+                    elif retry_level <= 6:
+                        reduction = 0.05 * (retry_level - 3)
                         new_minsep = _reduce_mm_minsep(current_minsep, reduction)
                         kwargs["minsep"] = new_minsep
                         changed = []
@@ -1015,21 +1278,21 @@ def batch_random(
                                 changed.append(f"{pair}={new_minsep[pair]:.2f}")
                         _log(f"  [Auto-retry] Reducing M-M minsep by "
                              f"{reduction*100:.0f}%: {', '.join(changed)}", lf)
-                        failures = 0
                         continue
                     else:
                         _log(f"  [Warning] Skipping structure {generated + 1} "
-                             f"after {max_retries} attempts x {retry_level+1} "
+                             f"after {max_retries} attempts x {retry_level} "
                              f"retries. Consider using --target-density.", lf)
-                        failures = 0
                         retry_level = 0
+                        kwargs["density_scale"] = base_density_scale
                         generated += 1
                 continue
 
             failures = 0
 
-            # Save unrelaxed structure
-            fname = os.path.join(output_dir, f"random_{generated:04d}{ext}")
+            # Save unrelaxed structure (always in random_initial/)
+            fname = os.path.join(initial_dir,
+                                 f"random_{generated:04d}{ext}")
             if ase_format == "vasp":
                 sorted_atoms_ur = atoms[atoms.numbers.argsort()]
                 write(fname, sorted_atoms_ur, format=ase_format, sort=True)
@@ -1042,7 +1305,7 @@ def batch_random(
                 atoms.calc = calc
                 OptimizerClass = _get_optimizer_class(optimizer)
                 target = _build_cell_filter(atoms, cell_filter)
-                opt_logfile = os.path.join(output_dir,
+                opt_logfile = os.path.join(opt_dir,
                                            f"random_{generated:04d}_opt.log")
 
                 # Detailed logging (consistent with batch-opt)
@@ -1097,9 +1360,9 @@ def batch_random(
                 density_f = compute_density_gcm3(atoms)
                 _log(f"    Final density: {density_f:.2f} g/cm3", lf)
 
-                # Save relaxed structure as _opt
+                # Save relaxed structure as _opt (in random_opt/)
                 fname_opt = os.path.join(
-                    output_dir, f"random_{generated:04d}_opt{ext}")
+                    opt_dir, f"random_{generated:04d}_opt{ext}")
                 if ase_format == "vasp":
                     sorted_atoms_r = atoms[atoms.numbers.argsort()]
                     write(fname_opt, sorted_atoms_r, format=ase_format,

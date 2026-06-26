@@ -13,6 +13,10 @@
 *.cif
 *.POSCAR
 POSCAR
+# Track curated example / validation structures even though *.xyz is ignored.
+!examples/**/*.xyz
+!examples/**/*.extxyz
+!examples/**/*.cif
 CONTCAR
 OUTCAR
 XDATCAR
@@ -113,4 +117,39 @@ random_*/
 *.png
 !docs/**/*.png
 test_mace_overnight.py
-Tutorials/
+
+# ======================
+# Local diagnostic / one-off scripts
+# (kept on disk for revival, not shipped)
+# ======================
+diag_*.py
+sync_*.sh
+
+# ======================
+# Local code-review / session reports
+# (timestamped Markdown audits that don't belong upstream)
+# ======================
+review_report/
+CODE_REVIEW_*.md
+AUDIT_*.md
+STRENGTHS_AUDIT_*.md
+NEW_USER_REVIEW_*.md
+CARRY_FORWARD.md
+
+# ======================
+# Tutorial run outputs
+# (underscore-prefixed dirs are large auto-generated outputs)
+# ======================
+Tutorials/_*/
+
+# ======================
+# LaTeX scratch
+# ======================
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.synctex.gz
+*.toc
+texput.log

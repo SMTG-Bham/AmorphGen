@@ -12,7 +12,7 @@ from copy import deepcopy
 from ase.io import read, write
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 
-from ..utils import (get_calculator,
+from ..utils import (get_calculator, make_cubic,
                      build_md_dynamics, attach_outputs, merge_config)
 from ..configs import DEFAULT_CONFIG
 
@@ -42,9 +42,10 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
         atoms = deepcopy(atoms_or_file)
         print("[Stage 3] Using provided Atoms object")
 
-    # NOTE: cubic cell reshape moved to start of Stage 4 (eq_high), so
-    # that the reshape acts on a fully molten liquid rather than a
-    # partially-melted structure.  See amorphgen.pipeline.equilibrate.
+    # Optional cubic reshape
+    if cfg.get("make_cubic", True):
+        atoms = make_cubic(atoms)
+        print("[Stage 3] Cell reshaped to cubic")
 
     if calc is None:
         device = global_cfg.get("device", "cuda")
@@ -66,6 +67,9 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
         timestep=cfg.get("timestep", 1.0),
         friction=cfg.get("friction", 0.01),
         ttime=cfg.get("ttime", 25.0),
+        npt_method=cfg.get("npt_method", "berendsen"),
+        taup_factor=cfg.get("taup_factor", 10.0),
+        compressibility_GPa=cfg.get("compressibility_GPa", 100.0),
     )
 
     logfile = cfg.get("log_file", "stage3_melt.log")

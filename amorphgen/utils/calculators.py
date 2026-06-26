@@ -53,12 +53,14 @@ MACE_FOUNDATION_MODELS: dict[str, str] = {
     "mace-mpa-0":         "medium-mpa-0",
     "mace-mpa-0-medium":  "medium-mpa-0",
     # ── MACE-OMAT-0 (Open Materials — excellent phonons, ASL license) ────────
-    "mace-omat-0-small":  "https://github.com/ACEsuit/mace-mp/releases/download/mace_omat_0/mace-omat-0-small.model",
-    "mace-omat-0-medium": "https://github.com/ACEsuit/mace-mp/releases/download/mace_omat_0/mace-omat-0-medium.model",
-    "mace-omat-0":        "https://github.com/ACEsuit/mace-mp/releases/download/mace_omat_0/mace-omat-0-medium.model",
+    # Use mace_mp's own short names (not raw URLs): mace_mp downloads them,
+    # whereas MACECalculator(model_paths=URL) cannot fetch a URL.
+    "mace-omat-0-small":  "small-omat-0",
+    "mace-omat-0-medium": "medium-omat-0",
+    "mace-omat-0":        "medium-omat-0",
     # ── MACE-MATPES (PBE / r2SCAN, ASL license) ─────────────────────────────
-    "mace-matpes-pbe":    "https://github.com/ACEsuit/mace-foundations/releases/download/mace_matpes_0/MACE-matpes-pbe-omat-ft.model",
-    "mace-matpes-r2scan": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_matpes_0/MACE-matpes-r2scan-omat-ft.model",
+    "mace-matpes-pbe":    "mace-matpes-pbe-0",
+    "mace-matpes-r2scan": "mace-matpes-r2scan-0",
     # ── MACE-MH (multi-domain: bulk + surface + molecule) ────────────────────
     "mace-mh-0":          "https://github.com/ACEsuit/mace-foundations/releases/download/mace_mh_1/mace-mh-0.model",
     "mace-mh-1":          "https://github.com/ACEsuit/mace-foundations/releases/download/mace_mh_1/mace-mh-1.model",
@@ -145,6 +147,16 @@ def _load_mace(model: str, device: str, model_path: str | None = None,
             "See: https://github.com/ACEsuit/mace"
         )
 
+    # Multi-head models (mace-mh-*) bundle several functionals in one file and
+    # require a `head` to pick which one. Accept a `model:head` syntax, e.g.
+    # 'mace-mh-1:omat_pbe'. Guard on '://' so raw URLs aren't split on their
+    # scheme colon. An explicit head=... kwarg takes precedence.
+    head = kwargs.pop("head", None)
+    if head is None and ":" in model and "://" not in model:
+        model, head = model.split(":", 1)
+    if head is not None:
+        kwargs["head"] = head
+
     # Custom / local model file
     if model_path is not None:
         if not os.path.isfile(model_path):
@@ -158,12 +170,16 @@ def _load_mace(model: str, device: str, model_path: str | None = None,
     # Resolve short-name → internal string / URL
     resolved = MACE_FOUNDATION_MODELS.get(model, model)
 
-    if resolved.startswith("https://") or os.path.isfile(resolved):
-        print(f"[MACE] Loading from URL/path: {resolved[:80]}")
+    if os.path.isfile(resolved):
+        # Local .model file
+        print(f"[MACE] Loading local model file: {resolved}")
         return MACECalculator(model_paths=resolved, device=device, **kwargs)
-    else:
-        print(f"[MACE] Loading foundation model '{model}' → mace_mp(model='{resolved}')")
-        return mace_mp(model=resolved, device=device, **kwargs)
+    # Short name (e.g. 'medium-mpa-0') OR a URL — mace_mp resolves names and
+    # downloads URLs to its cache. (MACECalculator cannot fetch a URL, which is
+    # why passing URLs to it previously broke the omat/matpes/mh/omol models.)
+    _head = f", head='{head}'" if head else ""
+    print(f"[MACE] Loading foundation model '{model}' → mace_mp(model='{resolved[:70]}'{_head})")
+    return mace_mp(model=resolved, device=device, **kwargs)
 
 def _load_chgnet(device: str, default_dtype: str | None = None,
                  **kwargs) -> Any:
@@ -375,6 +391,11 @@ def _detect_backend(model: str) -> str:
     """
     lower = model.lower()
 
+    # Strip a 'model:head' suffix (multi-head MACE, e.g. 'mace-mh-1:omat_pbe')
+    # for classification only — guard on '://' so URLs aren't split.
+    if ":" in lower and "://" not in lower:
+        lower = lower.split(":", 1)[0]
+
     # Classical pair potentials
     if lower in CLASSICAL_MODELS:
         return "classical"
@@ -486,14 +507,27 @@ def get_calculator(
         except ImportError:
             device = "cpu"
 
+    # ── Resolve "auto" default_dtype per backend ──────────────────────────
+    # CHGNet only supports float32; passing float64 raises NotImplementedError
+    # in _load_chgnet. MACE / SevenNet default to float64 (the established
+    # precision in their training and published benchmarks). Classical
+    # potentials use float32 (faster, accuracy doesn't matter for LJ /
+    # Buckingham force evaluations).
+    backend = _detect_backend(model) if model_path is None else "mace"
+    requested_dtype = kwargs.get("default_dtype", "auto")
+    if requested_dtype == "auto":
+        kwargs["default_dtype"] = (
+            "float32" if backend in ("chgnet", "classical") else "float64"
+        )
+
     # ── Custom model path → MACE backend ──────────────────────────────────
     if model_path is not None:
         return _load_mace(model, device=device, model_path=model_path, **kwargs)
 
     # ── Route by backend ──────────────────────────────────────────────────
-    backend = _detect_backend(model)
-
     if backend == "classical":
+        # Classical loaders don't take default_dtype yet — drop it
+        kwargs.pop("default_dtype", None)
         return _load_classical(model, device=device, **kwargs)
     elif backend == "mace":
         return _load_mace(model, device=device, **kwargs)

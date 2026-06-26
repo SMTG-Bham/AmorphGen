@@ -40,7 +40,6 @@ _VALID_TOP_KEYS = {
     "random_gen": dict,
     "analysis": dict,
     "classical_params": dict,
-    "convert": dict,
 }
 
 # Stage sub-keys and expected types.
@@ -52,40 +51,51 @@ _STAGE_SCHEMA = {
         "cell_filter": str,
     },
     "eq_premelt": {
-        "ensemble": str, "T": (int, float), "steps": int,
+        "ensemble": str, "npt_method": str,
+        "T": (int, float), "steps": int,
         "timestep": (int, float), "friction": (int, float),
         "ttime": (int, float),
+        "taup_factor": (int, float),
+        "compressibility_GPa": (int, float),
     },
     "melt": {
-        "ensemble": str, "T_start": (int, float), "T_end": (int, float),
+        "ensemble": str, "npt_method": str,
+        "T_start": (int, float), "T_end": (int, float),
         "T_step": (int, float), "steps_per_T": int, "rate": (int, float, type(None)),
         "timestep": (int, float), "friction": (int, float),
         "ttime": (int, float), "make_cubic": bool,
+        "taup_factor": (int, float),
+        "compressibility_GPa": (int, float),
     },
     "eq_high": {
-        "ensemble": str, "T": (int, float), "steps": int,
+        "ensemble": str, "npt_method": str,
+        "T": (int, float), "steps": int,
         "timestep": (int, float), "friction": (int, float),
-        "ttime": (int, float), "make_cubic": bool,
+        "ttime": (int, float),
+        "taup_factor": (int, float),
+        "compressibility_GPa": (int, float),
     },
     "quench": {
-        "ensemble": str, "T_start": (int, float), "T_end": (int, float),
+        "ensemble": str, "npt_method": str,
+        "T_start": (int, float), "T_end": (int, float),
         "T_step": (int, float), "steps_per_T": int, "rate": (int, float, type(None)),
         "timestep": (int, float), "friction": (int, float),
         "ttime": (int, float),
+        "taup_factor": (int, float),
+        "compressibility_GPa": (int, float),
     },
     "eq_low": {
-        "ensemble": str, "T": (int, float), "steps": int,
+        "ensemble": str, "npt_method": str,
+        "T": (int, float), "steps": int,
         "timestep": (int, float), "friction": (int, float),
         "ttime": (int, float),
-    },
-    "convert": {
-        "input": str,
-        "format": str,
-        "output_dir": (str, type(None)),
+        "taup_factor": (int, float),
+        "compressibility_GPa": (int, float),
     },
 }
 
 _VALID_ENSEMBLES = {"NVT", "NPT", "nvt", "npt"}
+_VALID_NPT_METHODS = {"berendsen", "mtk", "parrinello-rahman"}
 _VALID_DEVICES = {"cuda", "cpu", "mps", "auto"}
 
 
@@ -140,9 +150,19 @@ def _validate_config(cfg: dict, path: str) -> tuple[list[str], list[str]]:
                 f"Use 'NVT' or 'NPT'."
             )
 
+        # Validate npt_method values (only meaningful for NPT, but
+        # tolerated as a no-op in NVT stages so users can leave it set
+        # while flipping ensembles).
+        if "npt_method" in stage and stage["npt_method"] not in _VALID_NPT_METHODS:
+            errors.append(
+                f"{stage_name}.npt_method = '{stage['npt_method']}' is invalid. "
+                f"Choose from: {', '.join(sorted(_VALID_NPT_METHODS))}."
+            )
+
         # Validate positive numeric values
         for nkey in ("T", "T_start", "T_end", "steps", "steps_per_T",
-                     "timestep", "fmax", "max_steps"):
+                     "timestep", "fmax", "max_steps",
+                     "taup_factor", "compressibility_GPa"):
             if nkey in stage and isinstance(stage[nkey], (int, float)):
                 if stage[nkey] <= 0:
                     errors.append(

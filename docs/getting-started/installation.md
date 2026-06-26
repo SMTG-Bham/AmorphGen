@@ -70,12 +70,12 @@ pip install -e ".[mace,chgnet,dev]"
 
 ## Backend compatibility
 
-| Backend | PyPI package | GPU support |  
-|---------|-------------|-------------| 
-| MACE    | `mace-torch` | CUDA ✅ |  
-| CHGNet  | `chgnet`    | CUDA ✅ |  
-| SevenNet | `sevenn`   | CUDA ✅ |  
-| Classical (LJ, Buckingham) | built-in | N/A |  
+| Backend | PyPI package | GPU support | Mac (Apple Silicon) |
+|---------|-------------|-------------|---------------------|
+| MACE    | `mace-torch` | CUDA ✅ | CPU + MPS ✅ |
+| CHGNet  | `chgnet`    | CUDA ✅ | CPU + MPS ✅ |
+| SevenNet | `sevenn`   | CUDA ✅ | CPU + MPS ✅ |
+| Classical (LJ, Buckingham) | built-in | N/A | CPU ✅ |
 
 ## HPC setup (SLURM)
 
