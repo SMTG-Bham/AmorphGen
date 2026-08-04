@@ -13,7 +13,34 @@ from ase.build import bulk
 from amorphgen.utils.common import (
     make_cubic, resolve_ramp, merge_config,
     MDLogger, TrajectoryWriter, TRAJ_FORMATS,
+    resolve_device,
 )
+
+
+class TestResolveDevice:
+    """resolve_device: 'auto' resolution and the torch-free fallback."""
+
+    def test_explicit_device_passes_through(self):
+        assert resolve_device("cpu") == "cpu"
+        assert resolve_device("cuda") == "cuda"
+        assert resolve_device("mps") == "mps"
+
+    def test_auto_resolves_to_cuda_or_cpu(self):
+        # With or without torch installed, auto must land on a concrete device.
+        assert resolve_device("auto") in ("cuda", "cpu")
+
+    def test_auto_without_torch_falls_back_to_cpu(self, monkeypatch):
+        """The torch-free install contract: auto -> cpu, no ImportError."""
+        import builtins
+        real_import = builtins.__import__
+
+        def no_torch(name, *args, **kwargs):
+            if name == "torch" or name.startswith("torch."):
+                raise ImportError("torch not installed (simulated)")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", no_torch)
+        assert resolve_device("auto") == "cpu"
 from amorphgen.utils.calculators import (
     _detect_backend, MACE_FOUNDATION_MODELS, MODEL_DESCRIPTIONS,
 )
@@ -225,3 +252,35 @@ class TestModelRegistry:
 
     def test_default_model_in_registry(self):
         assert "mace-mpa-0" in MACE_FOUNDATION_MODELS
+
+
+class TestResumeHelpers:
+    """Shared frame-resume helpers (single home for the resume invariants)."""
+
+    def test_ramp_resume_position(self):
+        from amorphgen.utils.common import ramp_resume_position
+        assert ramp_resume_position(0, 60, 4) == (0, 0)       # fresh
+        assert ramp_resume_position(100, 60, 4) == (1, 40)    # mid-segment
+        assert ramp_resume_position(120, 60, 4) == (2, 0)     # on boundary
+        assert ramp_resume_position(240, 60, 4) == (4, 0)     # complete
+        assert ramp_resume_position(999, 60, 4) == (4, 0)     # clamped
+
+    def test_needs_velocity_init(self):
+        import numpy as np
+        from ase.build import bulk
+        from amorphgen.utils.common import needs_velocity_init
+        atoms = bulk("Cu", "fcc", a=3.6, cubic=True)
+        assert needs_velocity_init(atoms, 0)              # fresh run
+        assert needs_velocity_init(atoms, 100)            # resumed, no momenta
+        atoms.set_momenta(np.ones((len(atoms), 3)))
+        assert not needs_velocity_init(atoms, 100)        # resumed w/ momenta
+
+    def test_traj_log_interval_shared(self):
+        """attach_outputs and read_md_checkpoint must share ONE interval."""
+        import inspect
+        from amorphgen.utils.common import (attach_outputs, read_md_checkpoint,
+                                            TRAJ_LOG_INTERVAL)
+        assert (inspect.signature(attach_outputs).parameters["interval"].default
+                == TRAJ_LOG_INTERVAL)
+        assert (inspect.signature(read_md_checkpoint).parameters["interval"].default
+                == TRAJ_LOG_INTERVAL)

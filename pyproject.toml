@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "amorphgen"
-version = "1.0.0rc2"
+version = "1.0.0rc3"
 description = "Amorphous structure generation via melt-quench MD and random placement"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "Chaiyawat Kaewmeechai", email = "chaiyawatkaewmeechai@gmail.com"},
+    {name = "Chaiyawat Kaewmeechai", email = "c.kaewmeechai@bham.ac.uk"},
 ]
 keywords = [
     "amorphous",
@@ -37,12 +37,19 @@ classifiers = [
 ]
 
 # Core dependencies — always needed
+# Deliberately torch-free: random generation, analysis, and the classical
+# (LJ / Buckingham, NumPy-vectorised) pipelines run without PyTorch. Torch
+# arrives transitively with any MLIP extra ([mace], [chgnet], [sevennet]);
+# device="auto" resolves to "cpu" when torch is absent (utils.common.
+# resolve_device). Keeps the bare install ~50 MB instead of ~2 GB.
 dependencies = [
     "ase>=3.22",
     "numpy>=1.24",
     "scipy>=1.10",
-    "torch>=2.0",
     "pyyaml>=6.0",
+    # Plotting is part of the base analysis story (--analyse --save-plot on a
+    # bare install); matplotlib is ML-free and modest (~30 MB).
+    "matplotlib>=3.5",
 ]
 
 [project.optional-dependencies]
@@ -67,10 +74,10 @@ sevennet = [
     "sevenn>=0.10",
 ]
 
-# Analysis and plotting
-analysis = [
-    "matplotlib>=3.5",
-]
+# DEPRECATED alias (matplotlib moved into the core dependencies; see
+# DESIGN_MLIP_OPTIONAL.md D6). Kept as a no-op for one release so existing
+# `pip install amorphgen[analysis]` lines keep working; remove after v1.1.
+analysis = []
 
 # Convenience bundles
 # `[all]` covers the conflict-free combo (MACE + CHGNet + analysis); for
@@ -79,7 +86,6 @@ all = [
     "mace-torch>=0.3",
     "e3nn>=0.4.4,<0.5",
     "chgnet>=0.3",
-    "matplotlib>=3.5",
 ]
 # Everything in one env -- only works if you skip MACE foundation models
 # or use a mace-torch build that supports e3nn>=0.5. Read docs first.
@@ -87,12 +93,10 @@ full = [
     "mace-torch>=0.3",
     "chgnet>=0.3",
     "sevenn>=0.10",
-    "matplotlib>=3.5",
 ]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
-    "matplotlib>=3.5",
 ]
 docs = [
     "sphinx",

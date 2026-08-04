@@ -429,6 +429,69 @@ def _detect_backend(model: str) -> str:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Backend availability (fail-fast support — see DESIGN_MLIP_OPTIONAL.md, D2/D4)
+# ═════════════════════════════════════════════════════════════════════════════
+
+# Import name and pip-extra per MLIP backend. Single source of backend
+# knowledge: the CLI fail-fast, --list-models markers, and error messages all
+# derive from these two dicts.
+_BACKEND_IMPORT = {"mace": "mace", "chgnet": "chgnet", "sevennet": "sevenn"}
+_BACKEND_EXTRA = {"mace": "mace", "chgnet": "chgnet", "sevennet": "sevennet"}
+
+
+class BackendNotInstalledError(ImportError):
+    """The requested model's MLIP backend package is not installed."""
+
+
+def backend_available(backend: str) -> bool:
+    """True if *backend*'s python package is importable.
+
+    ``"classical"`` is always available (NumPy implementation in the base
+    install). Does not import the package — checks the module spec only, so
+    it is cheap and safe on torch-free installs.
+    """
+    if backend == "classical":
+        return True
+    mod = _BACKEND_IMPORT.get(backend)
+    if mod is None:
+        return False
+    import importlib.util
+    return importlib.util.find_spec(mod) is not None
+
+
+def available_backends() -> dict[str, bool]:
+    """Installed-state of every backend, e.g. ``{"mace": False, "chgnet": True,
+    "sevennet": False, "classical": True}``."""
+    return {b: backend_available(b) for b in (*_BACKEND_IMPORT, "classical")}
+
+
+def require_backend(model: str, model_path: str | None = None) -> str:
+    """Fail-fast check that *model*'s backend is importable.
+
+    Returns the backend name when available. Raises
+    :class:`BackendNotInstalledError` with a curated, copy-pasteable message
+    otherwise (and propagates :class:`ValueError` for unrecognised models).
+    The CLI calls this BEFORE any setup work; :func:`get_calculator` keeps its
+    own lazy import errors as the API-level backstop.
+    """
+    backend = "mace" if model_path is not None else _detect_backend(model)
+    if backend_available(backend):
+        return backend
+    extra = _BACKEND_EXTRA[backend]
+    installed = [b for b, ok in available_backends().items() if ok]
+    raise BackendNotInstalledError(
+        f"Model '{model}' needs the {backend.upper()} backend, which is not "
+        f"installed.\n"
+        f"  Install it:             pip install \"amorphgen[{extra}]\"\n"
+        f"  Installed backends:     {', '.join(installed)}\n"
+        f"  Torch-free alternative: classical potentials (--model lj or "
+        f"buckingham,\n"
+        f"                          with classical_params in a YAML config)\n"
+        f"  See all models:         amorphgen --list-models"
+    )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Public API
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -579,27 +642,43 @@ def get_mace_calculator(
 
 
 def list_models() -> None:
-    """Print all available foundation models to stdout."""
+    """Print the full model registry with per-backend installed markers.
+
+    Shows every known model regardless of what is installed (discovery),
+    with a marker per backend section saying whether it is usable right now
+    and, if not, the exact install command (diagnosis). See
+    DESIGN_MLIP_OPTIONAL.md (D4).
+    """
     bar = "-" * 72
     print(f"\n{bar}")
     print("  Available foundation models  (pass as --model NAME)")
     print(bar)
 
+    avail = available_backends()
+
+    def _marker(backend: str) -> str:
+        if backend == "classical":
+            return "[built-in]"
+        if avail.get(backend):
+            return "[installed]"
+        return f'[not installed -> pip install "amorphgen[{_BACKEND_EXTRA[backend]}]"]'
+
     # Group by backend
     sections = [
-        ("MACE", {k: v for k, v in MODEL_DESCRIPTIONS.items()
-                  if k.startswith("mace-")}),
-        ("CHGNet", {k: v for k, v in MODEL_DESCRIPTIONS.items()
-                    if k == "chgnet"}),
-        ("SevenNet", {k: v for k, v in MODEL_DESCRIPTIONS.items()
-                      if k == "sevennet" or k.startswith("7net")}),
-        ("Classical (requires classical_params in YAML)", {
+        ("MACE", "mace", {k: v for k, v in MODEL_DESCRIPTIONS.items()
+                          if k.startswith("mace-")}),
+        ("CHGNet", "chgnet", {k: v for k, v in MODEL_DESCRIPTIONS.items()
+                              if k == "chgnet"}),
+        ("SevenNet", "sevennet", {k: v for k, v in MODEL_DESCRIPTIONS.items()
+                                  if k == "sevennet" or k.startswith("7net")}),
+        ("Classical (requires classical_params in YAML)", "classical", {
             k: v for k, v in MODEL_DESCRIPTIONS.items()
             if k in ("lennard-jones", "buckingham")}),
     ]
 
-    for backend_name, models in sections:
-        print(f"\n  -- {backend_name} {'-' * (60 - len(backend_name))}")
+    for backend_name, backend_key, models in sections:
+        head = f"  -- {backend_name} "
+        print(f"\n{head}{'-' * max(60 - len(backend_name), 2)} {_marker(backend_key)}")
         for name, desc in models.items():
             print(f"  {name:<25s}  {desc}")
 

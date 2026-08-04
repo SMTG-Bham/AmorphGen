@@ -211,3 +211,91 @@ class TestChgnetDefaultDtype:
         _load_chgnet(device="cpu", default_dtype="float32")
         assert torch.get_default_dtype() is torch.float32
         assert _mod.TORCH_DTYPE is torch.float32
+
+
+# ─── Backend availability / fail-fast (DESIGN_MLIP_OPTIONAL.md D2/D4) ──────
+
+class TestBackendAvailability:
+    """require_backend / available_backends / list_models markers."""
+
+    def test_classical_always_available(self):
+        from amorphgen.utils.calculators import backend_available
+        assert backend_available("classical") is True
+
+    def test_available_backends_shape(self):
+        from amorphgen.utils.calculators import available_backends
+        avail = available_backends()
+        assert set(avail) == {"mace", "chgnet", "sevennet", "classical"}
+        assert all(isinstance(v, bool) for v in avail.values())
+        assert avail["classical"] is True
+
+    def test_require_backend_classical_passes_on_bare_install(self):
+        from amorphgen.utils.calculators import require_backend
+        assert require_backend("lj") == "classical"
+        assert require_backend("buckingham") == "classical"
+
+    def test_require_backend_missing_raises_with_install_hint(self, monkeypatch):
+        """The fail-fast message must contain a copy-pasteable install line
+        (invariant 4 of DESIGN_MLIP_OPTIONAL.md)."""
+        import amorphgen.utils.calculators as calc
+        monkeypatch.setattr(calc, "backend_available",
+                            lambda b: b == "classical")
+        with pytest.raises(calc.BackendNotInstalledError) as exc:
+            calc.require_backend("mace-mpa-0")
+        msg = str(exc.value)
+        assert 'pip install "amorphgen[mace]"' in msg
+        assert "classical" in msg          # torch-free alternative offered
+        assert "--list-models" in msg
+
+    def test_require_backend_model_path_implies_mace(self, monkeypatch):
+        import amorphgen.utils.calculators as calc
+        monkeypatch.setattr(calc, "backend_available",
+                            lambda b: b == "classical")
+        with pytest.raises(calc.BackendNotInstalledError):
+            calc.require_backend("ignored", model_path="/tmp/custom.model")
+
+    def test_require_backend_unknown_model_valueerror(self):
+        from amorphgen.utils.calculators import require_backend
+        with pytest.raises(ValueError, match="Unrecognised model"):
+            require_backend("not-a-real-model")
+
+    def test_list_models_shows_markers(self, capsys, monkeypatch):
+        """Full registry is shown regardless of installs, with per-backend
+        installed / not-installed markers (D4)."""
+        import amorphgen.utils.calculators as calc
+        monkeypatch.setattr(calc, "backend_available",
+                            lambda b: b in ("classical", "chgnet"))
+        calc.list_models()
+        out = capsys.readouterr().out
+        assert "mace-mpa-0" in out                       # registry complete
+        assert "[installed]" in out                      # chgnet marked
+        assert 'pip install "amorphgen[mace]"' in out    # missing marked
+        assert "[built-in]" in out                       # classical
+
+
+class TestRequiresCalculator:
+    """CLI gate: which modes trigger the fail-fast (D2)."""
+
+    def _args(self, **kw):
+        from amorphgen.cli import _get_parser
+        ns = _get_parser().parse_args([])
+        for k, v in kw.items():
+            setattr(ns, k, v)
+        return ns
+
+    def test_calculator_free_modes(self):
+        from amorphgen.cli import _requires_calculator
+        assert not _requires_calculator(self._args())                     # nothing
+        assert not _requires_calculator(self._args(analyse=True))
+        assert not _requires_calculator(self._args(random_gen=True))      # no --relax
+        assert not _requires_calculator(self._args(list_models=True))
+        assert not _requires_calculator(self._args(convert="x.xyz"))
+
+    def test_calculator_modes(self):
+        from amorphgen.cli import _requires_calculator
+        assert _requires_calculator(self._args(random_gen=True, relax=True))
+        assert _requires_calculator(self._args(batch_opt=True))
+        assert _requires_calculator(self._args(batch_quench=True))
+        assert _requires_calculator(self._args(mq_ensemble=True))
+        assert _requires_calculator(self._args(hybrid_ensemble=True))
+        assert _requires_calculator(self._args(input_file="POSCAR"))      # pipeline

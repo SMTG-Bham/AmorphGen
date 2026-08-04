@@ -4,7 +4,10 @@ import pytest
 import numpy as np
 from ase import Atoms
 
-from amorphgen.utils.radii import _classify_compound, auto_target_cn, default_minsep
+from amorphgen.utils.radii import (
+    _classify_compound, auto_target_cn, default_minsep,
+    PACKING_FACTORS, estimate_cell_length,
+)
 
 
 # ── Material classification ──────────────────────────────────────
@@ -182,6 +185,106 @@ def test_classify_oxynitride():
     assert cls == "metal_oxide"
 
 
+@pytest.mark.parametrize("composition", [
+    {"Na": 8, "Ta": 8, "O": 8, "Cl": 32},   # NaTaOCl4 (Cl-rich glass SE)
+    {"Bi": 16, "O": 16, "Cl": 16},          # BiOCl
+    {"La": 16, "O": 16, "Cl": 16},          # LaOCl
+    {"Zr": 8, "O": 8, "Cl": 16},            # ZrOCl2
+    {"Fe": 16, "O": 16, "Cl": 16},          # FeOCl
+])
+def test_classify_oxyhalide(composition):
+    """O + halogen routes to 'oxyhalide' (not the loose metal_oxide), so the
+    halide-framework packing is used and the density is not under-predicted."""
+    assert _classify_compound(composition) == "oxyhalide"
+
+
+def test_oxyhalide_denser_than_metal_oxide():
+    """The oxyhalide packing factor sizes a smaller (denser) cell than the
+    metal_oxide factor would for the same Cl-rich composition."""
+    comp = {"Na": 8, "Ta": 8, "O": 8, "Cl": 32}
+    assert PACKING_FACTORS["oxyhalide"] > PACKING_FACTORS["metal_oxide"]
+    L = estimate_cell_length(comp)
+    # loose metal_oxide sizing gave ~12.14 A; oxyhalide must be tighter
+    assert L < 12.0
+
+
+def test_oxyhalide_packing_interpolates_with_halogen_fraction():
+    """The oxyhalide packing factor scales between metal_oxide (O-only) and
+    halide (halogen-only) with the halogen fraction of the anions."""
+    from amorphgen.utils.radii import _oxyhalide_packing_factor
+    pf_ox = PACKING_FACTORS["metal_oxide"]
+    pf_hal = PACKING_FACTORS["halide"]
+    cl_rich = _oxyhalide_packing_factor({"Na": 8, "Ta": 8, "O": 8, "Cl": 32})  # 4:1
+    balanced = _oxyhalide_packing_factor({"Bi": 16, "O": 16, "Cl": 16})        # 1:1
+    # bounded by the two endpoint classes
+    assert pf_ox < balanced < cl_rich < pf_hal
+    # 1:1 sits at the midpoint
+    assert balanced == pytest.approx((pf_ox + pf_hal) / 2, abs=1e-9)
+
+
+def test_oxyhalide_does_not_capture_pure_oxide_or_halide():
+    """Regression: pure oxides and pure halides are unaffected by the new rule."""
+    assert _classify_compound({"In": 32, "O": 48}) == "metal_oxide"
+    assert _classify_compound({"Si": 24, "O": 48}) == "covalent_oxide"
+    assert _classify_compound({"Li": 16, "Zr": 8, "Cl": 48}) == "halide"
+
+
+@pytest.mark.parametrize("composition, expected", [
+    ({"Ti": 24, "O": 48, "F": 1}, "rutile_dioxide"),   # F-doped TiO2 (dopant)
+    ({"Sn": 24, "O": 48, "F": 2}, "rutile_dioxide"),   # FTO (~4% F of anions)
+    ({"In": 32, "O": 48, "Cl": 1}, "metal_oxide"),     # trace Cl in In2O3
+    ({"Sb": 16, "O": 20, "Cl": 8}, "oxyhalide"),       # Sb4O5Cl2, 29% — real
+])
+def test_oxyhalide_trace_halogen_gate(composition, expected):
+    """A dopant-level halogen (< _OXYHALIDE_MIN_HALOGEN_FRAC of the halogen+O
+    pool) must NOT flip an oxide to oxyhalide — one F atom in TiO2 previously
+    dropped pf 0.66 -> ~0.52 and inflated the estimated cell by ~25%."""
+    assert _classify_compound(composition) == expected
+
+
+def test_oxyhalide_gate_boundary_exactly_10_percent():
+    """The gate comparison is >=: exactly 10% halogen classifies oxyhalide."""
+    comp = {"Sb": 16, "O": 45, "Cl": 5}   # 5 / (5 + 45) = 10.0%
+    assert _classify_compound(comp) == "oxyhalide"
+
+
+@pytest.mark.parametrize("composition, expected", [
+    ({"V": 16, "O": 40, "F": 1}, "high_valent_oxide"),    # V2O5 + dopant F
+    ({"W": 16, "O": 48, "Cl": 1}, "high_valent_oxide"),   # WO3 + dopant Cl
+])
+def test_trace_halogen_preserves_os_gated_classes(composition, expected):
+    """Sub-gate halogens are STRIPPED before classification, so the dopant
+    cannot un-balance the charge solve behind high_valent_oxide. Regression:
+    V2O5+1F previously degraded to metal_oxide (pf 0.60 -> 0.52)."""
+    assert _classify_compound(composition) == expected
+
+
+def test_oxyhalide_pf_continuous_at_gate_boundary():
+    """The interpolation starts from the halogen-free BASE class pf, so
+    crossing the 10% gate changes the estimated cell by <1% for a rutile-type
+    oxide (previously a ~26% volume cliff from one F atom)."""
+    below = estimate_cell_length({"Ti": 48, "O": 96, "F": 10})   # 9.4% -> rutile
+    above = estimate_cell_length({"Ti": 48, "O": 96, "F": 11})   # 10.3% -> oxyhalide
+    assert abs(above - below) / below < 0.01
+
+
+def test_auto_cn_high_valent_cation_in_mixed_oxide():
+    """High-valent d0 cations are octahedral in oxides even when the compound
+    doesn't reach the high_valent_oxide class (mixed cations): ZnSb2O6 must
+    target Sb=6, not the metalloid default 4. Validated by relaxation
+    (Sb=6 seeds relax ~0.5 eV lower with fewer dangling O)."""
+    cn, tol = auto_target_cn({"Zn": 8, "Sb": 16, "O": 48})
+    assert cn["Sb"] == 6
+    assert cn["Zn"] == 4          # Zn stays tetrahedral
+    assert tol == 1               # octahedral target gets the flexible band
+    # LiNbO3: same rule via Nb5+
+    cn2, _ = auto_target_cn({"Li": 8, "Nb": 8, "O": 24})
+    assert cn2["Nb"] == 6
+    # unchanged: ordinary oxides keep their targets
+    cn3, tol3 = auto_target_cn({"Si": 16, "O": 32})
+    assert cn3["Si"] == 4 and tol3 == 0
+
+
 # ── auto_target_cn ───────────────────────────────────────────────
 
 def test_auto_cn_sio2():
@@ -303,3 +406,32 @@ def test_buckingham_no_stress():
     """Buckingham calculator should not claim to implement stress."""
     from amorphgen.utils.classical import BuckinghamCalculator
     assert "stress" not in BuckinghamCalculator.implemented_properties
+
+
+def test_get_packing_factor_dispatcher():
+    """get_packing_factor is the single dispatch point: static classes read
+    the table, oxyhalide interpolates by composition."""
+    from amorphgen.utils.radii import get_packing_factor
+    assert get_packing_factor("metal_oxide") == PACKING_FACTORS["metal_oxide"]
+    assert get_packing_factor("unknown-class") == PACKING_FACTORS["default"]
+    # oxyhalide: composition-aware (NaTaOCl4 ~0.568, not the static 0.56)
+    pf = get_packing_factor("oxyhalide", {"Na": 8, "Ta": 8, "O": 8, "Cl": 32})
+    assert abs(pf - 0.568) < 0.001
+    # without a composition, falls back to the static nominal entry
+    assert get_packing_factor("oxyhalide") == PACKING_FACTORS["oxyhalide"]
+
+
+@pytest.mark.parametrize("composition, crystal_rho", [
+    ({"Ti": 16, "B": 32}, 4.52),   # TiB2
+    ({"Zr": 16, "B": 32}, 6.09),   # ZrB2
+    ({"Mg": 16, "B": 32}, 2.57),   # MgB2
+])
+def test_boride_density_calibration(composition, crystal_rho):
+    """Borides use carbide-style radii (Goldschmidt cation + Cordero B) at
+    pf 0.60, landing diborides at 80-84 % of crystal density. Regression:
+    all-Cordero at pf 0.50 gave 56-89 % with an unfixable spread."""
+    from ase.data import atomic_masses, atomic_numbers
+    L = estimate_cell_length(composition)
+    m = sum(atomic_masses[atomic_numbers[s]] * n for s, n in composition.items())
+    rho = m * 1.66053906660 / L ** 3
+    assert 0.75 <= rho / crystal_rho <= 0.92

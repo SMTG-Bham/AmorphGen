@@ -23,6 +23,7 @@ from ase.filters import UnitCellFilter
 from ase.geometry import cell_to_cellpar
 
 from ..utils import get_calculator, merge_config
+from ..utils.common import assert_finite
 from ..configs import DEFAULT_CONFIG
 
 OPTIMIZERS = {
@@ -86,10 +87,8 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt", **kwargs):
         print("[Opt] Using provided Atoms object")
 
     if calc is None:
-        device = global_cfg.get("device", "cuda")
-        if device == "auto":
-            import torch
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+        from ..utils.common import resolve_device
+        device = resolve_device(global_cfg.get("device", "cuda"))
         calc = get_calculator(
             model=global_cfg.get("model", "mace-mpa-0"),
             device=device,
@@ -169,6 +168,9 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt", **kwargs):
             optimizer.step()
             energy = atoms.get_potential_energy()
             forces = target.get_forces()
+            # Eager divergence guard: stop before a NaN/Inf is written to disk.
+            assert_finite(atoms, context=f"optimisation of {formula}",
+                          step=step + 1)
             max_f = float((forces ** 2).sum(axis=1).max() ** 0.5)
             cp = cell_to_cellpar(atoms.cell)
             a, b, c = cp[:3]

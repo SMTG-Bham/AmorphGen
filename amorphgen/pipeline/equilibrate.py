@@ -65,11 +65,25 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high", **kwargs):
         atoms = make_cubic(atoms)
         print(f"[Stage {stage_label}] Reshaped cell to cubic (make_cubic)")
 
+    logfile = cfg.get("log_file", f"stage{stage_label}_eq.log")
+    trajfile = cfg.get("traj_file", f"stage{stage_label}_eq_traj.xyz")
+    steps = cfg.get("steps", 10000)
+
+    # Frame-level resume: pick a walltime-killed stage up from the last
+    # trajectory frame instead of rerunning from step 0. The frame carries
+    # the MD momenta, so only thermostat RNG / barostat scaling state is
+    # lost (negligible in equilibrium MD). Opt-in via --resume; stages that
+    # never started have no trajectory and start fresh as before.
+    from ..utils.common import resume_md_stage, needs_velocity_init
+    ck_atoms, elapsed = resume_md_stage(trajfile, kwargs.get("resume"),
+                                        stage_label)
+    if ck_atoms is not None:
+        atoms = ck_atoms
+        elapsed = min(elapsed, steps)
+
     if calc is None:
-        device = global_cfg.get("device", "cuda")
-        if device == "auto":
-            import torch
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+        from ..utils.common import resolve_device
+        device = resolve_device(global_cfg.get("device", "cuda"))
         calc = get_calculator(
             model=global_cfg.get("model", "mace-mpa-0"),
             device=device,
@@ -79,7 +93,8 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high", **kwargs):
 
     default_T = {"premelt": 300, "high": 3000, "low": 300}
     T = cfg.get("T", default_T.get(stage, 300))
-    MaxwellBoltzmannDistribution(atoms, temperature_K=T)
+    if needs_velocity_init(atoms, elapsed):
+        MaxwellBoltzmannDistribution(atoms, temperature_K=T)
 
     dyn = build_md_dynamics(
         atoms, ensemble=ensemble, T=T,
@@ -91,19 +106,18 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high", **kwargs):
         compressibility_GPa=cfg.get("compressibility_GPa", 100.0),
     )
 
-    logfile = cfg.get("log_file", f"stage{stage_label}_eq.log")
-    trajfile = cfg.get("traj_file", f"stage{stage_label}_eq.xyz")
     logger, traj = attach_outputs(dyn, atoms, logfile, trajfile,
-                                  fmt=global_cfg.get("traj_format", "extxyz"))
+                                  fmt=global_cfg.get("traj_format", "extxyz"),
+                                  append=elapsed > 0)
 
     from ..utils.common import compute_density_gcm3
     density = compute_density_gcm3(atoms)
-    steps = cfg.get("steps", 10000)
     total_ps = steps * cfg.get("timestep", 1.0) / 1000
     print(f"[Stage {stage_label}] {ensemble} equilibration  T={T} K  "
-          f"{steps} steps ({total_ps:.1f} ps)  density={density:.2f} g/cm3")
+          f"{steps - elapsed} steps ({total_ps:.1f} ps total)  "
+          f"density={density:.2f} g/cm3")
 
-    dyn.run(steps)
+    dyn.run(steps - elapsed)
 
     logger.close()
     traj.close()

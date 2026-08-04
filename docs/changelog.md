@@ -87,10 +87,44 @@ orphan: true
   sibling `random_gen.log` (using the existing `rank_from_log` parser)
   to fill in the E/atom column when the file-level lookup fails.
 
-## v1.0.0 (Unreleased)
+## v1.0.0rc3 (2026-08-03)
 
 ### Added
 
+- **MLIP-optional install.** Torch is no longer a core dependency — the base
+  `pip install` is lightweight (random-gen + analysis + classical potentials),
+  and MACE/CHGNet/SevenNet arrive only via extras (`[mace]`, `[chgnet]`,
+  `[sevennet]`). With no torch present, `--device auto` resolves to CPU and
+  calculator-requiring commands fail fast via `require_backend()` with the
+  exact install line. `--list-models` shows every model with installed/missing
+  markers.
+- **Numerical-divergence guard.** MD and relaxation now raise a clear
+  `DivergenceError` (via `assert_finite`) the moment an energy or force turns
+  non-finite — before a NaN/Inf frame reaches disk — with an actionable
+  message (the MLIP is out-of-distribution at high T, or the timestep is too
+  large). Guards the most common high-T melt-quench failure mode of universal
+  MLIPs.
+- **`--retry-mode {expand, reduce-minsep, none}`** — placement-stall policy for
+  `--random-gen`: `expand` (default; grow the cell 5% per retry, right when the
+  density is an estimate), `reduce-minsep` (hold the cell/density *exactly*
+  fixed and soften only non-bonded minseps, for fixed-density film / isochoric
+  studies), or `none` (no adjustment; a stall raises). Cation–anion bond
+  minseps are never reduced.
+- **Min-CN floor (default).** Every atom gets a hard coordination floor (auto
+  anions = 2, cations = 3, each capped at the element's target CN) and a
+  post-placement `_repair_min_cn()` pass relocates below-floor atoms — cutting
+  dangling bonds (IrO₂ dangling-O ~22% → ~3% at placement, < 1% after
+  relaxation).
+- **Frame-level MD resume.** `--resume` now continues an interrupted MD stage
+  (2–6) from the last frame of its trajectory (momenta carried), on top of the
+  existing stage-level skip.
+- **Oxyhalide material class** (e.g. BiOCl, NaTaOCl₄): packing factor
+  interpolated by halogen fraction between metal-oxide and halide, with a 10%
+  dopant gate so trace halogens (F-doped TiO₂ / FTO) keep their oxide routing.
+- **Homonuclear dimer detection** (`--check-dimers`) — flags peroxide-type
+  O–O and other same-element close pairs, skipping metal self-pairs when anions
+  are present. Plus `--sq` / `--sq-weighting` to expose the direct S(q) method
+  on the CLI.
 - **`--mq-ensemble`** mode: full melt-quench ensemble in one CLI command. Stages 1-4 from a crystalline input, then N independent quenches via auto-extracted snapshots from the stage-4 trajectory, collected to `final/`.
 - **`--hybrid-ensemble`** mode: take a directory of disordered structures and run stages 4-5-6-7 on each.
 - **`--rank-from-log`** mode: parse a random-gen log and rank structures by total energy (no calculator re-evaluation needed; works for VASP/CIF outputs that don't carry per-atom energy).
@@ -112,6 +146,12 @@ orphan: true
 
 ### Changed
 
+- **Material classification** expanded to 20 class-aware packing regimes, each
+  drawing radii from the right source (Shannon ionic / Cordero covalent /
+  Goldschmidt metallic) so a bare composition auto-derives a physical density
+  and minseps. Adds a joint charge-balance oxidation-state solver for mixed
+  cation/anion compounds and a high-valent d⁰ → CN=6 override; boride and
+  oxyhalide packing factors calibrated against crystal densities.
 - **`amorphgen.analysis`** package now exports `rank_from_log`, `format_log_ranking`, `validate_against_reference`, and `format_validation_report` (previously only `StructureAnalyser`).
 - **CLI help** reorganised into argument groups (modes / calculator / optimisation / pipeline / random-gen / batch-quench / batch-opt / analyse) for readability. All flags continue to work; only the help-text layout changed.
 - **Default MD timestep** in `DEFAULT_CONFIG` is now **0.5 fs** (was 1.0 fs). Safer for heavy elements and unusual chemistries. Shipped example YAMLs explicitly set 1.0 fs which is fine for typical oxides with chgnet/MACE foundation models.

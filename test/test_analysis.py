@@ -195,3 +195,144 @@ class TestRDFNormalisation:
         mask = (r > 4.0) & (r < 5.0)
         if np.any(mask):
             assert abs(np.mean(g[mask]) - 1.0) < 0.3
+
+
+# ─── Dimer detection ────────────────────────────────────────────────────────
+
+class TestDimerReport:
+    def _peroxide_structure(self):
+        """SiO2-ish box with one deliberately planted O-O peroxide (1.45 A)."""
+        from ase import Atoms
+        import numpy as np
+        pos = np.array([
+            [0.0, 0.0, 0.0], [5.0, 5.0, 5.0],          # Si, far apart
+            [2.5, 2.5, 2.5], [2.5, 2.5, 3.95],          # O-O at 1.45 A (dimer)
+            [7.0, 7.0, 7.0], [1.0, 7.0, 1.0],           # isolated O
+        ])
+        return Atoms("Si2O4", positions=pos, cell=[10, 10, 10], pbc=True)
+
+    def test_planted_peroxide_found(self):
+        from amorphgen.analysis.structure import compute_dimers
+        res = compute_dimers([self._peroxide_structure()])
+        assert res["total"] == 1
+        assert res["pairs"]["O-O"]["count"] == 1
+        assert abs(res["pairs"]["O-O"]["min_distance"] - 1.45) < 0.01
+        assert res["per_structure"] == [1]
+
+    def test_clean_structure_dimer_free(self):
+        from ase.build import bulk
+        from amorphgen.analysis.structure import compute_dimers
+        atoms = bulk("Cu", "fcc", a=3.6).repeat(2)   # normal metal, no dimers
+        res = compute_dimers([atoms])
+        assert res["total"] == 0
+
+    def test_format_report_mentions_pair(self):
+        from amorphgen.analysis.structure import compute_dimers, format_dimer_report
+        text = format_dimer_report(compute_dimers([self._peroxide_structure()]))
+        assert "O-O" in text and "1.45" in text
+        clean = format_dimer_report(
+            {"pairs": {}, "per_structure": [0], "total": 0,
+             "n_structures": 1, "threshold_frac": 0.85})
+        assert "DIMER-FREE" in clean
+
+    def test_analyser_method(self):
+        from amorphgen.analysis import StructureAnalyser
+        sa = StructureAnalyser([self._peroxide_structure()])
+        assert sa.dimer_report()["total"] == 1
+
+
+class TestSqNormalisation:
+    """Direct-method S(q) must satisfy the Faber-Ziman S(q->inf)=1 limit
+    for weighted MULTI-element compositions (regression: the raw form
+    plateaued at <f^2>/<f^2> ~ 1.8 for heavy/light element mixes)."""
+
+    def _random_binary(self):
+        """Random Na/Ta box — max f contrast (Z=11 vs 73)."""
+        import numpy as np
+        from ase import Atoms
+        rng = np.random.default_rng(7)
+        n = 60
+        pos = rng.uniform(0, 12.0, (n, 3))
+        return Atoms("Na30Ta30", positions=pos, cell=[12.0] * 3, pbc=True)
+
+    def test_xray_high_q_plateau_is_one(self):
+        import numpy as np
+        from amorphgen.analysis.rdf import compute_structure_factor_direct
+        res = compute_structure_factor_direct([self._random_binary()],
+                                              qmax=14.0, nq=140,
+                                              weighting="xray")
+        q = np.array(res["q"]); s = np.array(res["s_q"])
+        hi = s[(q > 9) & ~np.isnan(s)]
+        # random positions ~ ideal gas: S(q) ~ 1 everywhere above q_min
+        assert abs(hi.mean() - 1.0) < 0.15
+
+    def test_unweighted_unchanged_by_offset(self):
+        """For f=1 the self-scattering offset is exactly zero — the fix must
+        not alter unweighted results."""
+        import numpy as np
+        from amorphgen.analysis.rdf import compute_structure_factor_direct
+        res = compute_structure_factor_direct([self._random_binary()],
+                                              qmax=14.0, nq=140,
+                                              weighting="unweighted")
+        q = np.array(res["q"]); s = np.array(res["s_q"])
+        hi = s[(q > 9) & ~np.isnan(s)]
+        assert abs(hi.mean() - 1.0) < 0.15
+
+    def test_tiny_cell_image_dedup(self):
+        """In a cell smaller than 2x the threshold, a close pair's periodic
+        images must not double the dimer count (min-image dedup)."""
+        from ase import Atoms
+        from amorphgen.analysis.structure import compute_dimers
+        # SiO2 context => O-O threshold 0.85*2.24 = 1.90 A. Cell L=3.3:
+        # the O-O pair sits at 1.45 A directly AND at 3.3-1.45 = 1.85 A via
+        # the periodic image — BOTH under threshold, so neighbor_list yields
+        # two entries for the same (i, j) pair. Must count ONE dimer.
+        atoms = Atoms("SiO2", positions=[[1.65, 1.65, 1.65],
+                                         [0.0, 0.0, 0.0],
+                                         [1.45, 0.0, 0.0]],
+                      cell=[3.3, 3.3, 3.3], pbc=True)
+        res = compute_dimers([atoms])
+        assert res["pairs"]["O-O"]["count"] == 1
+        assert abs(res["pairs"]["O-O"]["min_distance"] - 1.45) < 0.01
+        assert res["total"] == 1
+
+    def test_metal_self_pairs_skipped_when_anions_present(self):
+        """Li-Li at ionic-matrix distances (2.2-2.4 A) must NOT be flagged —
+        the metallic-radius threshold is the wrong yardstick for cations
+        packed around shared anions (regression: relaxed a-Li3OCl produced
+        13 Li-Li false positives)."""
+        from ase import Atoms
+        from amorphgen.analysis.structure import compute_dimers
+        atoms = Atoms("Li2O", positions=[[0, 0, 0], [2.3, 0, 0],
+                                         [1.15, 1.6, 0]],
+                      cell=[8, 8, 8], pbc=True)   # Li-Li 2.3 A, physical
+        assert compute_dimers([atoms])["total"] == 0
+
+    def test_metal_self_pairs_checked_in_alloys(self):
+        """Anion-free systems keep the metal-metal check (real dimers)."""
+        from ase import Atoms
+        from amorphgen.analysis.structure import compute_dimers
+        atoms = Atoms("Cu2", positions=[[0, 0, 0], [1.5, 0, 0]],
+                      cell=[8, 8, 8], pbc=True)   # far below metallic contact
+        assert compute_dimers([atoms])["total"] == 1
+
+    def test_polyanion_bonds_not_flagged(self):
+        """A real phosphate P-O bond (~1.5 A) must NOT be flagged as a dimer
+        (P is a nonmetal, but P-O is the structure, not a defect). Regression:
+        relaxed a-KTiOPO4 reported 23 false P-O 'dimers'."""
+        from ase import Atoms
+        from amorphgen.analysis.structure import compute_dimers
+        # PO4-like: central P with 4 O at 1.53 A
+        atoms = Atoms("PO4", positions=[[0, 0, 0], [1.53, 0, 0], [-1.53, 0, 0],
+                                        [0, 1.53, 0], [0, -1.53, 0]],
+                      cell=[10, 10, 10], pbc=True)
+        assert compute_dimers([atoms])["total"] == 0
+
+    def test_homonuclear_defect_still_flagged_with_polyanion(self):
+        """A genuine S-S disulfide is still caught even in a P/S system."""
+        from ase import Atoms
+        from amorphgen.analysis.structure import compute_dimers
+        atoms = Atoms("PS2", positions=[[0, 0, 0], [2.0, 0, 0], [2.0, 2.05, 0]],
+                      cell=[10, 10, 10], pbc=True)   # S-S at 2.05 A (disulfide)
+        res = compute_dimers([atoms])
+        assert res["total"] == 1 and "S-S" in res["pairs"]

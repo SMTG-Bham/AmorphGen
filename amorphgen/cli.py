@@ -3,23 +3,14 @@ amorphgen.cli
 --------------
 Command-line interface for AmorphGen.
 
-Examples
---------
-Full pipeline with MACE (default):
-    amorphgen POSCAR
+Common usage lives in :data:`_EXAMPLES` (shown by ``amorphgen --examples``
+and at the bottom of ``amorphgen -h``) — kept in one place so the two stay
+in sync. Below are only the advanced patterns not covered there.
 
-Use CHGNet:
-    amorphgen POSCAR --model chgnet --device cpu
-
+Examples (advanced)
+-------------------
 Use a custom fine-tuned model:
     amorphgen POSCAR --model-path /data/InO_finetuned.model
-
-List all available models:
-    amorphgen --list-models
-
-Random structure generation:
-    amorphgen --random-gen --composition "In2O3*16" --relax
-    amorphgen --random-gen --composition In=32,O=48 --target-density 5.5
 
 Random generation with custom minsep:
     amorphgen --random-gen --composition "In2O3*8" --target-density 5.5 \
@@ -44,11 +35,55 @@ import sys
 import os
 
 
+# Concise, task-oriented usage shown at the bottom of ``-h`` and by
+# ``--examples``. Kept short on purpose; the full flag list is the rest of -h.
+_EXAMPLES = """\
+common usage:
+  # Random generation + relax (one step)
+  amorphgen --random-gen --composition "Nb2O5*40" -n 10 --relax -o out -m chgnet
+
+  # Generate only, then optimise the folder separately
+  amorphgen --random-gen --composition "SiO2*32" -n 20 -o gen
+  amorphgen --batch-opt --input-dir gen -o opt -C cubic
+
+  # Full 7-stage melt-quench pipeline from a crystal
+  amorphgen POSCAR -o mq_run
+
+  # Analyse a folder of structures (RDF, CN, density, S(q))
+  amorphgen --analyse --input-dir opt --save-plot plots --save-pdf
+
+  # List available calculator models
+  amorphgen --list-models
+
+composition:  "Nb2O5*40" (40 formula units)  or  "Nb=80,O=200" (atom counts)
+notes:        modes are mutually exclusive (pick one); on Apple Silicon prefer
+              '-m chgnet' or '-d cpu' (MACE + mps hits a float64 limitation).
+"""
+
+
+class _HelpFormatter(argparse.ArgumentDefaultsHelpFormatter,
+                     argparse.RawDescriptionHelpFormatter):
+    """Show argument defaults *and* keep the epilog's literal formatting."""
+
+
+class _ExamplesAction(argparse.Action):
+    """``--examples``: print the common-usage block and exit (skips the full -h)."""
+
+    def __init__(self, option_strings, dest, **kwargs):
+        kwargs["nargs"] = 0
+        super().__init__(option_strings, dest, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        print(_EXAMPLES)
+        parser.exit()
+
+
 def _get_parser():
     """Build and return the argument parser (without parsing)."""
     p = argparse.ArgumentParser(
         description="AmorphGen: amorphous structure generation via melt-quench MD and random placement",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        formatter_class=_HelpFormatter,
+        epilog=_EXAMPLES,
     )
     return _add_arguments(p)
 
@@ -68,6 +103,8 @@ def _add_arguments(p):
     p.add_argument("--resume", action="store_true",
                    help="Skip completed work in --random-gen / --batch-quench "
                         "/ pipeline modes.")
+    p.add_argument("--examples", action=_ExamplesAction,
+                   help="Show common usage examples and exit.")
 
     # ── Mode selectors ────────────────────────────────────────────────────────
     g_mode = p.add_argument_group(
@@ -240,6 +277,20 @@ def _add_arguments(p):
                              "atoms below target CN.")
     g_rand.add_argument("--max-attempts", type=int, default=500000,
                         help="Max placement attempts per atom.")
+    g_rand.add_argument("--retry-mode", default="expand",
+                        choices=["expand", "reduce-minsep", "none"],
+                        help="Placement-stall policy. 'expand' (default): "
+                             "grow the cell 5%% per retry, minseps stay "
+                             "physical — right when the density is an "
+                             "estimate. 'reduce-minsep': hold the cell (and "
+                             "density) FIXED and soften only non-bonded "
+                             "minseps (same-element, anion-anion) 5%% per "
+                             "retry — for fixed-density film / isochoric "
+                             "studies where expansion would corrupt the "
+                             "comparison. 'none': auto-retry OFF — nothing "
+                             "is adjusted; unplaceable structures fail/skip "
+                             "so both density AND minseps stay exact. Bond "
+                             "minseps are never reduced in any mode.")
 
     # ── Batch quench ──────────────────────────────────────────────────────────
     g_bq = p.add_argument_group("batch-quench", "Used with --batch-quench.")
@@ -273,6 +324,21 @@ def _add_arguments(p):
                            "RDF minimum), or 'auto' (minsep from radii table; "
                            "may truncate first peak for a-Si, a-HfO2, "
                            "chalcogenides).")
+    g_an.add_argument("--sq", action="store_true",
+                      help="Compute the total structure factor S(q) via the "
+                           "direct (Debye) method: correct FSDP intensities "
+                           "and S(q->inf)=1. Saved as PNG+CSV under "
+                           "--save-plot. Note: the FSDP region needs a large "
+                           "box (q_min = 2*pi/L; ~450+ atoms recommended).")
+    g_an.add_argument("--sq-weighting", default="xray",
+                      choices=["xray", "neutron", "unweighted"],
+                      help="Scattering-factor weighting for --sq. Use 'xray' "
+                           "to compare with X-ray diffraction (heavy elements "
+                           "dominate), 'neutron' for neutron data.")
+    g_an.add_argument("--check-dimers", action="store_true",
+                      help="Report unphysical close contacts (O-O peroxide, "
+                           "Cl-Cl, metal-metal dimers) below 0.85 x the "
+                           "radii-derived minsep.")
     g_an.add_argument("--per-structure", action="store_true",
                       help="Per-structure comparison table.")
     g_an.add_argument("--save-report", default=None, metavar="FILE",
@@ -864,6 +930,28 @@ def _collect_ensemble_final(quench_dir: str, final_dir: str, output_format: str,
     print(f"  Collected {n_collected} final structures -> {final_dir}/")
 
 
+def _requires_calculator(args) -> bool:
+    """Will this invocation construct a calculator?
+
+    Gates the fail-fast backend check (DESIGN_MLIP_OPTIONAL.md, D2). Modes
+    that only read/transform/analyse structures never need a backend and must
+    keep working on a torch-free install.
+    """
+    # Calculator-free modes (checked first — they may combine with input_file)
+    if (args.list_models or args.rank_from_log or args.convert
+            or args.extract_snapshots or args.analyse):
+        return False
+    # Random generation only builds a calculator when relaxing
+    if args.random_gen:
+        return bool(args.relax)
+    # MD / optimisation modes always need one
+    if (args.batch_opt or args.batch_quench or args.mq_ensemble
+            or args.hybrid_ensemble):
+        return True
+    # Bare input_file = full melt-quench pipeline
+    return args.input_file is not None
+
+
 def main():
     args = parse_args()
 
@@ -921,6 +1009,21 @@ def main():
     # Amorphous-input modes default to a cubic (isotropic) cell filter.
     override = _apply_amorphous_cubic_default(
         args, override, _get_parser().get_default("cell_filter"))
+
+    # ── Fail fast when the requested backend is missing ──────────────────────
+    # Calculator-requiring modes abort BEFORE any setup work (no work dir, no
+    # structure loading) with a copy-pasteable install hint. Backend knowledge
+    # lives in utils.calculators (require_backend); this is just the gate.
+    # See DESIGN_MLIP_OPTIONAL.md (D2).
+    if _requires_calculator(args):
+        from .utils.calculators import require_backend, BackendNotInstalledError
+        model = override.get("model", args.model) or "mace-mpa-0"
+        model_path = override.get("model_path", getattr(args, "model_path", None))
+        try:
+            require_backend(model, model_path=model_path)
+        except (BackendNotInstalledError, ValueError) as exc:
+            print(f"Error: {exc}")
+            sys.exit(1)
 
     # ── Rank structures from a random-gen log file ────────────────────────────
     if args.rank_from_log:
@@ -1015,6 +1118,14 @@ def main():
         else:
             text = sa.summary()
 
+        # Dimer check: CLI flag > YAML. summary() prints itself, so print the
+        # dimer section too; the concatenated text feeds --save-report.
+        if args.check_dimers or an_cfg.get("check_dimers", False):
+            from .analysis.structure import format_dimer_report
+            dimer_text = format_dimer_report(sa.dimer_report())
+            print(dimer_text)
+            text += "\n" + dimer_text
+
         # Save report: CLI > YAML
         report_path = args.save_report
         if report_path is None and "save_report" in an_cfg:
@@ -1059,6 +1170,31 @@ def main():
             plot_kwargs["show_title"] = True
         if plot_dir:
             sa.plot(output_dir=plot_dir, **plot_kwargs)
+
+        # S(q): CLI flag > YAML (direct method, Faber-Ziman normalised)
+        if args.sq or an_cfg.get("sq", False):
+            sq_weighting = args.sq_weighting
+            if (sq_weighting == _get_parser().get_default("sq_weighting")
+                    and "sq_weighting" in an_cfg):
+                sq_weighting = an_cfg["sq_weighting"]
+            L_min = min(min(a.cell.lengths()) for a in sa.atoms_list)
+            q_min = 2 * 3.141592653589793 / L_min
+            print(f"\n  S(q): direct method, {sq_weighting} weighting "
+                  f"(q_min = 2pi/L = {q_min:.2f} A^-1)")
+            if L_min < 15.0:
+                print("  Warning: cell < 15 A — the FSDP region "
+                      "(~1-2 A^-1) is under-resolved at this box size; "
+                      "use ~450+ atom boxes for a quantitative S(q).")
+            sq_result = sa.structure_factor_direct(weighting=sq_weighting)
+            if plot_dir:
+                from .analysis.plotting import plot_sq
+                plot_sq(sq_result, output_dir=plot_dir,
+                        dpi=plot_kwargs.get("dpi", 300),
+                        save_pdf=plot_kwargs.get("save_pdf", False),
+                        weighting=sq_weighting,
+                        show_title=plot_kwargs.get("show_title", False))
+            else:
+                print("  (pass --save-plot DIR to write the S(q) PNG + CSV)")
 
         # Extra analysis from YAML
         if "ring_bond_pair" in an_cfg:
@@ -1223,6 +1359,7 @@ def main():
             cn_tolerance=cn_tolerance,
             dmax_factor=args.dmax_factor,
             repair_iters=args.repair_iters,
+            retry_mode=args.retry_mode,
             resume=args.resume,
         )
         return

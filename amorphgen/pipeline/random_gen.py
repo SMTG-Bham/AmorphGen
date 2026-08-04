@@ -43,15 +43,45 @@ from ..utils.radii import (
 
 logger = logging.getLogger(__name__)
 
-# Auto-expand on placement failure. Random sequential placement cannot reach the
+# Auto-retry on placement failure. Random sequential placement cannot reach the
 # highest equilibrium densities (a dense covalent network such as BeO sits above
 # the random-close-packing limit for hard-sphere placement at its crystal
-# density). Rather than shrink the physically-correct minimum separations, the
-# generator expands the cell a few percent and retries; a subsequent MLIP
-# relaxation densifies back to the target. Mirrors batch_random's cell-expansion
-# retry so the bare generate_random API is robust too.
+# density). Two policies, selected by ``retry_mode``:
+#
+#   "expand" (default)  — keep the physically-correct minimum separations and
+#       grow the cell a few percent per retry; a subsequent MLIP relaxation
+#       densifies back. Right when the density is an *estimate*.
+#   "reduce-minsep"     — keep the cell (and therefore the density) EXACTLY as
+#       requested and soften the NON-BONDED minseps (same-element pairs and
+#       anion-anion packing) by 5 % per retry instead; cation-anion bond
+#       minseps are never touched. Right when the density is the *experiment*
+#       (fixed-density film studies, isochoric comparisons) and expansion
+#       would silently corrupt it. The tighter contacts are left for the
+#       relaxation to resolve.
+#   "none"              — auto-retry OFF: nothing is ever adjusted. A stall
+#       raises immediately, telling you honestly that the requested
+#       (density, minsep) combination is not placeable by random sequential
+#       addition. For strict studies where BOTH the cell and the minseps are
+#       controlled variables. (batch_random still resamples seeds — that
+#       changes no physical parameter — but its escalation ladder is fully
+#       disabled and unplaceable structures are skipped.)
+#
+# The adjusting policies share the same retry budget below.
 _MAX_EXPAND_RETRIES = 4
-_EXPAND_FACTOR = 1.05            # cell-edge growth per retry (~14% density drop / 3x)
+_EXPAND_FACTOR = 1.05            # "expand": cell-edge growth per retry (~14% density drop / 3x)
+_MINSEP_REDUCE_FACTOR = 0.95     # "reduce-minsep": non-bonded minsep shrink per retry (~19% / 4x)
+_RETRY_MODES = ("expand", "reduce-minsep", "none")
+
+
+def _reduce_nonbonded_minsep(minsep: dict, factor: float) -> dict:
+    """Scale the NON-BONDED pair minseps (same-element and anion-anion) by
+    *factor*, leaving cation-anion bond minseps untouched."""
+    reduced = dict(minsep)
+    for pair in reduced:
+        s1, s2 = pair.split("-")
+        if s1 == s2 or (s1 in NONMETALS and s2 in NONMETALS):
+            reduced[pair] = reduced[pair] * factor
+    return reduced
 
 
 # ==============================================================================
@@ -504,6 +534,7 @@ def generate_random(
     repair_iters: int = 0,
     min_cn: int | dict[str, int] | None = None,
     repair_floor: bool = True,
+    retry_mode: str = "expand",
     _expand_attempt: int = 0,
 ) -> Atoms:
     """
@@ -577,10 +608,26 @@ def generate_random(
         element's target CN). Only active in coordination-aware mode
         (``target_cn`` set / not ``--no-sc``).
 
+    retry_mode : {"expand", "reduce-minsep", "none"}, default "expand"
+        Policy when placement stalls (see the module-level note):
+        ``"expand"`` grows the cell 5 % per retry keeping minseps physical
+        (density is an estimate — the default workflow); ``"reduce-minsep"``
+        holds the cell **fixed** and softens only the non-bonded minseps
+        (same-element and anion-anion) by 5 % per retry — use when the
+        density itself is the controlled variable (fixed-density film
+        studies) and cell expansion would corrupt the comparison;
+        ``"none"`` disables auto-retry entirely — a stall raises
+        immediately, honestly reporting that the exact requested
+        (density, minsep) combination is not placeable. Cation-anion bond
+        minseps are never reduced in any mode.
+
     Returns
     -------
     ase.Atoms
     """
+    if retry_mode not in _RETRY_MODES:
+        raise ValueError(
+            f"retry_mode must be one of {_RETRY_MODES}, got '{retry_mode}'")
     rng = np.random.default_rng(seed)
 
     symbols = []
@@ -818,25 +865,38 @@ def generate_random(
                 break
 
         if not placed:
-            # Auto-expand the cell and retry rather than fail outright. Dense
-            # covalent networks (BeO) cannot be placed at their full equilibrium
-            # density with physical hard-sphere minseps; expanding a few percent
-            # makes room while keeping the minseps physical. A later relaxation
-            # densifies back to the target. (See _MAX_EXPAND_RETRIES note above.)
-            if _expand_attempt < _MAX_EXPAND_RETRIES:
-                new_L = L * _EXPAND_FACTOR
-                logger.info(
-                    "  [auto-expand] placement stalled at L=%.2f A "
-                    "(%d/%d placed); retrying at L=%.2f A "
-                    "(physical minsep kept; relaxation densifies)",
-                    L, n_placed, n_atoms, new_L,
-                )
+            # Auto-retry rather than fail outright (policy set by retry_mode;
+            # see the _MAX_EXPAND_RETRIES note above). The adjusting policies
+            # share the same retry budget and recurse with the adjusted
+            # parameter; "none" never adjusts and raises immediately.
+            if retry_mode != "none" and _expand_attempt < _MAX_EXPAND_RETRIES:
+                if retry_mode == "reduce-minsep":
+                    # Fixed cell: soften non-bonded minseps instead. The cell
+                    # (and therefore the density) stays exactly as requested.
+                    new_L = L
+                    new_minsep = _reduce_nonbonded_minsep(
+                        minsep, _MINSEP_REDUCE_FACTOR)
+                    logger.info(
+                        "  [auto-retry:minsep] placement stalled at fixed "
+                        "L=%.2f A (%d/%d placed); reducing non-bonded "
+                        "minseps by 5%% (cell held fixed; bonds untouched)",
+                        L, n_placed, n_atoms,
+                    )
+                else:
+                    new_L = L * _EXPAND_FACTOR
+                    new_minsep = minsep
+                    logger.info(
+                        "  [auto-expand] placement stalled at L=%.2f A "
+                        "(%d/%d placed); retrying at L=%.2f A "
+                        "(physical minsep kept; relaxation densifies)",
+                        L, n_placed, n_atoms, new_L,
+                    )
                 return generate_random(
                     composition,
                     cell_length_ang=new_L,
                     target_density=None,
                     density_scale=density_scale,
-                    minsep=minsep,
+                    minsep=new_minsep,
                     minsep_scale=minsep_scale,
                     seed=seed,
                     max_attempts_per_atom=max_attempts_per_atom,
@@ -849,12 +909,19 @@ def generate_random(
                     repair_iters=repair_iters,
                     min_cn=min_cn,
                     repair_floor=repair_floor,
+                    retry_mode=retry_mode,
                     _expand_attempt=_expand_attempt + 1,
                 )
+            retry_desc = {
+                "reduce-minsep": (f"{_MAX_EXPAND_RETRIES} non-bonded minsep "
+                                  f"reductions (cell held fixed)"),
+                "expand": f"{_MAX_EXPAND_RETRIES} cell expansions",
+                "none": "0 retries (auto-retry disabled: retry_mode='none')",
+            }[retry_mode]
             raise RuntimeError(
                 f"Could not place atom {i+1}/{n_atoms} ({sym}) after "
-                f"{max_attempts_per_atom} attempts and {_MAX_EXPAND_RETRIES} "
-                f"cell expansions (final cell {L:.2f} A, "
+                f"{max_attempts_per_atom} attempts and {retry_desc} "
+                f"(final cell {L:.2f} A, "
                 f"{n_placed}/{n_atoms} placed).\n"
                 f"  Suggestions:\n"
                 f"    1. Use --target-density with a lower value\n"
@@ -1259,7 +1326,16 @@ def batch_random(
                     # tight (e.g. size-mismatched alloys like CuZr), and giving
                     # atoms more room is more physical than squeezing them.
                     # Only then fall back to reducing M-M minsep.
-                    if retry_level <= 3:
+                    # Ladder shape depends on retry_mode:
+                    #   "expand" (default): 3 cell rungs, then 3 minsep rungs
+                    #   "reduce-minsep": density MUST NOT move — skip the
+                    #       cell rungs, go straight to minsep reduction
+                    #   "none": nothing may be adjusted — no rungs at all;
+                    #       seed resampling above is the only retry, then skip
+                    mode = kwargs.get("retry_mode", "expand")
+                    expand_rungs = 3 if mode == "expand" else 0
+                    minsep_rungs = 0 if mode == "none" else 3
+                    if retry_level <= expand_rungs:
                         factor = [0.92, 0.85, 0.78][retry_level - 1]
                         kwargs["density_scale"] = base_density_scale * factor
                         _log(f"  [Auto-retry] Expanding cell "
@@ -1267,8 +1343,8 @@ def batch_random(
                              f"{kwargs['density_scale']:.3f}); cell ~"
                              f"{(1.0/factor)**(1/3.0)*100-100:.0f}% larger", lf)
                         continue
-                    elif retry_level <= 6:
-                        reduction = 0.05 * (retry_level - 3)
+                    elif retry_level <= expand_rungs + minsep_rungs:
+                        reduction = 0.05 * (retry_level - expand_rungs)
                         new_minsep = _reduce_mm_minsep(current_minsep, reduction)
                         kwargs["minsep"] = new_minsep
                         changed = []

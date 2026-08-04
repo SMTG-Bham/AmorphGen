@@ -47,11 +47,23 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
         atoms = make_cubic(atoms)
         print("[Stage 3] Cell reshaped to cubic")
 
+    logfile = cfg.get("log_file", "stage3_melt.log")
+    trajfile = cfg.get("traj_file", "stage3_melt_traj.xyz")
+
+    # Frame-level resume: continue a walltime-killed ramp from the last
+    # trajectory frame (momenta included); the ramp position is recovered
+    # via ramp_resume_position below. The legacy filename lets a run
+    # interrupted under a pre-rename AmorphGen still resume after upgrade.
+    from ..utils.common import (resume_md_stage, needs_velocity_init,
+                                ramp_resume_position)
+    ck_atoms, elapsed = resume_md_stage(trajfile, kwargs.get("resume"), "3",
+                                        legacy_trajfile="stage3_melt.xyz")
+    if ck_atoms is not None:
+        atoms = ck_atoms
+
     if calc is None:
-        device = global_cfg.get("device", "cuda")
-        if device == "auto":
-            import torch
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+        from ..utils.common import resolve_device
+        device = resolve_device(global_cfg.get("device", "cuda"))
         calc = get_calculator(
             model=global_cfg.get("model", "mace-mpa-0"),
             device=device,
@@ -60,7 +72,8 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
     atoms.calc = calc
 
     T_start = cfg["T_start"]
-    MaxwellBoltzmannDistribution(atoms, temperature_K=T_start)
+    if needs_velocity_init(atoms, elapsed):
+        MaxwellBoltzmannDistribution(atoms, temperature_K=T_start)
 
     dyn = build_md_dynamics(
         atoms, ensemble=ensemble, T=T_start,
@@ -72,10 +85,9 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
         compressibility_GPa=cfg.get("compressibility_GPa", 100.0),
     )
 
-    logfile = cfg.get("log_file", "stage3_melt.log")
-    trajfile = cfg.get("traj_file", "stage3_melt.xyz")
     logger, traj = attach_outputs(dyn, atoms, logfile, trajfile,
-                                  fmt=global_cfg.get("traj_format", "extxyz"))
+                                  fmt=global_cfg.get("traj_format", "extxyz"),
+                                  append=elapsed > 0)
 
     # Temperature ramp
     T_end = cfg["T_end"]
@@ -101,10 +113,18 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
           f"(+{T_step} K, {steps} steps each, {actual_rate:.1f} K/ps)  "
           f"density={density:.2f} g/cm3")
 
-    for T in target_temps:
+    # Recover the ramp position on resume: k0 full segments done, offset
+    # steps into segment k0 (see ramp_resume_position for the
+    # elapsed==total edge semantics).
+    k0, offset = ramp_resume_position(elapsed, steps, len(target_temps))
+    for idx, T in enumerate(target_temps):
+        if idx < k0:
+            continue
         dyn.set_temperature(temperature_K=T)
-        print(f"  -> T = {T:5d} K")
-        dyn.run(steps)
+        run_steps = steps - offset if idx == k0 else steps
+        note = f"  (resumed, {run_steps} steps left)" if (idx == k0 and offset) else ""
+        print(f"  -> T = {T:5d} K{note}")
+        dyn.run(run_steps)
 
     logger.close()
     traj.close()

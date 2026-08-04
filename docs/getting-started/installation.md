@@ -4,13 +4,29 @@
 
 - Python 3.10, 3.11, or 3.12
 - ASE (Atomic Simulation Environment)
-- At least one MLIP backend
+- An MLIP backend **only** for MLIP relaxation / melt-quench MD — the base
+  install is deliberately torch-free
+
+## Pick the install for your task
+
+| I want to… | Install |
+|---|---|
+| generate random structures, analyse trajectories (RDF, CN, S(q), plots), classical LJ/Buckingham pipelines | `pip install amorphgen` (~80 MB, no PyTorch) |
+| MLIP relaxation & melt-quench MD | `pip install "amorphgen[mace]"` or `"amorphgen[chgnet]"` |
+| everything (MACE + CHGNet) | `pip install "amorphgen[all]"` |
+
+On a torch-free install, `--device auto` resolves to CPU and any
+calculator-requiring command fails fast with the exact install line to copy.
+`amorphgen --list-models` shows every model with installed/missing markers.
 
 ## Install from PyPI
 
 Install AmorphGen with your preferred backend:
 
 ```bash
+# Lightweight (no PyTorch): generation + analysis + classical potentials
+pip install amorphgen
+
 # MACE only
 pip install "amorphgen[mace]"
 

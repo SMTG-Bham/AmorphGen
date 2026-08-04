@@ -170,12 +170,18 @@ def compute_structure_factor_direct(atoms_list, qmax=15.0, nq=300,
     scat = _scattering_factors(unique, weighting)
     n_atoms = len(atoms0)
 
-    # Composition fractions and <f>
+    # Composition fractions, <f> and <f^2> (Faber-Ziman normalisation)
     c = np.array([syms0.count(s) for s in unique], dtype=float) / n_atoms
     f_per_elem = np.array([scat[s] for s in unique])
     f_mean = float((c * f_per_elem).sum())
+    f2_mean = float((c * f_per_elem ** 2).sum())
     if f_mean == 0:
         return {"q": [], "s_q": [], "n_per_bin": []}
+    # Self-scattering offset: raw |Σ f e^{iqr}|²/(N<f>²) tends to <f²>/<f>²
+    # at high q (uncorrelated phases), not 1. Subtracting this constant gives
+    # the Faber-Ziman total S(q) with the correct S(q→∞) = 1 limit. Zero for
+    # unweighted/monatomic (f² = f = 1).
+    self_offset = f2_mean / (f_mean * f_mean) - 1.0
 
     # Spherical-shell accumulators
     q_edges = np.linspace(0.0, qmax, nq + 1)
@@ -217,7 +223,8 @@ def compute_structure_factor_direct(atoms_list, qmax=15.0, nq=300,
             # |Σ f_i e^{i q·r_i}|² = (Σ f cos)² + (Σ f sin)²
             cos_sum = (f_atoms * np.cos(phases)).sum(axis=1)
             sin_sum = (f_atoms * np.sin(phases)).sum(axis=1)
-            sq_vals = (cos_sum * cos_sum + sin_sum * sin_sum) / denom
+            sq_vals = ((cos_sum * cos_sum + sin_sum * sin_sum) / denom
+                       - self_offset)
 
             # Bin by |q|
             bin_idx = np.clip(((q_mags[start:stop] / qmax) * nq).astype(int),

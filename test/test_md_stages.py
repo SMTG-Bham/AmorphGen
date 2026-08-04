@@ -407,3 +407,77 @@ class TestFullPipelineEMT:
         assert result is not None
         assert os.path.isfile(os.path.join(work, "stage5_quenched.xyz"))
         assert os.path.isfile(os.path.join(work, "stage7_opt.xyz"))
+
+
+# ── Frame-level resume (kill mid-stage, resume, verify) ──
+
+class TestFrameLevelResume:
+    """An interrupted MD stage resumes from the last trajectory frame with
+    only the remaining steps, appending (not duplicating) frames."""
+
+    def _cu(self):
+        atoms = bulk("Cu", "fcc", a=3.6, cubic=True).repeat(2)
+        atoms.rattle(0.05, seed=1)
+        return atoms
+
+    def test_read_md_checkpoint_edge_cases(self, tmp_work_dir):
+        from amorphgen.utils.common import read_md_checkpoint
+        assert read_md_checkpoint("does_not_exist.xyz") is None
+        write("single.xyz", self._cu(), format="extxyz")
+        assert read_md_checkpoint("single.xyz") is None      # 1 frame = step 0
+        write("two.xyz", self._cu(), format="extxyz")
+        write("two.xyz", self._cu(), format="extxyz", append=True)
+        ck = read_md_checkpoint("two.xyz")
+        assert ck is not None and ck[1] == 100               # (frames-1)*100
+
+    def test_trajectory_truncated_on_fresh_run(self, tmp_work_dir):
+        """A NON-resume rerun must not append to a stale trajectory."""
+        from amorphgen.utils.common import TrajectoryWriter
+        write("stale.xyz", self._cu(), format="extxyz")
+        write("stale.xyz", self._cu(), format="extxyz", append=True)
+        TrajectoryWriter("stale.xyz", fmt="extxyz")          # fresh => truncate
+        assert not os.path.exists("stale.xyz")
+
+    def test_equilibrate_kill_and_resume(self, tmp_work_dir, capsys):
+        from amorphgen.pipeline import equilibrate
+
+        def cfg(steps):
+            return {"device": "cpu", "traj_format": "extxyz",
+                    "eq_premelt": {"ensemble": "NVT", "T": 300,
+                                   "steps": steps, "timestep": 1.0,
+                                   "friction": 0.01}}
+
+        # "Kill" at step 200: run a 200-step stage => frames at 0, 100, 200
+        equilibrate.run(self._cu(), cfg(200), EMT(), stage="premelt")
+        assert len(read("stage2_eq_traj.xyz", index=":")) == 3
+        capsys.readouterr()
+
+        # Resume the FULL 450-step stage: must do only the remaining 250
+        equilibrate.run(self._cu(), cfg(450), EMT(), stage="premelt",
+                        resume=True)
+        out = capsys.readouterr().out
+        assert "Frame-level resume: 200 steps" in out
+        # appended without duplicating the resume point: 0,100,200 + 300,400
+        assert len(read("stage2_eq_traj.xyz", index=":")) == 5
+
+    def test_quench_ramp_resume_position(self, tmp_work_dir, capsys):
+        from amorphgen.pipeline import quench
+
+        def cfg():
+            return {"device": "cpu", "traj_format": "extxyz",
+                    "quench": {"ensemble": "NVT", "T_start": 600,
+                               "T_end": 300, "T_step": -100,
+                               "steps_per_T": 60, "timestep": 1.0,
+                               "friction": 0.01}}
+
+        # Partial run: only 140 of the 4x60=240 ramp steps -> frames 0,100
+        partial = cfg(); partial["quench"]["steps_per_T"] = 35  # 4*35=140
+        quench.run(self._cu(), partial, EMT())
+        assert len(read("stage5_quench_traj.xyz", index=":")) == 2   # 0, 100
+        capsys.readouterr()
+
+        # Resume the full ramp: elapsed=100 -> segment k0=1, 20 steps left
+        quench.run(self._cu(), cfg(), EMT(), resume=True)
+        out = capsys.readouterr().out
+        assert "Frame-level resume: 100 steps" in out
+        assert "(resumed, 20 steps left)" in out   # elapsed 100 = 1*60 + 40

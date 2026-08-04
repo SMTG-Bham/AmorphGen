@@ -144,17 +144,26 @@ Only install the backend(s) you need. Classical potentials (Lennard-Jones, Bucki
 
 ## Installation
 
+Pick the install for your task:
+
+| I want to… | Install | Size |
+|---|---|---|
+| generate random structures, analyse trajectories (RDF, CN, S(q), plots), run classical LJ/Buckingham pipelines | `pip install -e .` | ~80 MB, **no PyTorch** |
+| MLIP relaxation & melt-quench MD | `pip install -e ".[mace]"` or `".[chgnet]"` | + PyTorch |
+| everything (MACE + CHGNet) | `pip install -e ".[all]"` | + PyTorch |
+
 ```bash
 git clone https://github.com/SMTG-Bham/AmorphGen.git
 cd AmorphGen
-
-# Install with your preferred backend
-pip install -e ".[mace]"             # MACE only
-pip install -e ".[chgnet]"           # CHGNet only
-pip install -e ".[mace,chgnet]"      # MACE + CHGNet (recommended)
-pip install -e ".[all]"              # MACE + CHGNet + analysis (no SevenNet)
-pip install -e ".[all,dev]"          # the above + pytest
+pip install -e ".[mace,chgnet]"      # example: MACE + CHGNet
+pip install -e ".[all,dev]"          # everything + pytest
 ```
+
+> **MLIPs are optional.** The base package is deliberately torch-free.
+> Install an MLIP extra only when you need MACE/CHGNet/SevenNet relaxation
+> or melt-quench MD; with no torch present, `--device auto` resolves to CPU,
+> and calculator-requiring commands fail fast with the exact install line.
+> `amorphgen --list-models` shows every model with installed/missing markers.
 
 > **SevenNet needs its own environment.** SevenNet depends on `e3nn>=0.5`,
 > while MACE foundation-model files (`mace-mpa-0`, ...) were pickled with
@@ -706,11 +715,11 @@ pipe = MeltQuenchPipeline(
 | Stage | Trajectory | Final structure | Log |
 |-------|-----------|-----------------|-----|
 | 1 | `stage1_opt.traj` | `stage1_opt.cif` + `stage1_opt.xyz` | `stage1_opt.log` |
-| 2 | `stage2_eq.xyz` | `stage2_eq.xyz` | `stage2_eq.log` |
-| 3 | `stage3_melt.xyz` | `stage3_melted.xyz` | `stage3_melt.log` |
-| 4 | `stage4_eq.xyz` | `stage4_eq.xyz` | `stage4_eq.log` |
-| 5 | `stage5_quench.xyz` | `stage5_quenched.xyz` | `stage5_quench.log` |
-| 6 | `stage6_eq.xyz` | `stage6_eq.xyz` | `stage6_eq.log` |
+| 2 | `stage2_eq_traj.xyz` | `stage2_eq.xyz` | `stage2_eq.log` |
+| 3 | `stage3_melt_traj.xyz` | `stage3_melted.xyz` | `stage3_melt.log` |
+| 4 | `stage4_eq_traj.xyz` | `stage4_eq.xyz` | `stage4_eq.log` |
+| 5 | `stage5_quench_traj.xyz` | `stage5_quenched.xyz` | `stage5_quench.log` |
+| 6 | `stage6_eq_traj.xyz` | `stage6_eq.xyz` | `stage6_eq.log` |
 | **7** | `stage7_opt.traj` | **`stage7_opt.cif`** + `stage7_opt.xyz` | `stage7_opt.log` |
 
 ---
@@ -748,7 +757,7 @@ AmorphGen/
 ├── .github/workflows/
 │   └── test.yml                    ← CI (pytest on 3.10/3.11/3.12)
 ├── amorphgen/
-│   ├── __init__.py                 ← v1.0.0rc2
+│   ├── __init__.py                 ← v1.0.0rc3
 │   ├── cli.py                      ← CLI entry point (amorphgen command)
 │   ├── configs/
 │   │   ├── default_config.py       ← all default parameters

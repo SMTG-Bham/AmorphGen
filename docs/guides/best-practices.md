@@ -38,6 +38,55 @@ mid-quench volume change as a red flag rather than a result.
 | You have a crystal and want classic MQ | Full pipeline, but prefer **NVT** stages; watch the density |
 | MLIP keeps over-expanding under NPT | Switch to random-gen / hybrid, or fix the cell |
 
+## Choosing the anneal temperature
+
+A 0 K relaxation of a random-gen seed fixes bond *lengths* but cannot cross
+barriers: network *connectivity* defects (dangling anions, missing bridges,
+under-coordinated formers) survive it. Annealing is what heals them — but
+only if the temperature is high enough for bonds to break and reform, and
+"high enough" is **system-dependent**. Watch a connectivity metric during
+the anneal (bridging-anion fraction, network-former coordination), not just
+the energy: if the metric is flat, the anneal is only vibrating.
+
+**Worked example — a-SiO₂ (72 atoms, CHGNet, NVT).** A random-gen +
+short-relax seed starts with 79% of Si tetrahedral (CN=4) and 79% of O
+bridging (Si–O–Si). Annealing at just **600 K** heals the network within
+~5 ps:
+
+| Time at 600 K | Si CN=4 | bridging O |
+|---|---|---|
+| 0 ps (relaxed seed) | 79% | 79% |
+| 3 ps | 92% | 100% |
+| 5 ps | 100% | 100% |
+
+Corner-sharing silica rearranges readily — a modest anneal far below any
+melting point completes the tetrahedral network, at NVT in the fixed
+auto-estimated cell (the reliable MLIP regime from the section above).
+
+The same seed annealed at **1500 K** for 8 ps ends with the *same*
+connectivity (96% Si CN=4, 98% bridging O after re-relaxation) but a
+**~38 meV/atom lower energy** (−590.99 vs −588.23 eV for 72 atoms):
+connectivity metrics saturate first, while ring-topology and strain keep
+relaxing at higher temperature. So for silica-like glasses, 600 K is enough
+to *heal* the network; a hotter anneal buys a deeper minimum without
+changing the headline coordination numbers — compare re-relaxed energies,
+not just CN, when the medium-range order matters (e.g. for ring statistics
+or vibrational properties).
+
+**Rules of thumb:**
+
+- Open corner-sharing networks (SiO₂, GeO₂, B₂O₃, phosphates):
+  **500–800 K, a few ps** is typically enough.
+- Dense or heavy-cation frameworks (rutile-type oxides, high-valent
+  oxides, heavy-metal halide/oxyhalide glasses): low-T anneals leave the
+  connectivity metrics flat; expect to need **~1000 K or above and ≥10 ps**
+  before bridging grows, then re-relax.
+- If the metric is still rising when the anneal ends, extend it — plateau
+  first, then quench/relax.
+- Always **re-relax after annealing** and compare energies: the annealed
+  minimum should be lower; if it is not, the anneal was too short or too
+  cold.
+
 ## Trust the relaxed density, set it when the estimate is shaky
 
 The auto-estimated density is a *starting cell* heuristic (class-aware sphere

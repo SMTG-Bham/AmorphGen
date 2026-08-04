@@ -217,3 +217,120 @@ def compute_bond_angle_stats(angle_data: dict) -> dict:
             "count": len(angles),
         }
     return result
+
+
+def compute_dimers(atoms_list, threshold_frac: float = 0.85) -> dict:
+    """Detect unphysically close same-element / anion-anion pairs ("dimers").
+
+    A dimer is a HOMONUCLEAR (same-element) pair whose distance falls below
+    ``threshold_frac`` times the radii-derived minimum separation for that
+    pair (``utils.radii.default_minsep``) — the classic "wrong bond" defect
+    of amorphous networks: O-O peroxide, S-S disulfide, N-N (~N2), Cl-Cl,
+    P-P, and metal-metal dimers. In anion-bearing systems, same-element
+    METAL pairs are additionally skipped (cations pack closer than the
+    metallic threshold around shared anions — relaxed a-Li3OCl has physical
+    Li-Li at 2.27-2.38 A that would otherwise flag 13 false dimers).
+
+    Only same-element pairs are checked. Cross-element contacts are NOT
+    flagged, because they conflate real bonds with non-defects: a
+    polyanion former bonds covalently to its anions (phosphate P-O ~1.5 A,
+    thiophosphate P-S ~2.0 A, LiPON P-N ~1.5 A), and those short contacts
+    are the STRUCTURE, not a defect — flagging them would drown the report
+    (KTiOPO4 relaxed shows 23 real P-O "bonds" that are not dimers). Genuine
+    defects in those same structures are homonuclear (S-S, P-P, N-N) and are
+    still caught.
+
+    With the default 0.85, O-O flags below ~1.9 A (0.85 x 2.24 A), the
+    peroxide signature that cold-relaxed MLIP structures develop from loose
+    seeds; such structures sit higher in energy and should usually be
+    discarded from an ensemble (rank by energy, keep the dimer-free
+    members).
+
+    Returns
+    -------
+    dict
+        ``{"pairs": {pair: {"count", "min_distance", "threshold"}},
+        "per_structure": [int, ...], "total": int, "n_structures": int,
+        "threshold_frac": float}`` — ``pairs`` contains only pairs with at
+        least one dimer; counts are summed over all structures.
+    """
+    from ..utils.radii import default_minsep, NONMETALS, METALLOIDS
+
+    symbols = sorted({s for atoms in atoms_list
+                      for s in atoms.get_chemical_symbols()})
+    minsep = default_minsep(symbols)
+    has_anions = any(s in NONMETALS for s in symbols)
+
+    # Homonuclear pairs only (see docstring). Same-element metal pairs are
+    # skipped when anions are present (metallic threshold is the wrong
+    # yardstick for cations packed around anions).
+    thresholds = {}
+    for pair, d in minsep.items():
+        a, b = pair.split("-")
+        if a != b:
+            continue
+        a_is_metal = a not in NONMETALS and a not in METALLOIDS
+        if not a_is_metal or not has_anions:
+            thresholds[pair] = threshold_frac * d
+    if not thresholds:
+        return {"pairs": {}, "per_structure": [0] * len(atoms_list),
+                "total": 0, "n_structures": len(atoms_list),
+                "threshold_frac": threshold_frac}
+
+    max_cut = max(thresholds.values())
+    pair_stats = {}
+    per_structure = []
+    for atoms in atoms_list:
+        syms = np.array(atoms.get_chemical_symbols())
+        i, j, d = neighbor_list("ijd", atoms, cutoff=max_cut)
+        mask = i < j                       # each direction once
+        # Dedup periodic images: in cells smaller than ~2x the cutoff the
+        # same (i, j) pair can appear once per image — keep only the
+        # minimum-image distance so a single close contact is not counted
+        # twice.
+        pair_min: dict = {}
+        for ii, jj, dd in zip(i[mask], j[mask], d[mask]):
+            idx = (int(ii), int(jj))
+            if idx not in pair_min or dd < pair_min[idx]:
+                pair_min[idx] = float(dd)
+        n_here = 0
+        for (ii, jj), dd in pair_min.items():
+            key = "-".join(sorted((syms[ii], syms[jj])))
+            thr = thresholds.get(key)
+            if thr is None or dd >= thr:
+                continue
+            n_here += 1
+            st = pair_stats.setdefault(
+                key, {"count": 0, "min_distance": float("inf"),
+                      "threshold": thr})
+            st["count"] += 1
+            st["min_distance"] = min(st["min_distance"], dd)
+        per_structure.append(n_here)
+
+    return {"pairs": pair_stats, "per_structure": per_structure,
+            "total": sum(per_structure), "n_structures": len(atoms_list),
+            "threshold_frac": threshold_frac}
+
+
+def format_dimer_report(result: dict) -> str:
+    """Human-readable table for :func:`compute_dimers` output."""
+    lines = ["", "=" * 65,
+             f"  Dimer check  (threshold = {result['threshold_frac']:.2f} x minsep, "
+             f"{result['n_structures']} structure(s))",
+             "=" * 65]
+    if result["total"] == 0:
+        lines.append("  DIMER-FREE: no unphysical close contacts found.")
+    else:
+        lines.append(f"  {'pair':<8s} {'count':>6s} {'min dist (A)':>13s} "
+                     f"{'threshold (A)':>14s}")
+        lines.append("  " + "-" * 45)
+        for pair, st in sorted(result["pairs"].items()):
+            lines.append(f"  {pair:<8s} {st['count']:>6d} "
+                         f"{st['min_distance']:>13.2f} {st['threshold']:>14.2f}")
+        bad = sum(1 for n in result["per_structure"] if n)
+        lines.append(f"\n  {result['total']} dimer(s) in {bad}/"
+                     f"{result['n_structures']} structure(s). Dimer-bearing "
+                     f"structures usually rank higher in energy — consider "
+                     f"discarding them from the ensemble.")
+    lines.append("=" * 65)
+    return "\n".join(lines)

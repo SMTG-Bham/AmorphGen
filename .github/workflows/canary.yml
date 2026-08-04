@@ -1,0 +1,48 @@
+# Weekly MLIP-backend canary (DESIGN_MLIP_OPTIONAL.md, D7).
+#
+# The PR/push matrix is deliberately torch-free, so upstream backend breakage
+# (API drift, dependency-pin conflicts like the e3nn 0.4/0.5 split) would
+# otherwise go unnoticed until a user reports it. This job installs the
+# CHGNet extra (CPU-capable, smallest footprint) once a week and runs a tiny
+# end-to-end relax. MACE is validated locally before releases — its
+# foundation-model downloads are too large/flaky for CI.
+name: Backend canary
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"   # Mondays 06:00 UTC
+  workflow_dispatch: {}    # manual trigger for debugging
+
+jobs:
+  chgnet-canary:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install with CHGNet backend
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[chgnet]"
+
+    - name: End-to-end relax smoke (CHGNet, CPU)
+      run: |
+        python - <<'EOF'
+        from amorphgen import generate_random
+        from amorphgen.utils.calculators import get_calculator, require_backend
+
+        assert require_backend("chgnet") == "chgnet"
+
+        atoms = generate_random({"Si": 4, "O": 8}, seed=0)
+        atoms.calc = get_calculator("chgnet", device="cpu")
+
+        from ase.optimize import FIRE
+        FIRE(atoms, logfile=None).run(fmax=0.5, steps=5)  # API smoke, not physics
+        e = atoms.get_potential_energy()
+        assert isinstance(float(e), float)
+        print(f"chgnet canary OK: E = {e:.2f} eV after 5 FIRE steps")
+        EOF

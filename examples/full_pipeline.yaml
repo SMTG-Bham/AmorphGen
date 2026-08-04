@@ -10,8 +10,15 @@
 #   atoms = pipe.run()
 
 model: mace-mpa-0
+# Device: "cuda" (NVIDIA), "cpu", "mps" (Apple Silicon), or "auto" (auto-detect).
+# This file defaults to cuda for HPC; override on the CLI for other systems:
+#   amorphgen POSCAR --config full_pipeline.yaml --device mps
 device: cuda
 default_dtype: float64
+# All MD stages below set timestep: 1.0 fs. Safe for typical oxides with chgnet
+# / MACE foundation models. The DEFAULT_CONFIG default is 0.5 fs (more
+# conservative for heavy elements / unusual chemistries). Reduce here if you
+# see energy drift or high T-fluctuations during equilibration.
 
 # ── Stage 1 & 7: Structure optimisation ──
 opt:

@@ -360,3 +360,42 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
                 for i, rho in enumerate(rho_values):
                     f.write(f"{i},{rho:.4f}\n")
             print(f"  Saved: {rho_csv_path}")
+
+
+def plot_sq(sq_result, output_dir=".", prefix="analysis", dpi=300,
+            save_pdf=False, weighting="xray", show_title=False):
+    """Plot the direct-method total structure factor S(q) + write a CSV.
+
+    Direct (Debye) S(q) with Faber-Ziman normalisation (S(q→∞)=1). The FSDP
+    region is resolvable down to q_min ≈ 2π/L, so small boxes leave the
+    low-q part noisy — the CSV includes ``n_per_bin`` so shells built from
+    only 1-3 reciprocal vectors can be identified.
+    """
+    import csv
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    os.makedirs(output_dir, exist_ok=True)
+    q = np.array(sq_result["q"], dtype=float)
+    s = np.array(sq_result["s_q"], dtype=float)
+    n = np.array(sq_result["n_per_bin"], dtype=int)
+    m = ~np.isnan(s) & (n > 0)
+
+    fig, ax = plt.subplots(figsize=(5.4, 4.0))
+    ax.plot(q[m], s[m], lw=1.4, color=_PALETTE[0])
+    ax.axhline(1.0, ls=":", color="grey", alpha=0.6)
+    ax.set_xlabel(r"$q$ ($\mathrm{\AA}^{-1}$)")
+    ax.set_ylabel(r"$S(q)$")
+    _apply_pub_style(ax)
+    if show_title:
+        ax.set_title(f"Total S(q) — direct method, {weighting} weighting")
+    base = os.path.join(output_dir, f"{prefix}_sq")
+    _save_fig(fig, base, dpi, save_pdf)
+
+    with open(f"{base}.csv", "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["q_invA", "s_q", "n_per_bin"])
+        for qi, si, ni in zip(q, s, n):
+            w.writerow([f"{qi:.5f}", "" if np.isnan(si) else f"{si:.6f}", ni])
+    print(f"  Saved: {base}.csv")

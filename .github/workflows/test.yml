@@ -36,3 +36,46 @@ jobs:
       with:
         name: test-results-py${{ matrix.python-version }}
         path: .pytest_cache/
+
+  # Guards the torch-free promise: a bare `pip install amorphgen` (no extras)
+  # must support random generation, numeric analysis, and the CLI. A stray
+  # module-level `import torch` (or matplotlib) anywhere on these paths fails
+  # this job.
+  light-install:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Bare install (no extras)
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .
+
+    - name: Verify torch is absent
+      run: |
+        python -c "import importlib.util, sys; sys.exit(1 if importlib.util.find_spec('torch') else 0)"
+
+    - name: Smoke-test the light paths
+      run: |
+        python - <<'EOF'
+        from amorphgen import generate_random
+        atoms = generate_random({"Si": 8, "O": 16}, seed=0)
+        assert len(atoms) == 24
+
+        from amorphgen.analysis import StructureAnalyser
+        sa = StructureAnalyser([atoms])
+        rdf = sa.rdf(pair="Si-O", rmax=5.0, nbins=100)
+        assert len(rdf["r"]) == 100
+
+        from amorphgen.utils.common import resolve_device
+        assert resolve_device("auto") == "cpu"
+
+        from amorphgen.cli import _get_parser
+        _get_parser().parse_args(["--random-gen", "--composition", "SiO2*8"])
+        print("light-install smoke OK")
+        EOF

@@ -420,6 +420,18 @@ _TRANSITION_METAL_CARBIDE_CATIONS = frozenset({
 # solid networks — excluded from the pure-element semiconductor rule.
 _DIATOMIC_NONMETALS = frozenset({"H", "N", "O", "F", "Cl", "Br", "I"})
 
+# Halogen anion-formers, shared by the halide / oxyhalide classification and
+# the oxyhalide packing-factor interpolation.
+_HALOGENS = frozenset({"F", "Cl", "Br", "I"})
+
+# Minimum halogen fraction of the (halogen + O) anion pool for a compound to
+# classify as oxyhalide. Below this the halogen is a dopant, not a framework
+# anion (e.g. F-doped TiO2 / SnO2:F), and the compound keeps its oxide
+# routing — otherwise one F atom would flip rutile_dioxide (pf 0.66) to
+# oxyhalide (pf ~0.52), inflating the estimated cell by ~25%. Real oxyhalides
+# sit far above this: Sb4O5Cl2 ~0.29, BiOCl 0.50, NaTaOCl4 0.80.
+_OXYHALIDE_MIN_HALOGEN_FRAC = 0.10
+
 _RUTILE_DIOXIDE_RMAX = 0.70      # A; Shannon 4+ CN6 cation-radius cutoff
 # Cation-radius cutoff (A) separating small-cation nitrides (denser packing,
 # placeable at higher pf) from large-cation nitrides (placement-limited by the
@@ -549,7 +561,7 @@ def auto_target_cn(composition: dict) -> tuple[dict | None, int]:
     pnictogens = elems & {"P", "As", "Sb"}
     has_nitrogen = "N" in anions
     has_oxide = "O" in anions
-    has_halide = bool(anions & {"Cl", "Br", "I", "F"})
+    has_halide = bool(anions & _HALOGENS)
     has_chalcogen = bool(chalcogens)
     has_halide_sulfide = has_halide or has_chalcogen
 
@@ -558,14 +570,27 @@ def auto_target_cn(composition: dict) -> tuple[dict | None, int]:
     if has_oxide and not has_nitrogen and not has_halide_sulfide:
         # Pure oxides: metals CN=5 (flexible 4-6), metalloids CN=4 (strict)
         has_metal_cation = any(s not in _ALWAYS_TETRAHEDRAL and s not in METALLOIDS for s in cations)
+        has_high_valent = False
         for s in cations:
             if s in _ALWAYS_TETRAHEDRAL or s in METALLOIDS:
                 target_cn[s] = 4
             else:
                 target_cn[s] = 5
-        # tolerance=1 only if metal cations present (flexible 4-6)
+            # High-valent d0 cations (Sb5+, Nb5+, Ta5+, Mo6+, W6+) are
+            # octahedral in oxides regardless of the metal/metalloid routing
+            # above. Matters for MIXED-cation oxides that don't reach the
+            # high_valent_oxide class (which needs ALL cations >= 5):
+            # ZnSb2O6 must target Sb=6, not the metalloid default 4 —
+            # validated by relaxation (forced Sb=6 seeds relax 0.5 eV lower
+            # with fewer dangling O than the auto Sb=4 seeds).
+            os_val = infer_oxidation_state(s, composition)
+            if os_val is not None and os_val >= 5:
+                target_cn[s] = 6
+                has_high_valent = True
+        # tolerance=1 if metal cations present (flexible 4-6) or a
+        # high-valent octahedral target was set (flexible 5-7);
         # pure metalloid oxides (SiO2, GeO2, B2O3): tolerance=0 (strict CN=4)
-        return target_cn, 1 if has_metal_cation else 0
+        return target_cn, 1 if (has_metal_cation or has_high_valent) else 0
 
     elif has_nitrogen and not has_oxide:
         # Nitrides: all CN=4 strict
@@ -585,7 +610,14 @@ def auto_target_cn(composition: dict) -> tuple[dict | None, int]:
     # Chalcogenides already handled above via cls == "chalcogenide"
 
     else:
-        # Mixed or other: metals CN=5 flexible, metalloids CN=4
+        # Mixed or other: metals CN=5 flexible, metalloids CN=4.
+        # DELIBERATE: the high-valent CN=6 override from the pure-oxide
+        # branch is NOT applied here. In mixed-anion frameworks the large
+        # soft anions lower the cation coordination — validated for
+        # oxyhalides: Ta(V) in a-NaTaOCl4 is ~5-coordinate (trigonal
+        # bipyramidal; Tang et al., Angew. Chem. 2026, EXAFS+AIMD, and our
+        # MLIP relaxations agree), unlike octahedral Ta(V) in Ta2O5. Do not
+        # "fix" this asymmetry by adding the override below.
         for s in cations:
             if s in _ALWAYS_TETRAHEDRAL or s in METALLOIDS:
                 target_cn[s] = 4
@@ -1034,10 +1066,23 @@ PACKING_FACTORS = {
     "fluorite_dioxide": 0.63,  # ZrO2, HfO2, CeO2 — 8/7-coordinate fluorite/baddeleyite MO2
     "high_valent_oxide": 0.60,  # V2O5, Nb2O5, Ta2O5, Sb2O5, MoO3, WO3 — cation OS>=5, dense
     "halide":          0.58,  # Li2ZrCl6, LiF
-    "nitride":         0.52,  # large-cation nitrides (ZrN, HfN, ScN). Kept low:
-                              # the cation-cation distance limits placement, so a
-                              # denser cell fails to generate. Densities run low;
-                              # use --target-density for these.
+    "oxyhalide":       0.56,  # NaTaOCl4, BiOCl, LaOCl, ZrOCl2 — halide framework
+                              # with O substitution/bridging. NOMINAL value only:
+                              # estimate_cell_length interpolates the actual pf
+                              # between metal_oxide (0.52) and halide (0.58) by
+                              # halogen fraction via _oxyhalide_packing_factor
+                              # (NaTaOCl4 -> 0.568, rho 2.68 -> 2.93); this entry
+                              # is the class's documented midpoint / fallback.
+    "nitride":         0.52,  # large-cation nitrides (ZrN, HfN, ScN). Kept low
+                              # DELIBERATELY (verified 2026-07-31): placement
+                              # saturates at ~73-82% of crystal density under
+                              # the minsep constraints regardless of pf —
+                              # raising it just triggers auto-expand overshoot
+                              # and LOWERS the final density (ZrN 82%→73% at
+                              # 0.58). Not fixable by SC/min-CN tweaks either
+                              # (same saturation with both disabled). Use
+                              # --target-density or post-generation NPT /
+                              # cell relaxation when the density matters.
     "small_cation_nitride":   0.62,  # small-cation nitrides (AlN, GaN, Si3N4, TiN) —
                               # small cations fit the N sublattice, so they pack
                               # denser and still place. Cation-radius-gated.
@@ -1047,7 +1092,10 @@ PACKING_FACTORS = {
     "elemental_semiconductor": 0.28,  # a-Se, a-Te, a-As, a-Sb, a-P (chain/layer, Cordero)
     "pnictide":        0.32,  # GaAs, InP, InAs (III-V compounds)
     "chalcogenide":    0.30,  # ZnS, CdTe, GeTe (II-VI / IV-VI)
-    "boride":          0.50,  # TiB2, MgB2, ZrB2
+    "boride":          0.60,  # TiB2, MgB2, ZrB2 — Goldschmidt cation +
+                              # Cordero B (carbide-style; calibrated
+                              # 2026-07-31: diborides land 80-84 % of
+                              # crystal; was 56-89 % with all-Cordero/0.50)
     "covalent_network_oxide": 0.35,  # BeO — covalent wurtzite oxide network;
                                      # Cordero radii for both atoms (Be 0.96,
                                      # O 0.66) + 0.35 -> rho ~2.96 vs measured
@@ -1083,7 +1131,8 @@ def _classify_compound(composition: dict) -> str:
 
     Returns one of: "group_iv", "pnictide", "chalcogenide",
     "covalent_oxide", "covalent_network_oxide", "metal_oxide", "halide",
-    "nitride", "carbide", "hydride", "boride", "alloy", "default".
+    "oxyhalide", "nitride", "carbide", "hydride", "boride", "alloy",
+    "default".
     """
     elems = set(composition.keys())
     has_metal = any(s not in NONMETALS and s not in METALLOIDS for s in elems)
@@ -1122,6 +1171,30 @@ def _classify_compound(composition: dict) -> str:
     # Chalcogenides (S, Se, Te) — check before oxides
     if chalcogens and "O" not in anions:
         return "chalcogenide"
+
+    # Oxyhalides (O + a halogen, e.g. NaTaOCl4, BiOCl, LaOCl, ZrOCl2). These
+    # are halide-framework materials with O substitution/bridging, not open
+    # metal-oxide networks — the large halide anions set the packing. Routed
+    # BEFORE the oxide branch, which would otherwise catch any O-bearing
+    # compound and hand back the loose metal_oxide factor (0.52), sizing the
+    # cell too big and under-predicting the density. Uses Shannon ionic radii
+    # (same as oxide/halide) with a halide-leaning packing factor.
+    # Gated on the halogen being a framework anion, not a dopant: below
+    # _OXYHALIDE_MIN_HALOGEN_FRAC of the (halogen + O) pool the compound keeps
+    # its oxide routing (so F-doped TiO2 stays rutile_dioxide).
+    if "O" in anions and (anions & _HALOGENS):
+        if _halogen_fraction(composition) >= _OXYHALIDE_MIN_HALOGEN_FRAC:
+            return "oxyhalide"
+        # Dopant-level halogen: classify the halogen-free composition instead
+        # of falling through with the dopant still present — a stray F/Cl in
+        # the dict would otherwise corrupt the downstream checks that read the
+        # full composition (the charge-balance solve behind high_valent_oxide
+        # in particular: V2O5 + 1 F must stay high_valent_oxide, not degrade
+        # to metal_oxide). Recursion is safe: the stripped composition has no
+        # halogens, so this branch cannot re-enter.
+        stripped = {k: v for k, v in composition.items()
+                    if k not in _HALOGENS}
+        return _classify_compound(stripped)
 
     # Oxides
     if "O" in anions:
@@ -1170,7 +1243,7 @@ def _classify_compound(composition: dict) -> str:
             return "covalent_oxide"
 
     # Halides
-    if anions & {"Cl", "Br", "I", "F"}:
+    if anions & _HALOGENS:
         return "halide"
 
     # Nitrides — small-cation nitrides (AlN, GaN, Si3N4, TiN, ...) pack densely
@@ -1215,6 +1288,74 @@ def _classify_compound(composition: dict) -> str:
     return "default"
 
 
+def _halogen_fraction(composition: dict) -> float:
+    """Halogen fraction of the (halogen + O) anion pool.
+
+    The single definition shared by the oxyhalide classification gate and
+    the packing-factor interpolation, so the two can never disagree about
+    the same composition.
+    """
+    n_hal = sum(composition.get(x, 0) for x in _HALOGENS)
+    n_o = composition.get("O", 0)
+    if n_hal + n_o == 0:
+        return 0.0
+    return n_hal / (n_hal + n_o)
+
+
+def _oxyhalide_packing_factor(composition: dict) -> float:
+    """Anion-ratio-interpolated packing factor for oxyhalides.
+
+    An oxyhalide's packing sits between its parent oxide and a pure halide,
+    controlled by how much of the anion sublattice is halogen vs oxygen.
+    Interpolate linearly on the halogen fraction of the anions:
+
+        f_pack = pf_base + (pf_halide - pf_base) * n_halogen/(n_halogen + n_O)
+
+    where ``pf_base`` is the packing factor of the **halogen-free base
+    class** (what `_classify_compound` returns with the halogens stripped),
+    not a hardcoded oxide value. This keeps the estimate continuous at the
+    dopant gate: a rutile-type MO2 just above the 10% halogen threshold
+    interpolates from rutile's 0.66 (pf ~0.65), not from metal_oxide's 0.52
+    — without this, one atom across the boundary jumped the predicted cell
+    volume by ~26%. Loose-oxide parents (NaTaOCl4 -> metal_oxide base,
+    pf 0.568; BiOCl -> 0.55) are unchanged, and the halogen-only endpoint
+    still recovers ``halide`` (0.58).
+    """
+    frac_hal = _halogen_fraction(composition)
+    if frac_hal == 0.0:                       # defensive; not reachable for oxyhalide
+        return PACKING_FACTORS["oxyhalide"]
+    stripped = {k: v for k, v in composition.items() if k not in _HALOGENS}
+    base_cls = _classify_compound(stripped) if stripped else "default"
+    pf_base = PACKING_FACTORS.get(base_cls, PACKING_FACTORS["metal_oxide"])
+    pf_hal = PACKING_FACTORS["halide"]
+    return pf_base + (pf_hal - pf_base) * frac_hal
+
+
+# Classes whose density radii mix bonding regimes: every cation uses
+# Goldschmidt metallic, the mapped "anchor" anion-former uses Cordero
+# covalent. Add new metal-covalent-anchor families (silicides, oxycarbides)
+# here rather than copying the branch in _radius_for_density.
+_MIXED_RADIUS_ANCHOR = {"transition_metal_carbide": "C", "boride": "B"}
+
+
+def get_packing_factor(cls: str, composition: dict | None = None) -> float:
+    """Packing factor for a material class — composition-aware where needed.
+
+    The single dispatch point between the static :data:`PACKING_FACTORS`
+    table and classes whose packing depends on the composition itself
+    (currently only ``oxyhalide``, which interpolates between its halogen-
+    free base class and ``halide`` by halogen fraction). New mixed-anion
+    families (oxynitrides, oxysulfides) should add their interpolation here
+    rather than special-casing :func:`estimate_cell_length`. Note the
+    obvious oxynitride interpolation is currently a no-op — metal_oxide and
+    nitride share pf 0.52 — so no oxynitride branch exists yet; add one only
+    with calibration data that motivates it.
+    """
+    if cls == "oxyhalide" and composition is not None:
+        return _oxyhalide_packing_factor(composition)
+    return PACKING_FACTORS.get(cls, PACKING_FACTORS["default"])
+
+
 def _radius_for_density(sym: str, cls: str,
                         composition: dict | None = None) -> float:
     """Pick the radius type appropriate for the composition's bonding character.
@@ -1232,10 +1373,11 @@ def _radius_for_density(sym: str, cls: str,
       atomic centres).
     """
     ionic_classes = {"covalent_oxide", "metal_oxide", "rutile_dioxide",
-                     "fluorite_dioxide", "high_valent_oxide", "halide", "nitride",
+                     "fluorite_dioxide", "high_valent_oxide", "halide",
+                     "oxyhalide", "nitride",
                      "small_cation_nitride", "hydride"}
     covalent_classes = {"group_iv", "elemental_semiconductor", "pnictide",
-                        "chalcogenide", "boride", "covalent_carbide",
+                        "chalcogenide", "covalent_carbide",
                         "covalent_network_oxide"}
     # Infer oxidation state from charge balance when a composition is
     # supplied; falls back to "highest positive" inside get_ionic_radius
@@ -1255,12 +1397,16 @@ def _radius_for_density(sym: str, cls: str,
         return r
     if cls in covalent_classes:
         return covalent_radii[atomic_numbers[sym]]
-    if cls == "transition_metal_carbide":
-        # TiC, WC, ZrC etc. — cation uses Goldschmidt metallic, C uses
-        # Cordero.  This pair of radii + pf=0.60 reproduces a-TiC density
-        # ≈ 4.0 g/cm³ (vs crystal 4.93) and a-WC ≈ 14 g/cm³ (vs 15.6),
-        # within the documented 5-20 % amorphous-vs-crystal range.
-        if sym == "C":
+    if cls in _MIXED_RADIUS_ANCHOR:
+        # Dense metallic-bonded ceramics with one covalent anchor element:
+        # the anchor (C in carbides, B in borides) uses Cordero, every
+        # cation uses Goldschmidt metallic. Carbides: pf=0.60 reproduces
+        # a-TiC ≈ 4.0 g/cm³ (crystal 4.93) and a-WC ≈ 14 (15.6). Borides
+        # (calibrated 2026-07-31): pf=0.60 lands TiB2/ZrB2/MgB2 at 80-84 %
+        # of crystal — all-Cordero at pf 0.50 split them 56-89 %, unfixable
+        # by any single pf. Cage borides (LaB6-type) run ~100 % of crystal;
+        # use density_scale < 1 there if placement struggles.
+        if sym == _MIXED_RADIUS_ANCHOR[cls]:
             return covalent_radii[atomic_numbers[sym]]
         r = get_metallic_radius(sym)
         if r is None:
@@ -1313,7 +1459,7 @@ def estimate_cell_length(composition: dict, target_density: float | None = None,
     else:
         cls = _classify_compound(composition)
         if packing_factor is None:
-            packing_factor = PACKING_FACTORS.get(cls, PACKING_FACTORS["default"])
+            packing_factor = get_packing_factor(cls, composition)
 
         total_sphere_vol = 0.0
         for sym, count in composition.items():

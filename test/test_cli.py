@@ -10,8 +10,25 @@ from unittest.mock import patch
 
 from amorphgen.cli import (
     parse_args, _parse_composition, _parse_minsep,
-    _parse_target_cn, _parse_dmax,
+    _parse_target_cn, _parse_dmax, _get_parser, _EXAMPLES,
 )
+
+
+class TestExamplesHelp:
+
+    def test_examples_flag_prints_and_exits(self, capsys):
+        """--examples prints the usage block and exits cleanly (code 0)."""
+        with pytest.raises(SystemExit) as exc:
+            _get_parser().parse_args(["--examples"])
+        assert exc.value.code == 0
+        out = capsys.readouterr().out
+        assert "common usage:" in out
+        assert "--random-gen" in out
+
+    def test_epilog_contains_examples(self):
+        """-h shows the worked examples via the parser epilog."""
+        assert _get_parser().epilog == _EXAMPLES
+        assert "amorphgen --analyse" in _EXAMPLES
 
 
 class TestParseComposition:

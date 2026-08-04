@@ -85,6 +85,7 @@ class TestClassifyCompound:
         ({"Zn": 16, "S": 16}, "chalcogenide"),
         ({"Al": 16, "N": 16}, "small_cation_nitride"),
         ({"Li": 16, "Cl": 16}, "halide"),
+        ({"Bi": 16, "O": 16, "Cl": 16}, "oxyhalide"),
     ])
     def test_classification(self, comp, expected_class):
         assert _classify_compound(comp) == expected_class
@@ -362,3 +363,74 @@ class TestAutoDeriveInLogFile:
         # Pair keys are sorted alphabetically: Si-O → 'O-Si'
         assert "O-Si:" in auto_line and "ionic" in auto_line
         assert "O-O:" in auto_line and "anion-pack" in auto_line
+
+
+# ─── retry_mode: fixed-cell placement retries ─────────────────────────────
+
+class TestRetryMode:
+    """retry_mode="reduce-minsep" holds the cell (density) exactly while
+    softening only non-bonded minseps; "expand" (default) grows the cell.
+    Fixed-density film / isochoric studies depend on the cell contract."""
+
+    STALL = dict(density_scale=1.5, seed=0, max_attempts_per_atom=20000)
+    COMP = {"Si": 8, "O": 16}
+
+    def test_invalid_mode_raises(self):
+        with pytest.raises(ValueError, match="retry_mode"):
+            generate_random(self.COMP, retry_mode="bogus", seed=0)
+
+    def test_reduce_minsep_holds_cell_exactly(self):
+        from amorphgen.utils.radii import estimate_cell_length
+        L_req = estimate_cell_length(self.COMP, density_scale=1.5)
+        a = generate_random(self.COMP, retry_mode="reduce-minsep", **self.STALL)
+        assert abs(a.cell.lengths()[0] - L_req) < 1e-9   # density preserved
+
+    def test_expand_mode_grows_cell_on_stall(self):
+        from amorphgen.utils.radii import estimate_cell_length
+        L_req = estimate_cell_length(self.COMP, density_scale=1.5)
+        a = generate_random(self.COMP, retry_mode="expand", **self.STALL)
+        # this over-dense setup stalls at least once -> cell must have grown
+        assert a.cell.lengths()[0] > L_req + 1e-6
+
+    def test_reduce_minsep_never_touches_bonds(self):
+        """Cation-anion bond minseps are NEVER reduced; non-bonded pairs may
+        shrink but only to the documented floor (0.95^4 ~ 0.815)."""
+        import numpy as np
+        from ase.neighborlist import neighbor_list
+        from amorphgen.utils.radii import default_minsep, auto_target_cn
+        tcn, _ = auto_target_cn(self.COMP)
+        ms = default_minsep(["Si"] * 8 + ["O"] * 16, target_cn=tcn)
+        a = generate_random(self.COMP, retry_mode="reduce-minsep", **self.STALL)
+        syms = np.array(a.get_chemical_symbols())
+        i, j, d = neighbor_list("ijd", a, cutoff=4.0)
+        floor = 0.95 ** 4
+        assert d[(syms[i] == "Si") & (syms[j] == "O")].min() >= ms["O-Si"] - 1e-9
+        assert d[(syms[i] == "O") & (syms[j] == "O")].min() >= ms["O-O"] * floor - 1e-9
+        assert d[(syms[i] == "Si") & (syms[j] == "Si")].min() >= ms["Si-Si"] * floor - 1e-9
+
+    def test_cli_flag_parses(self):
+        from amorphgen.cli import _get_parser
+        ns = _get_parser().parse_args(
+            ["--random-gen", "--composition", "SiO2*8",
+             "--retry-mode", "reduce-minsep"])
+        assert ns.retry_mode == "reduce-minsep"
+        assert _get_parser().parse_args([]).retry_mode == "expand"  # default
+
+    def test_none_mode_disables_all_retries(self):
+        """retry_mode='none': a stall raises immediately — nothing adjusted.
+        The honest 'this (density, minsep) combination is not placeable'."""
+        with pytest.raises(RuntimeError, match="auto-retry disabled"):
+            generate_random(self.COMP, retry_mode="none", **self.STALL)
+
+    def test_none_mode_succeeds_when_placeable(self):
+        """'none' is not fail-always: placeable requests work normally and
+        the cell is exactly the requested one."""
+        a = generate_random(self.COMP, retry_mode="none", seed=0)  # auto density
+        L_req = estimate_cell_length(self.COMP)
+        assert abs(a.cell.lengths()[0] - L_req) < 1e-9
+
+    def test_cli_accepts_none(self):
+        from amorphgen.cli import _get_parser
+        ns = _get_parser().parse_args(
+            ["--random-gen", "--composition", "SiO2*8", "--retry-mode", "none"])
+        assert ns.retry_mode == "none"

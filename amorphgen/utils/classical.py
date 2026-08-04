@@ -45,7 +45,15 @@ _torch = None
 def _get_torch():
     global _torch
     if _torch is None:
-        import torch
+        try:
+            import torch
+        except ImportError:
+            raise ImportError(
+                "The GPU path of the classical calculators requires PyTorch, "
+                "which is an optional dependency. Install it with "
+                "`pip install torch`, or use device='cpu' (vectorised NumPy, "
+                "no torch needed)."
+            ) from None
         _torch = torch
     return _torch
 

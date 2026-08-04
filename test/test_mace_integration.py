@@ -27,7 +27,7 @@ class TestMaceCalculatorFactory:
         calc = get_mace_calculator(model="mace-mpa-0", device="cpu")
         assert calc is not None
 
-    def test_invalid_model_path_raises(self, tmp_dir):
+    def test_invalid_model_path_raises(self, tmp_path):
         from amorphgen.utils import get_mace_calculator
         with pytest.raises(FileNotFoundError):
             get_mace_calculator(model_path="/nonexistent/path/model.model",
@@ -50,14 +50,14 @@ class TestFullPipelineWithMACE:
     Not a physically meaningful amorphisation — just checks no crashes.
     """
 
-    def test_stages_1_to_7_al(self, tmp_dir):
+    def test_stages_1_to_7_al(self, tmp_path):
         from amorphgen import MeltQuenchPipeline
         from ase.build import bulk
         from ase.io import write
         from ase import Atoms
 
         atoms = bulk("Al", "fcc", a=4.05, cubic=True).repeat(2)
-        poscar = os.path.join(tmp_dir, "Al_test.cif")
+        poscar = os.path.join(tmp_path, "Al_test.cif")
         write(poscar, atoms)
         n_atoms = len(atoms)
 
@@ -98,7 +98,7 @@ class TestFullPipelineWithMACE:
             },
         }
 
-        work_dir = os.path.join(tmp_dir, "al_pipeline")
+        work_dir = os.path.join(tmp_path, "al_pipeline")
         pipeline = MeltQuenchPipeline(
             input_file=poscar,
             work_dir=work_dir,

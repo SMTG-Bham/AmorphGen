@@ -175,6 +175,32 @@ class StructureAnalyser:
         return compute_coordination(self.atoms_list, self._max_cutoff,
                                     self._get_cutoff, pair)
 
+    def dimer_report(self, threshold_frac=0.85):
+        """Detect unphysical same-element / anion-anion close contacts.
+
+        Flags "dimers" — pairs closer than ``threshold_frac`` times the
+        radii-derived minimum separation (O-O peroxide below ~1.9 A, Cl2,
+        metal-metal dimers). These form when cold MLIP relaxation collapses
+        under-coordinated seeds and mark structures that usually rank higher
+        in energy; the recommended workflow is to generate an ensemble and
+        keep the dimer-free, lowest-energy members.
+
+        Parameters
+        ----------
+        threshold_frac : float
+            Fraction of the pair minsep below which a contact counts as a
+            dimer (default 0.85).
+
+        Returns
+        -------
+        dict
+            ``{"pairs": {pair: {"count", "min_distance", "threshold"}},
+            "per_structure": list[int], "total": int, "n_structures": int,
+            "threshold_frac": float}``
+        """
+        from .structure import compute_dimers
+        return compute_dimers(self.atoms_list, threshold_frac=threshold_frac)
+
     def bond_distances(self, pair=None):
         """Compute bond distance statistics.
 

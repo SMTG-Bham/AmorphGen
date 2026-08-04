@@ -115,10 +115,8 @@ class MeltQuenchPipeline:
     def _get_calc(self):
         """Build or return the shared calculator."""
         if self._calc is None or not self.share_calc:
-            device = self.cfg.get("device", "cuda")
-            if device == "auto":
-                import torch
-                device = "cuda" if torch.cuda.is_available() else "cpu"
+            from ..utils.common import resolve_device
+            device = resolve_device(self.cfg.get("device", "cuda"))
 
             calc_kwargs = {}
             if self.cfg.get("classical_params"):
@@ -256,18 +254,26 @@ class MeltQuenchPipeline:
 
                 t_stage = time.time()
 
+                # MD stages get the resume flag for FRAME-level resume: an
+                # interrupted stage picks up from the last frame of its
+                # stage trajectory (stages that never started have no
+                # trajectory and run fresh). Optimisation stages (1, 7)
+                # restart whole — LBFGS/FIRE state is not checkpointed.
                 if s == 1:
                     atoms = opt_cell.run(atoms, self.cfg, calc)
                 elif s == 2:
-                    atoms = equilibrate.run(atoms, self.cfg, calc, stage="premelt")
+                    atoms = equilibrate.run(atoms, self.cfg, calc,
+                                            stage="premelt", resume=resume)
                 elif s == 3:
-                    atoms = melt_cell.run(atoms, self.cfg, calc)
+                    atoms = melt_cell.run(atoms, self.cfg, calc, resume=resume)
                 elif s == 4:
-                    atoms = equilibrate.run(atoms, self.cfg, calc, stage="high")
+                    atoms = equilibrate.run(atoms, self.cfg, calc,
+                                            stage="high", resume=resume)
                 elif s == 5:
-                    atoms = quench.run(atoms, self.cfg, calc)
+                    atoms = quench.run(atoms, self.cfg, calc, resume=resume)
                 elif s == 6:
-                    atoms = equilibrate.run(atoms, self.cfg, calc, stage="low")
+                    atoms = equilibrate.run(atoms, self.cfg, calc,
+                                            stage="low", resume=resume)
                 elif s == 7:
                     atoms = final_opt.run(atoms, self.cfg, calc)
                 else:

@@ -78,11 +78,12 @@ over every anion-former (oxynitrides, oxyfluorides).
 | `transition_metal_carbide` | Goldschmidt (cation) + Cordero (C) | 0.60 | TiC, WC, ZrC |
 | `alloy` | Goldschmidt metallic | 0.60 | NiTi, CuZr, brass, pure metals |
 | `halide` | Shannon ionic CN6 | 0.58 | LiF, NaCl, Li2ZrCl6 |
+| `oxyhalide` | Shannon ionic CN6 | 0.52–0.58 (interpolated by halogen fraction of the halogen+O anion pool; dopant-level halogens, <10%, keep the oxide class) | BiOCl, LaOCl, NaTaOCl4, ZrOCl2 |
 | `hydride` | Shannon ionic CN6 | 0.55 | LiH, MgH2, NaAlH4 |
 | `metal_oxide` | Shannon ionic CN6 | 0.52 | In2O3, Al2O3, Ga2O3, MgO, ZnO |
 | `nitride` | Shannon ionic CN6 | 0.52 | ZrN, HfN, ScN (large cation) |
 | `covalent_oxide` | Shannon ionic CN6 | 0.50 | SiO2, GeO2, B2O3 |
-| `boride` | Cordero covalent | 0.50 | TiB2, MgB2, ZrB2 |
+| `boride` | Goldschmidt cation + Cordero B | 0.60 | TiB2, MgB2, ZrB2 (LaB6-type cage borides run ~100% of crystal; use `--density-scale` <1 if placement struggles) |
 | `covalent_network_oxide` | Cordero covalent | 0.35 | BeO (small polarizing cation) |
 | `pnictide` | Cordero covalent | 0.32 | GaAs, InP, InAs |
 | `covalent_carbide` | Cordero covalent | 0.32 | SiC, B4C |
@@ -144,7 +145,29 @@ amorphgen --random-gen --composition "SiO2*16" --n-structures 20 \
 # With relaxation
 amorphgen --random-gen --composition "In2O3*8" --n-structures 10 \
     --relax --model mace-mpa-0 --cell-filter none
+
+# Fixed-density study: hold the cell EXACTLY at the target density and
+# soften non-bonded minseps on placement stalls instead of expanding
+amorphgen --random-gen --composition "SiO2*16" --n-structures 10 \
+    --target-density 2.6 --retry-mode reduce-minsep
 ```
+
+## Placement-stall policy (`--retry-mode`)
+
+Random sequential placement cannot always reach the requested density with
+fully physical hard-sphere minseps. When placement stalls, two policies are
+available:
+
+| Mode | Cell | Minseps | Use when |
+|---|---|---|---|
+| `expand` (default) | grows 5% per retry (≤4) | all kept physical | the density is an **estimate** — a later MLIP relaxation densifies back |
+| `reduce-minsep` | **held exactly fixed** | non-bonded pairs (same-element, anion–anion) softened 5% per retry (≤4, ~19% max); cation–anion **bonds never touched** | the density is the **experiment** — fixed-density film studies, isochoric comparisons, where silent cell expansion would corrupt the comparison |
+| `none` | held exactly fixed | all kept exact — **nothing is ever adjusted** | strict studies where both density AND minseps are controlled variables: a stall fails (or, in a batch, skips the structure after seed resampling) instead of adjusting anything — an honest "this combination is not placeable" |
+
+In `reduce-minsep` mode the too-close non-bonded contacts are left for the
+relaxation to resolve — run at fixed cell (`--cell-filter none`) to keep the
+density pinned through relaxation too. `batch_random`'s escalation ladder is
+mode-aware: in `reduce-minsep` mode it never touches `density_scale`.
 
 ## Python API
 

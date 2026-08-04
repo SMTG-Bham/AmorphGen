@@ -96,10 +96,8 @@ def run(snapshot_files: list[str],
 
     # Build calculator once
     if calc is None:
-        device = global_cfg.get("device", "cuda")
-        if device == "auto":
-            import torch
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+        from ..utils.common import resolve_device
+        device = resolve_device(global_cfg.get("device", "cuda"))
         calc = get_calculator(
             model=global_cfg.get("model", "mace-mpa-0"),
             device=device,
@@ -145,15 +143,23 @@ def run(snapshot_files: list[str],
         os.chdir(run_dir)
 
         try:
+            # MD stages get the resume flag for FRAME-level resume within
+            # this run: safe because we chdir into the per-run directory
+            # above, so a run can only ever see its own stage trajectories.
+            # A stage whose trajectory is already complete resumes with 0
+            # remaining steps (cheap skip); optimisation (7) restarts whole.
             for s in stages:
                 if s == 4:
                     atoms = equilibrate.run(atoms, cfg_override=cfg_override,
-                                            calc=calc, stage="high")
+                                            calc=calc, stage="high",
+                                            resume=resume)
                 elif s == 5:
-                    atoms = quench.run(atoms, cfg_override=cfg_override, calc=calc)
+                    atoms = quench.run(atoms, cfg_override=cfg_override,
+                                       calc=calc, resume=resume)
                 elif s == 6:
                     atoms = equilibrate.run(atoms, cfg_override=cfg_override,
-                                            calc=calc, stage="low")
+                                            calc=calc, stage="low",
+                                            resume=resume)
                 elif s == 7:
                     atoms = final_opt.run(atoms, cfg_override=cfg_override, calc=calc)
                 else:
