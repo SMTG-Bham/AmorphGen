@@ -14,14 +14,11 @@ orphan: true
   `amorphgen --analyse --input-dir <work_dir>/random_opt/` work without
   any `*_opt.vasp` filtering. The per-structure `random_NNNN_opt.log`
   file moved into `random_opt/` alongside its structure.
-  - **Migration**: to restore the old flat layout, post-process with
-    `mv <work_dir>/random_*/* <work_dir>/`.
 - **Default analysis cutoff** changed from `"auto"` (minsep-based) to
   `"auto-rdf"` (first-RDF-minimum). This is the standard convention in
   neutron-diffraction analysis of glasses, and avoids systematically
   under-counting coordination for materials with broad first-shell
-  distributions (a-Si, a-HfO₂, chalcogenides). Legacy `"auto"` is still
-  accepted.
+  distributions.
 - **`--default-dtype` default** changed from `"float64"` to `"auto"`,
   which resolves per-backend: `float32` for CHGNet (its only supported
   dtype) and classical potentials; `float64` for MACE and SevenNet.
@@ -45,29 +42,13 @@ orphan: true
 ### Added
 
 - **`weighting` parameter on `structure_factor()`**: ``"unweighted"``
-  (default, current behaviour — a single FFT of the all-atom g(r)),
-  ``"xray"`` (Faber-Ziman partial sum with Z² weights), or
-  ``"neutron"`` (same but with tabulated coherent scattering lengths
-  for ~50 common elements). The X-ray weighting recovers the
-  first-sharp-diffraction peak (FSDP) in amorphous oxides that
-  cancels in the unweighted sum.
-- **`structure_factor_direct()`** — new method that computes S(q)
-  directly from atomic positions via the Debye formula evaluated at
-  reciprocal-lattice q-vectors:
-  $$ S(q) = \\frac{1}{N\\langle f\\rangle^2}\\left|\\sum_i f_i e^{i\\vec{q}\\cdot\\vec{r}_i}\\right|^2 $$
-  Bypasses the rmax truncation that under-estimates peak intensities
-  in the FT-of-g(r) method. For a-Ga₂O₃ the direct method gives FSDP
-  intensity S(q=2.4)=2.0 vs FT-of-g(r) S(q=2.4)=0.84, matching the
-  experimental value (Kaewmeechai et al., Phys. Rev. B 111, 035203,
-  2025, Fig. S2b) and the GAP_500 simulation in the same reference.
-  Slower than the FT method (~4-5× per ensemble); use for paper-
-  quality S(Q) comparison with experiment.
+  (default, current behaviour — a single FFT of the all-atom g(r)).
 - **`amorphgen.analysis.compare_ensembles()`** and `EnsembleSpec`:
   multi-ensemble overlay plots (RDF, coordination, bond angles, density)
   with one call. Used by the new Validation docs page.
 - **Per-structure density violin** in `--analyse --save-plot`: new
   `analysis_density.{png,pdf,csv}` output alongside the existing RDF /
-  CN / angles plots, matching the comparison-plot aesthetic.
+  CN / angles plots.
 - **Validation docs page** (`/validation/`) with four sub-tabs
   (a-Ga₂O₃, a-SiO₂, a-HfO₂, a-Si). Each tab includes results-vs-reference
   table, structure render, validation figure, and reproduce-it
@@ -84,8 +65,7 @@ orphan: true
 - **Per-structure E/atom column** in `--analyse --per-structure` was
   always `N/A` for structure files that don't carry energy in their
   header (VASP, CIF). The analyser now falls back to parsing the
-  sibling `random_gen.log` (using the existing `rank_from_log` parser)
-  to fill in the E/atom column when the file-level lookup fails.
+  sibling `random_gen.log`.
 
 ## v1.0.0rc3 (2026-08-03)
 
@@ -159,5 +139,3 @@ orphan: true
 
 ### Removed
 
-- **M3GNet backend (via matgl).** Loader code and registry kept in place; install pipeline removed from `[all]` extra. Currently broken upstream (DGL drops Mac wheels; matgl 2.x model paths return 401 from HuggingFace). Will be reinstated when matgl/DGL packaging stabilises. Use **SevenNet** as the recommended drop-in replacement (similar architecture, no DGL dependency).
-- **Experimental placement-algorithm subpackage** (`amorphgen/pipeline/placement/`) and the `--placement-algorithm` CLI flag. We tested four alternatives (Voronoi-CRN, WWW + Keating, Metropolis repair, ARTn-lite) on Si64 + CHGNet and found the existing default coordination-aware placement matched or outperformed all of them. The 70% CN=4 ceiling is set by CHGNet's energy landscape, not by placement quality, so a more sophisticated placement does not help unless paired with a Si-specific potential (which is outside AmorphGen's general-purpose scope). Modules and a full carry-forward report are archived locally (and gitignored) under `experiments/cn_fix_2026-05/` for any future revival.
