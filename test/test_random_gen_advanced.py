@@ -372,7 +372,12 @@ class TestRetryMode:
     softening only non-bonded minseps; "expand" (default) grows the cell.
     Fixed-density film / isochoric studies depend on the cell contract."""
 
-    STALL = dict(density_scale=1.5, seed=0, max_attempts_per_atom=20000)
+    # density_scale=2.0 forces a placement stall on EVERY platform: SiO2 at 2.0x
+    # needs ~2 cell expansions to place, so the stall margin survives the small
+    # floating-point / BLAS differences that made 1.5x jam on macOS but place on
+    # Linux (CI flake, 2026-08). reduce-minsep still places at 2.0x via softened
+    # minseps; 2.5x is too dense for it. Do not lower this below 2.0.
+    STALL = dict(density_scale=2.0, seed=0, max_attempts_per_atom=20000)
     COMP = {"Si": 8, "O": 16}
 
     def test_invalid_mode_raises(self):
@@ -381,13 +386,15 @@ class TestRetryMode:
 
     def test_reduce_minsep_holds_cell_exactly(self):
         from amorphgen.utils.radii import estimate_cell_length
-        L_req = estimate_cell_length(self.COMP, density_scale=1.5)
+        L_req = estimate_cell_length(self.COMP,
+                                     density_scale=self.STALL["density_scale"])
         a = generate_random(self.COMP, retry_mode="reduce-minsep", **self.STALL)
         assert abs(a.cell.lengths()[0] - L_req) < 1e-9   # density preserved
 
     def test_expand_mode_grows_cell_on_stall(self):
         from amorphgen.utils.radii import estimate_cell_length
-        L_req = estimate_cell_length(self.COMP, density_scale=1.5)
+        L_req = estimate_cell_length(self.COMP,
+                                     density_scale=self.STALL["density_scale"])
         a = generate_random(self.COMP, retry_mode="expand", **self.STALL)
         # this over-dense setup stalls at least once -> cell must have grown
         assert a.cell.lengths()[0] > L_req + 1e-6
