@@ -144,13 +144,11 @@ Only install the backend(s) you need. Classical potentials (Lennard-Jones, Bucki
 
 ## Installation
 
-Pick the install for your task:
-
-| I want to… | Install | Size |
+| Tasks | Install | Size |
 |---|---|---|
 | generate random structures, analyse trajectories (RDF, CN, S(q), plots), run classical LJ/Buckingham pipelines | `pip install -e .` | ~80 MB, **no PyTorch** |
-| MLIP relaxation & melt-quench MD | `pip install -e ".[mace]"` or `".[chgnet]"` | + PyTorch |
-| everything (MACE + CHGNet) | `pip install -e ".[all]"` | + PyTorch |
+| + MLIP relaxation & melt-quench MD | `pip install -e ".[mace]"` or `".[chgnet]"` | + PyTorch |
+| + everything (MACE + CHGNet) | `pip install -e ".[all]"` | + PyTorch |
 
 ```bash
 git clone https://github.com/SMTG-Bham/AmorphGen.git
