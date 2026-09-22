@@ -335,6 +335,22 @@ def _add_arguments(p):
                       help="Scattering-factor weighting for --sq. Use 'xray' "
                            "to compare with X-ray diffraction (heavy elements "
                            "dominate), 'neutron' for neutron data.")
+    g_an.add_argument("--sq-method", default="direct",
+                      choices=["direct", "ft"],
+                      help="How to compute S(q) for --sq. 'direct' (default): "
+                           "Debye sum at reciprocal-lattice q-vectors -- no "
+                           "real-space truncation, resolves the FSDP. 'ft': "
+                           "Fourier transform of g(r) truncated at L/2 -- "
+                           "smoother but damps/shifts the FSDP; use for "
+                           "comparison with FT-based codes. Both are "
+                           "Faber-Ziman weighted.")
+    g_an.add_argument("--sq-smooth", type=float, default=None, metavar="SIGMA_Q",
+                      help="Gaussian re-binning width (1/A) for the direct "
+                           "S(q), weighted by q-vectors per shell; reduces "
+                           "the low-q speckle noise without moving peaks "
+                           "(default 0.05; 0 = raw). Keep well below the "
+                           "FSDP width (~0.3 1/A). Raw values are always "
+                           "kept in the CSV as s_q_raw.")
     g_an.add_argument("--check-dimers", action="store_true",
                       help="Report unphysical close contacts (O-O peroxide, "
                            "Cl-Cl, metal-metal dimers) below 0.85 x the "
@@ -353,8 +369,10 @@ def _add_arguments(p):
                       help="Add titles to plots (off by default).")
     g_an.add_argument("--total-rdf", action="store_true",
                       help="Include total g(r) in RDF plot.")
-    g_an.add_argument("--smearing", type=float, default=0.0, metavar="SIGMA",
-                      help="RDF Gaussian smearing (A); use 0.02-0.05 vs exp.")
+    g_an.add_argument("--smearing", type=float, default=None, metavar="SIGMA",
+                      help="RDF Gaussian smearing in A (default 0.05, ~thermal/"
+                           "experimental broadening; 0 = raw histogram). "
+                           "S(q) is always computed from the raw g(r).")
     g_an.add_argument("--reference", default=None, metavar="YAML",
                       help="Reference YAML; adds validation table.")
 
@@ -574,7 +592,8 @@ def _parse_dmax(spec: str) -> dict[str, float]:
     return dmax
 
 
-def _build_override(args, parser, explicit_only: bool = False) -> dict:
+def _build_override(args, parser, explicit_only: bool = False,
+                    argv: list[str] | None = None) -> dict:
     """
     Build a config override dict from CLI args.
 
@@ -586,6 +605,9 @@ def _build_override(args, parser, explicit_only: bool = False) -> dict:
         If True, only include args the user explicitly set (for YAML mode,
         so defaults don't overwrite YAML values). If False, include all
         args with their defaults (for non-YAML mode).
+    argv : list[str], optional
+        Raw command-line tokens used to detect flags that were typed with a
+        value equal to the parser default (defaults to ``sys.argv[1:]``).
 
     Returns
     -------
@@ -594,6 +616,16 @@ def _build_override(args, parser, explicit_only: bool = False) -> dict:
     if explicit_only:
         explicit = {k for k, v in vars(args).items()
                     if v != parser.get_default(k)}
+        # A flag typed on the command line with a value equal to the parser
+        # default (e.g. ``--eq-high-ensemble NVT``) is still an explicit
+        # choice and must beat the YAML / DEFAULT_CONFIG value.  argparse
+        # cannot tell the two apart, so look at the raw argv as well.
+        if argv is None:
+            argv = sys.argv[1:]
+        typed = {tok.split("=", 1)[0] for tok in argv if tok.startswith("-")}
+        for action in parser._actions:
+            if action.dest != "help" and typed.intersection(action.option_strings):
+                explicit.add(action.dest)
         def get(key):
             return getattr(args, key) if key in explicit else None
     else:
@@ -1150,11 +1182,12 @@ def main():
             plot_kwargs["rmax"] = an_cfg["rmax"]
 
         # Smearing: CLI > YAML > default (0.0)
+        # smearing: CLI > YAML analyse block > DEFAULT_SMEARING; 0 = raw.
+        from .analysis.rdf import DEFAULT_SMEARING
         smearing = args.smearing
-        if smearing == 0.0 and "smearing" in an_cfg:
-            smearing = an_cfg["smearing"]
-        if smearing > 0:
-            plot_kwargs["smearing"] = smearing
+        if smearing is None:
+            smearing = an_cfg.get("smearing", DEFAULT_SMEARING)
+        plot_kwargs["smearing"] = float(smearing)
 
         # Total RDF: CLI flag or YAML
         if args.total_rdf or an_cfg.get("total_rdf", False):
@@ -1179,19 +1212,38 @@ def main():
                 sq_weighting = an_cfg["sq_weighting"]
             L_min = min(min(a.cell.lengths()) for a in sa.atoms_list)
             q_min = 2 * 3.141592653589793 / L_min
-            print(f"\n  S(q): direct method, {sq_weighting} weighting "
+            sq_method = args.sq_method
+            if sq_method == "direct" and "sq_method" in an_cfg:
+                sq_method = an_cfg["sq_method"]
+            print(f"\n  S(q): {sq_method} method, {sq_weighting} weighting "
                   f"(q_min = 2pi/L = {q_min:.2f} A^-1)")
-            if L_min < 15.0:
+            if sq_method == "ft":
+                print("  Note: FT of g(r) is truncated at r = L/2 "
+                      f"({L_min/2:.1f} A); the FSDP is damped/shifted. "
+                      "Use --sq-method direct for the FSDP.")
+            elif L_min < 15.0:
                 print("  Warning: cell < 15 A — the FSDP region "
                       "(~1-2 A^-1) is under-resolved at this box size; "
                       "use ~450+ atom boxes for a quantitative S(q).")
-            sq_result = sa.structure_factor_direct(weighting=sq_weighting)
+            # sq_smooth: CLI > YAML analyse block > DEFAULT_SQ_SMOOTH; 0 = raw.
+            from .analysis.rdf import DEFAULT_SQ_SMOOTH
+            sq_smooth = args.sq_smooth
+            if sq_smooth is None:
+                sq_smooth = float(an_cfg.get("sq_smooth", DEFAULT_SQ_SMOOTH))
+            if sq_method == "ft":
+                sq_result = sa.structure_factor(weighting=sq_weighting)
+            else:
+                sq_result = sa.structure_factor_direct(weighting=sq_weighting,
+                                                       sigma_q=sq_smooth)
+                if sq_smooth > 0:
+                    print(f"  S(q) re-binned with sigma_q = {sq_smooth:.2f} "
+                          f"1/A (n_per_bin-weighted); raw values kept in CSV")
             if plot_dir:
                 from .analysis.plotting import plot_sq
                 plot_sq(sq_result, output_dir=plot_dir,
                         dpi=plot_kwargs.get("dpi", 300),
                         save_pdf=plot_kwargs.get("save_pdf", False),
-                        weighting=sq_weighting,
+                        weighting=sq_weighting, method=sq_method,
                         show_title=plot_kwargs.get("show_title", False))
             else:
                 print("  (pass --save-plot DIR to write the S(q) PNG + CSV)")
@@ -1314,12 +1366,25 @@ def main():
         if args.dmax_factor == 1.5 and "dmax_factor" in rg_cfg:
             args.dmax_factor = rg_cfg["dmax_factor"]
 
-        # cell_filter: CLI > YAML random_gen > "cubic" for random-gen
-        # Random gen produces cubic cells, so default to cubic (not FrechetCellFilter)
+        # cell_filter: CLI > YAML random_gen > explicit YAML opt > "cubic"
+        # Random gen produces cubic cells, so default to cubic (not
+        # FrechetCellFilter). A --relax is an optimisation, so an explicit
+        # cell_filter under the YAML ``opt:`` block is honoured too -- the
+        # shipped example_classical.yaml sets ``opt: cell_filter: none``
+        # (classical potentials have no stress), and ignoring it made the
+        # stress guard tell users to set a value their YAML already had.
+        ff_default = parser.get_default("cell_filter")
         cell_filter = args.cell_filter
-        if cell_filter == parser.get_default("cell_filter"):
+        if cell_filter == ff_default:
+            opt_cf = None
+            if isinstance(override, dict) and isinstance(override.get("opt"), dict):
+                opt_cf = override["opt"].get("cell_filter")
             if "cell_filter" in rg_cfg:
                 cell_filter = rg_cfg["cell_filter"]
+            elif opt_cf not in (None, ff_default):
+                # Explicitly set by the user (the no-YAML path puts the
+                # parser default here, which is not a user choice).
+                cell_filter = opt_cf
             else:
                 cell_filter = "cubic"
 

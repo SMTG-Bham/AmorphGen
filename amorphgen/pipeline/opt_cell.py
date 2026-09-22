@@ -135,6 +135,12 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt", **kwargs):
         filter_name = cfg.get("cell_filter", "FrechetCellFilter")
         _log(f"  Cell filter: {filter_name}", lf)
 
+        # Every cell filter relaxes the cell, which needs a stress tensor.
+        # Guard classical (stress-less) calculators with a clear error.
+        if filter_name not in ("none", None):
+            from ..utils.common import require_stress
+            require_stress(calc, f"Cell-filter optimisation (cell_filter={filter_name!r})")
+
         if filter_name == "none" or filter_name is None:
             # Positions only — cell stays fixed
             target = atoms
