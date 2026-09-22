@@ -82,4 +82,4 @@ amorphgen "inputs/sample-${SAMPLE}.xyz" \
     --resume
 ```
 
-Each array task runs on its own GPU. The `--resume` flag makes resubmission safe — completed samples are skipped automatically.
+Each array task runs on its own GPU. The `--resume` flag makes resubmission safe: completed samples are skipped automatically.

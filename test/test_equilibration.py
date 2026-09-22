@@ -176,6 +176,39 @@ class TestMSD:
         # MSD should increase over time
         assert msd["all"][-1] > msd["all"][0]
 
+    def test_frame_stride_scales_time_axis(self):
+        """Trajectories are written every TRAJ_LOG_INTERVAL MD steps, so the
+        time axis must scale with frame_stride (regression: it assumed one
+        step per frame, making D wrong by ~100x)."""
+        from amorphgen.utils.equilibration import compute_msd
+        from amorphgen.utils.common import TRAJ_LOG_INTERVAL
+        from ase import Atoms
+
+        frames = [Atoms("Si", positions=[[i * 0.1, 0, 0]],
+                        cell=[10, 10, 10], pbc=True) for i in range(8)]
+        t_default, _ = compute_msd(frames, timestep_fs=0.5)
+        t_stride1, _ = compute_msd(frames, timestep_fs=0.5, frame_stride=1)
+        assert t_default[-1] == pytest.approx(t_stride1[-1] * TRAJ_LOG_INTERVAL)
+
+
+class TestPartialRdfNormalisation:
+
+    def test_same_element_asymptotes_to_one(self):
+        """Same-element partial g(r) must approach 1 (not 0.5) at large r.
+        Regression: undirected (i<j) counting with directed-pair-density
+        normalisation halved g_AA."""
+        import numpy as np
+        from ase import Atoms
+        from amorphgen.utils.equilibration import _compute_partial_rdf_frame
+
+        rng = np.random.default_rng(0)
+        L = 30.0
+        n = 1500
+        gas = Atoms("Ar" + str(n), positions=rng.uniform(0, L, (n, 3)),
+                    cell=[L, L, L], pbc=True)
+        g = _compute_partial_rdf_frame(gas, "Ar", "Ar", rmax=8.0, nbins=80)
+        assert abs(g[len(g) // 2:].mean() - 1.0) < 0.1
+
 
 # ─── Extra coverage: plot helpers + compute_cn_vs_time + convergence_report
 

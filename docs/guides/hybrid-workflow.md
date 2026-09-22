@@ -1,6 +1,6 @@
 # Hybrid workflow
 
-Combine random structure generation with melt-quench to efficiently sample the amorphous energy landscape — without paying the cost of melting from a crystal.
+Combine random structure generation with melt-quench to efficiently sample the amorphous energy landscape, without paying the cost of melting from a crystal.
 
 ## Concept
 
@@ -41,11 +41,11 @@ tio2_hybrid/
 
 The `run_NNNN/` index matches the source snapshot index parsed from the input
 filename (`snapshot_NNNN_*.xyz`). When splitting the per-input runs across
-SLURM array tasks, point all tasks at the same `quench_runs/` directory —
+SLURM array tasks, point all tasks at the same `quench_runs/` directory;
 AmorphGen handles the per-snapshot naming. See {doc}`mq-ensemble`'s "HPC
 job-array tip" for the full SLURM template.
 
-`--resume` is honoured at every step — re-running the command picks up incomplete runs.
+`--resume` is honoured at every step; re-running the command picks up incomplete runs.
 
 ## Recommended `hybrid.yaml` for an oxide
 
@@ -57,7 +57,7 @@ device: cuda
 eq_high:
   ensemble: NVT
   T: 3000              # above Tm but inside chgnet/MACE training data
-  steps: 20000         # 20 ps anneal — random inputs need less than crystal-melt
+  steps: 20000         # 20 ps anneal - random inputs need less than crystal-melt
   timestep: 0.5
   friction: 0.01
 
@@ -86,12 +86,12 @@ opt:
   cell_filter: cubic   # preserves cubic shape from random-gen
 ```
 
-## Why use the hybrid workflow?
+## When to use the hybrid workflow
 
-- **Faster** than running full 7-stage pipelines on N structures from crystals (skips crystal opt + premelt + heating ramp per structure).
-- **Better sampling** — random initial configurations provide diverse starting points.
-- **Defensible cell volume** — random-gen sets a sensible amorphous density up front; NVT preserves it.
-- **Annealing at chgnet/MACE-trained T** (e.g. 3000 K) avoids extrapolation while still being above the melting point of most oxides.
+- Faster than running full 7-stage pipelines on N structures from crystals (skips crystal opt + premelt + heating ramp per structure).
+- Better sampling: random initial configurations provide diverse starting points.
+- Defensible cell volume: random-gen sets a sensible amorphous density up front; NVT preserves it.
+- Annealing at chgnet/MACE-trained T (e.g. 3000 K) avoids extrapolation while still being above the melting point of most oxides.
 
 ## Comparison to `--mq-ensemble` (crystal melt-quench)
 

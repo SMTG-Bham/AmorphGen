@@ -96,22 +96,30 @@ def auto_cutoff_rdf(atoms_list: list, rmax: float = 6.0,
         g_smooth = (np.convolve(g_r, np.ones(5) / 5, mode='same')
                     if len(g_r) > 5 else g_r)
 
-        # Find first peak: g(r) > max(1.5, 0.5*max(g)) and local maximum
+        # First peak = the first local maximum that is at least half the
+        # strongest feature of g(r).  Taking the first bump above a fixed
+        # threshold (old behaviour) latched onto placement noise on the rising
+        # edge of unrelaxed random structures and returned a cutoff *below*
+        # the bond length (CN ~ 0).
         g_max = np.max(g_smooth) if len(g_smooth) > 0 else 0
-        peak_threshold = max(1.0, 0.3 * g_max)
+        peak_threshold = max(1.5, 0.5 * g_max)   # a bonded shell has g >> 1
 
         peak_idx = None
         for i in range(1, len(g_smooth) - 1):
-            if (g_smooth[i] > peak_threshold
-                    and g_smooth[i] > g_smooth[i - 1]
+            if (g_smooth[i] >= peak_threshold
+                    and g_smooth[i] >= g_smooth[i - 1]
                     and g_smooth[i] > g_smooth[i + 1]):
                 peak_idx = i
                 break
 
-        # Find first minimum after peak
+        # First minimum after the peak: a local minimum that is a genuine
+        # depletion (g <= half the peak height), so a small dip on the
+        # descending flank is skipped.
         if peak_idx is not None:
+            g_peak = g_smooth[peak_idx]
             for i in range(peak_idx + 1, len(g_smooth) - 1):
-                if (g_smooth[i] < g_smooth[i - 1]
+                if (g_smooth[i] <= 0.5 * g_peak
+                        and g_smooth[i] <= g_smooth[i - 1]
                         and g_smooth[i] <= g_smooth[i + 1]):
                     cutoffs[key] = float(r_centres[i])
                     cutoff_found = True
@@ -119,6 +127,10 @@ def auto_cutoff_rdf(atoms_list: list, rmax: float = 6.0,
 
         if not cutoff_found:
             cutoffs[key] = fallback.get(key, 3.5)
+            warnings.warn(
+                f"auto-rdf cutoff: no clear first minimum in g(r) for {key}; "
+                f"using the radii-table cutoff {cutoffs[key]:.2f} A instead "
+                f"(structures may be unrelaxed).", stacklevel=2)
 
     return cutoffs
 

@@ -169,6 +169,30 @@ class TestAnalyseMode:
                    for tok in ("Pair", "Bond", "Coordination",
                                 "Coord", "Si-Si"))
 
+    @pytest.mark.parametrize("method", ["direct", "ft"])
+    def test_sq_method_flag(self, tmp_path, monkeypatch, capsys, method):
+        """--sq-method selects the S(q) route; direct (default) reports
+        q-vectors per shell, ft prints the truncation note and has no
+        n_per_bin column."""
+        src = tmp_path / "struct.xyz"
+        a = Atoms("Si64",
+                  positions=[(i * 1.4 % 11, (i // 4) * 1.4 % 11,
+                              (i // 16) * 1.4 % 11) for i in range(64)],
+                  cell=[11, 11, 11], pbc=True)
+        write(str(src), a, format="extxyz")
+        plots = tmp_path / "plots"
+        _run_cli(["--analyse", str(src), "--sq", "--sq-method", method,
+                  "--save-plot", str(plots)], monkeypatch)
+        out = capsys.readouterr().out
+        assert f"S(q): {method} method" in out
+        header = (plots / "analysis_sq.csv").read_text().splitlines()[0]
+        if method == "direct":
+            assert "n_per_bin" in header
+            assert "truncated" not in out
+        else:
+            assert "n_per_bin" not in header
+            assert "truncated at r = L/2" in out
+
 
 # ─── --analyse with --reference ───────────────────────────────────────────
 

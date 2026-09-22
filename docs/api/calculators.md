@@ -34,7 +34,7 @@ The following MACE foundation models are available via `get_calculator()`:
 
 | Key | Variant |
 |-----|---------|
-| `sevennet`, `7net-mf-ompa` | Multi-fidelity foundation (OMat+MPtrj+Alexandria) — recommended |
+| `sevennet`, `7net-mf-ompa` | Multi-fidelity foundation (OMat+MPtrj+Alexandria), recommended |
 | `7net-mf-0` | Multi-fidelity baseline |
 | `7net-omat` | OMat-only |
 | `7net-l3i5` | Improved equivariant features |

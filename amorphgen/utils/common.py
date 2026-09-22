@@ -124,6 +124,37 @@ def make_cubic(atoms):
 _VALID_NPT_METHODS = ("berendsen", "mtk", "parrinello-rahman")
 
 
+def calculator_supports_stress(calc) -> bool:
+    """Return True if *calc* advertises a stress tensor.
+
+    Variable-cell operations (NPT barostats, cell-filter optimisation) need
+    the stress. The classical pair potentials (Lennard-Jones, Buckingham)
+    implement only energy + forces, so this returns False for them.
+    """
+    props = getattr(calc, "implemented_properties", None) or []
+    return "stress" in props
+
+
+def require_stress(calc, context: str) -> None:
+    """Raise a clear error if *calc* cannot provide stress for *context*.
+
+    Prevents an opaque ``PropertyNotImplementedError`` from surfacing deep
+    inside ASE when a stress-less calculator is used with a barostat or a
+    cell filter.
+    """
+    if not calculator_supports_stress(calc):
+        name = type(calc).__name__ if calc is not None else "the calculator"
+        props = getattr(calc, "implemented_properties", []) if calc is not None else []
+        raise RuntimeError(
+            f"{context} requires a stress tensor, but {name} implements only "
+            f"{list(props)}. Either use a stress-capable MLIP backend "
+            f"(mace / chgnet / sevennet), or run with a fixed cell when using "
+            f"a classical pair potential (lennard-jones / buckingham): pass "
+            f"-C none on the CLI, or set cell_filter: none under opt: (or "
+            f"random_gen:) in the YAML, and use an NVT ensemble for MD stages."
+        )
+
+
 def build_md_dynamics(atoms, ensemble: str = "NVT", T: float = 300.0,
                       timestep: float = 1.0, friction: float = 0.01,
                       ttime: float = 25.0, pfactor: float | None = None,
@@ -217,6 +248,11 @@ def build_md_dynamics(atoms, ensemble: str = "NVT", T: float = 300.0,
     if ensemble.upper() != "NPT":
         raise ValueError(f"Unknown ensemble '{ensemble}'. Use 'NVT' or 'NPT'.")
 
+    # NPT barostats need the stress tensor; fail early and clearly for
+    # stress-less calculators (classical LJ / Buckingham) rather than deep
+    # inside the ASE integrator.
+    require_stress(getattr(atoms, "calc", None), f"NPT ({npt_method}) dynamics")
+
     method = npt_method.lower()
     if method not in _VALID_NPT_METHODS:
         raise ValueError(
@@ -282,29 +318,37 @@ def build_md_dynamics(atoms, ensemble: str = "NVT", T: float = 300.0,
 
 def resolve_ramp(T_start: float, T_end: float, T_step: float) -> list[float]:
     """
-    Generate a list of temperatures for a ramp.
+    Generate the list of temperatures for a ramp from ``T_start`` to ``T_end``.
 
-    Works for both heating (T_step > 0) and cooling (T_step < 0).
-    Always includes T_end.
+    The ramp direction is taken from the endpoints, so only the *magnitude*
+    of ``T_step`` matters — a mis-signed step (e.g. a positive step for a
+    cooling ramp) can no longer produce an empty list or an infinite loop.
+    Float steps are supported. ``T_end`` is always the final entry, even when
+    the span is not an integer multiple of the step, and the ramp never
+    overshoots past ``T_end``.
+
+    Raises
+    ------
+    ValueError
+        If ``T_step`` has zero magnitude.
     """
-    if T_step == 0:
-        raise ValueError("T_step cannot be zero.")
+    T_start = float(T_start)
+    T_end = float(T_end)
+    step = abs(float(T_step))
+    if step == 0:
+        raise ValueError("T_step magnitude cannot be zero.")
 
-    temps = []
-    T = T_start
-    if T_step > 0:
-        while T <= T_end + 1e-6:
-            temps.append(round(T, 2))
-            T += T_step
-    else:
-        while T >= T_end - 1e-6:
-            temps.append(round(T, 2))
-            T += T_step
+    span = abs(T_end - T_start)
+    # Number of full steps that fit strictly inside the span (the -1e-9 keeps
+    # an exactly-divisible span from emitting a duplicate endpoint below).
+    n = int(np.ceil(span / step - 1e-9))
+    sign = 1.0 if T_end >= T_start else -1.0
 
-    # Ensure T_end is included
-    if abs(temps[-1] - T_end) > 1e-6:
-        temps.append(round(T_end, 2))
-
+    temps = [round(T_start + sign * step * k, 2) for k in range(n)]
+    temps.append(round(T_end, 2))
+    # Near-divisible spans can round the last interior point onto T_end.
+    if len(temps) >= 2 and abs(temps[-1] - temps[-2]) < 1e-9:
+        temps.pop(-2)
     return temps
 
 

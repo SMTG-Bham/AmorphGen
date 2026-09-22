@@ -183,3 +183,24 @@ class TestMDStages:
         # System should still be physically reasonable
         assert cu_supercell.get_temperature() > 0
         assert np.isfinite(cu_supercell.get_potential_energy())
+
+
+class TestCalcInjection:
+    """A calculator passed to MeltQuenchPipeline is used for every stage,
+    bypassing the get_calculator() backend factory."""
+
+    def test_injected_calc_is_reused(self, cu_bulk, emt_calc, tmp_work_dir):
+        from amorphgen.pipeline.run_pipeline import MeltQuenchPipeline
+        from ase.io import write
+
+        input_file = str(tmp_work_dir / "input.xyz")
+        write(input_file, cu_bulk)
+
+        pipe = MeltQuenchPipeline(
+            input_file=input_file,
+            work_dir=str(tmp_work_dir / "run"),
+            calc=emt_calc,
+        )
+        # No get_calculator() call, no backend factory — the exact object back.
+        assert pipe._get_calc() is emt_calc
+        assert pipe._get_calc() is emt_calc  # stable across calls

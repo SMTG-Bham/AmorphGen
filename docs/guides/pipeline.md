@@ -20,7 +20,7 @@ Relaxes the input structure (cell + atomic positions) to remove any initial stre
 Short NVT equilibration at 300 K. Thermalises the system before the rapid heating stage, improving trajectory stability.
 
 ### Stage 3: Melt (heat ramp)
-Linear temperature ramp from 300 K to the target melt temperature (default 3000 K). Uses **NPT with the Berendsen weak-coupling barostat** by default — the cell expands physically as the system heats.
+Linear temperature ramp from 300 K to the target melt temperature (default 3000 K). Uses **NPT with the Berendsen weak-coupling barostat** by default, the cell expands physically as the system heats.
 
 ### Stage 4: High-temperature equilibration
 Holds the system at the melt temperature to ensure thorough melting and loss of crystalline memory. Uses **NPT with the Martyna-Tobias-Klein (MTK) Nose-Hoover-chain integrator** by default, giving true canonical fluctuations around the equilibrium melt volume. Users who want the legacy constant-volume behaviour can set `eq_high.ensemble: NVT`.
@@ -63,7 +63,7 @@ melt:
   compressibility_GPa: 200.0     # stiffer, oxide-realistic
 ```
 
-On a Cu/EMT benchmark at 1500 K over 300 fs, these settings reduce the maximum volume excursion from 6.7 % (defaults) to 1.8 % — a 74 % reduction.
+On a Cu/EMT benchmark at 1500 K over 300 fs, these settings reduce the maximum volume excursion from 6.7 % (defaults) to 1.8 %, a 74 % reduction.
 
 **Example: true canonical fluctuations at the equilibration plateau**
 

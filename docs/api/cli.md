@@ -161,6 +161,12 @@ amorphgen --analyse --input-dir optimised/ \
 # Validate against literature ranges defined in a reference YAML
 amorphgen --analyse --input-dir optimised/ \
     --reference examples/reference_a_Ga2O3.yaml
+
+# Structure factor S(q): direct (Debye) method, neutron weighting, saved as PNG + CSV
+amorphgen --analyse --input-dir optimised/ --sq --sq-weighting neutron --save-plot plots/
+
+# Same, but the Fourier-transform-of-g(r) route and no re-binning
+amorphgen --analyse --input-dir optimised/ --sq --sq-method ft --sq-smooth 0 --save-plot plots/
 ```
 
 ### Rank structures by energy (from a random-gen log)

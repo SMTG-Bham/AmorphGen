@@ -50,7 +50,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
     # ramp_resume_position. The legacy filename lets a run interrupted
     # under a pre-rename AmorphGen still resume after upgrade.
     from ..utils.common import (resume_md_stage, needs_velocity_init,
-                                ramp_resume_position)
+                                ramp_resume_position, resolve_ramp)
     ck_atoms, elapsed = resume_md_stage(trajfile, kwargs.get("resume"), "5",
                                         legacy_trajfile="stage5_quench.xyz")
     if ck_atoms is not None:
@@ -80,10 +80,8 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
         compressibility_GPa=cfg.get("compressibility_GPa", 100.0),
     )
 
-    logger, traj = attach_outputs(dyn, atoms, logfile, trajfile,
-                                  fmt=global_cfg.get("traj_format", "extxyz"),
-                                  append=elapsed > 0)
-
+    # Ramp schedule resolved BEFORE attach_outputs so a bad schedule (e.g.
+    # T_step: 0) raises before any existing trajectory/log is truncated.
     T_end = cfg["T_end"]
     T_step = cfg.get("T_step", -100)
     timestep_fs = cfg.get("timestep", 1.0)
@@ -96,12 +94,14 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
     else:
         steps = cfg.get("steps_per_T", 1000)
 
-    # Build temperature list (cooling)
-    temps = []
-    T = T_start
-    while T >= T_end - 1e-6:
-        temps.append(int(round(T)))
-        T += T_step
+    # Build temperature list (cooling). resolve_ramp is float-safe, infers the
+    # cooling direction from the endpoints (so a mis-signed or zero T_step can
+    # no longer loop forever), always lands on T_end, and never overshoots.
+    temps = resolve_ramp(T_start, T_end, T_step)
+
+    logger, traj = attach_outputs(dyn, atoms, logfile, trajfile,
+                                  fmt=global_cfg.get("traj_format", "extxyz"),
+                                  append=elapsed > 0)
 
     from ..utils.common import compute_density_gcm3
     density = compute_density_gcm3(atoms)
@@ -120,7 +120,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
         dyn.set_temperature(temperature_K=T)
         run_steps = steps - offset if idx == k0 else steps
         note = f"  (resumed, {run_steps} steps left)" if (idx == k0 and offset) else ""
-        print(f"  -> T = {T:5d} K{note}")
+        print(f"  -> T = {T:7.1f} K{note}")
         dyn.run(run_steps)
 
     logger.close()

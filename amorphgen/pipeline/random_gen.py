@@ -1027,6 +1027,25 @@ _FORMAT_MAP = {
 }
 
 
+def _derive_structure_seed(base_seed: int, index: int, attempt: int) -> int:
+    """Deterministic per-structure seed from ``(base_seed, index, attempt)``.
+
+    Keyed on the structure *index* (not a running counter that advances on
+    every attempt and skip), so a ``--resume`` run reproduces exactly the
+    structures a fresh, uninterrupted run would generate for the same
+    ``base_seed`` — while a retry of a failed placement (``attempt`` > 0) still
+    draws fresh randomness rather than repeating the same failure.
+
+    Note: this makes generation reproducible in the common case. The
+    batch-level escalation ladder (density_scale / minsep changes after
+    repeated failures) mutates state that is *not* persisted across a resume,
+    so a run that triggered the ladder is not bit-for-bit reproducible on
+    resume from the ladder point onward.
+    """
+    ss = np.random.SeedSequence([int(base_seed), int(index), int(attempt)])
+    return int(ss.generate_state(1, dtype=np.uint32)[0])
+
+
 def batch_random(
     composition: dict[str, int],
     n_structures: int = 1,
@@ -1252,7 +1271,7 @@ def batch_random(
         # -- Generate structures --
         # Auto-retry: reduce M-M minsep by 5/10/15/20%
         generated = 0
-        seed_offset = 0
+        attempt = 0          # retry counter for the CURRENT structure index
         failures = 0
         retry_level = 0
         current_minsep = dict(kwargs.get("minsep") or minsep_log)
@@ -1309,15 +1328,17 @@ def batch_random(
                 _log(f"  [{generated+1}/{n_structures}] Already exists "
                      f"-- skipping.", lf)
                 generated += 1
+                attempt = 0
                 continue
 
-            seed_i = base_seed + seed_offset if base_seed is not None else None
-            seed_offset += 1
+            seed_i = (_derive_structure_seed(base_seed, generated, attempt)
+                      if base_seed is not None else None)
 
             try:
                 atoms = generate_random(composition, seed=seed_i, **kwargs)
             except RuntimeError:
                 failures += 1
+                attempt += 1
                 if failures >= max_retries:
                     failures = 0
                     retry_level += 1
@@ -1362,6 +1383,7 @@ def batch_random(
                         retry_level = 0
                         kwargs["density_scale"] = base_density_scale
                         generated += 1
+                        attempt = 0
                 continue
 
             failures = 0
@@ -1376,9 +1398,15 @@ def batch_random(
                 write(fname, atoms, format=ase_format)
 
             if relax and calc is not None:
-                from ..utils.common import compute_density_gcm3
+                from ..utils.common import compute_density_gcm3, require_stress
                 from ase.geometry import cell_to_cellpar
                 atoms.calc = calc
+                # A cell filter relaxes the cell and needs stress; classical
+                # potentials (LJ/Buckingham) don't provide it. Fail clearly
+                # instead of crashing inside ASE (the default cell_filter for
+                # --random-gen --relax is 'cubic', so this is a common combo).
+                if cell_filter not in ("none", None):
+                    require_stress(calc, f"--relax with cell_filter={cell_filter!r}")
                 OptimizerClass = _get_optimizer_class(optimizer)
                 target = _build_cell_filter(atoms, cell_filter)
                 opt_logfile = os.path.join(opt_dir,
@@ -1460,6 +1488,7 @@ def batch_random(
                          f"mean={data['mean']:.1f}, "
                          f"range=[{data['min']},{data['max']}]", lf)
             generated += 1
+            attempt = 0
 
         _log(f"\n  Generated {len(paths)} structures in {output_dir}/", lf)
         if len(paths) < n_structures:

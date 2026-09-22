@@ -70,6 +70,12 @@ class MeltQuenchPipeline:
 
     share_calc : bool
         If True, one calculator is shared across all stages.
+    calc : ASE calculator, optional
+        A pre-built ASE calculator to use for every stage, bypassing the
+        ``get_calculator()`` backend factory. Lets you drive the full pipeline
+        with any ASE calculator (a fine-tuned model, a custom potential, an
+        external code). NPT and cell-filter stages still require the
+        calculator to provide a stress tensor.
     """
 
     STAGE_NAMES = {
@@ -96,13 +102,21 @@ class MeltQuenchPipeline:
     def __init__(self, input_file: str,
                  work_dir: str = "melt_quench_run",
                  cfg_override: dict | None = None,
-                 share_calc: bool = True):
+                 share_calc: bool = True,
+                 calc=None):
 
         self.input_file = input_file
         self.work_dir   = work_dir
         self.cfg        = merge_config(DEFAULT_CONFIG, cfg_override)
         self.share_calc = share_calc
-        self._calc      = None
+        # An explicit ASE calculator supplied here is used for every stage,
+        # bypassing the get_calculator() factory. This lets callers drive the
+        # full pipeline with any ASE calculator (a fine-tuned model, a custom
+        # potential, an external code) rather than only the built-in backends.
+        # A stress-less calculator will still be rejected by the NPT / cell-
+        # filter guards where a stress tensor is required.
+        self._injected_calc = calc
+        self._calc      = calc
         self._orig_dir  = os.getcwd()
         os.makedirs(work_dir, exist_ok=True)
 
@@ -113,7 +127,13 @@ class MeltQuenchPipeline:
     # ─────────────────────────────────────────────────────────────────────────
 
     def _get_calc(self):
-        """Build or return the shared calculator."""
+        """Build or return the shared calculator.
+
+        An injected calculator (passed to the constructor) is always reused
+        as-is; otherwise one is built from the config via get_calculator().
+        """
+        if self._injected_calc is not None:
+            return self._injected_calc
         if self._calc is None or not self.share_calc:
             from ..utils.common import resolve_device
             device = resolve_device(self.cfg.get("device", "cuda"))

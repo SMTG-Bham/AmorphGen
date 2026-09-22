@@ -197,3 +197,125 @@ class TestClassicalViaFactory:
                                    "cutoff": 10.0,
                                })
         assert isinstance(calc, BuckinghamCalculator)
+
+
+# ─── Stress-capability guard (classical potentials lack a stress tensor) ────
+
+class TestStressGuard:
+    """LJ/Buckingham implement only energy+forces. Variable-cell operations
+    (NPT, cell-filter optimisation) need stress and must fail with a clear
+    error instead of an opaque PropertyNotImplementedError from ASE."""
+
+    def _lj(self):
+        return LennardJonesCalculator(
+            {("Cu", "Cu"): {"epsilon": 0.01, "sigma": 3.0}})
+
+    def _atoms(self):
+        return Atoms("Cu4",
+                     positions=[[0, 0, 0], [1.8, 0, 0],
+                                [0, 1.8, 0], [0, 0, 1.8]],
+                     cell=[6, 6, 6], pbc=True)
+
+    def test_classical_reports_no_stress(self):
+        from amorphgen.utils.common import calculator_supports_stress
+        assert calculator_supports_stress(self._lj()) is False
+
+    def test_emt_reports_stress(self):
+        from ase.calculators.emt import EMT
+        from amorphgen.utils.common import calculator_supports_stress
+        assert calculator_supports_stress(EMT()) is True
+
+    def test_npt_with_stressless_calc_raises(self):
+        from amorphgen.utils.common import build_md_dynamics
+        atoms = self._atoms()
+        atoms.calc = self._lj()
+        with pytest.raises(RuntimeError, match="stress"):
+            build_md_dynamics(atoms, ensemble="NPT", npt_method="berendsen")
+
+    def test_npt_with_stress_capable_calc_builds(self):
+        from ase.calculators.emt import EMT
+        from amorphgen.utils.common import build_md_dynamics
+        atoms = self._atoms()
+        atoms.calc = EMT()
+        dyn = build_md_dynamics(atoms, ensemble="NPT", npt_method="berendsen")
+        assert dyn is not None
+
+    def test_require_stress_helper_message_is_actionable(self):
+        from amorphgen.utils.common import require_stress
+        with pytest.raises(RuntimeError) as exc:
+            require_stress(self._lj(), "Cell-filter optimisation")
+        msg = str(exc.value)
+        # Must name the remedy AND where it goes (CLI flag / YAML block).
+        assert "stress" in msg
+        assert "-C none" in msg and "cell_filter: none" in msg and "opt:" in msg
+
+
+# ─── Ewald Coulomb ─────────────────────────────────────────────────────────
+
+class TestEwaldCoulomb:
+    """The Coulomb part of BuckinghamCalculator is an Ewald sum by default."""
+
+    _P0 = {("Na", "Cl"): {"A": 0.0, "rho": 1.0, "C": 0.0},
+           ("Na", "Na"): {"A": 0.0, "rho": 1.0, "C": 0.0},
+           ("Cl", "Cl"): {"A": 0.0, "rho": 1.0, "C": 0.0}}
+    _MADELUNG = -1.747565 * 14.399645 / 2.82          # eV per ion pair, NaCl a=5.64
+
+    def _nacl(self):
+        from ase.build import bulk
+        return bulk("NaCl", "rocksalt", a=5.64).repeat((2, 2, 2))   # 16 atoms, 7.98 A cell
+
+    @pytest.mark.parametrize("cutoff", [6.0, 12.0])   # below and above L/2
+    def test_nacl_madelung_energy(self, cutoff):
+        from amorphgen.utils.classical import BuckinghamCalculator
+        at = self._nacl()
+        at.calc = BuckinghamCalculator(self._P0, charges={"Na": 1, "Cl": -1}, cutoff=cutoff)
+        e_pair = at.get_potential_energy() / (len(at) // 2)
+        assert e_pair == pytest.approx(self._MADELUNG, abs=2e-3)
+
+    def test_wolf_is_only_approximate(self):
+        from amorphgen.utils.classical import BuckinghamCalculator
+        at = self._nacl()
+        at.calc = BuckinghamCalculator(self._P0, charges={"Na": 1, "Cl": -1}, cutoff=6.0,
+                                       coulomb_method="wolf")
+        e_pair = at.get_potential_energy() / (len(at) // 2)
+        assert abs(e_pair - self._MADELUNG) > 0.02     # Wolf: ~1 % off here
+
+    def test_forces_match_finite_differences(self):
+        from amorphgen.utils.classical import BuckinghamCalculator
+        rng = np.random.default_rng(3)
+        at = self._nacl(); at.rattle(0.15, seed=1)
+        at.calc = BuckinghamCalculator(
+            {("Na", "Cl"): {"A": 2000.0, "rho": 0.3, "C": 0.0},
+             ("Na", "Na"): {"A": 0.0, "rho": 1.0, "C": 0.0},
+             ("Cl", "Cl"): {"A": 1000.0, "rho": 0.35, "C": 20.0}},
+            charges={"Na": 1, "Cl": -1}, cutoff=8.0)
+        F = at.get_forces()
+        for k in rng.choice(len(at), 2, replace=False):
+            for ax in range(3):
+                h = 1e-4; p = at.positions.copy()
+                at.positions[k, ax] = p[k, ax] + h; ep = at.get_potential_energy()
+                at.positions[k, ax] = p[k, ax] - h; em = at.get_potential_energy()
+                at.positions = p
+                assert -(ep - em) / (2 * h) == pytest.approx(F[k, ax], abs=1e-4)
+
+    def test_default_alpha_and_method(self):
+        from amorphgen.utils.classical import BuckinghamCalculator
+        c = BuckinghamCalculator(self._P0, charges={"Na": 1, "Cl": -1}, cutoff=10.0)
+        assert c.coulomb_method == "ewald" and c.alpha == pytest.approx(0.35)
+        w = BuckinghamCalculator(self._P0, charges={"Na": 1, "Cl": -1}, cutoff=10.0,
+                                 coulomb_method="wolf")
+        assert w.alpha == pytest.approx(0.2)
+        with pytest.raises(ValueError):
+            BuckinghamCalculator(self._P0, charges={"Na": 1}, coulomb_method="pme")
+
+    def test_against_pymatgen_ewald_if_available(self):
+        pmg = pytest.importorskip("pymatgen.analysis.ewald")
+        from pymatgen.core import Structure, Lattice
+        from amorphgen.utils.classical import BuckinghamCalculator
+        at = self._nacl(); at.rattle(0.2, seed=2)
+        at.calc = BuckinghamCalculator(self._P0, charges={"Na": 1, "Cl": -1}, cutoff=8.0)
+        st = Structure(Lattice(at.cell[:]), at.get_chemical_symbols(), at.positions, coords_are_cartesian=True)
+        st.add_oxidation_state_by_element({"Na": 1, "Cl": -1})
+        ref = pmg.EwaldSummation(st, compute_forces=True)
+        assert at.get_potential_energy() == pytest.approx(ref.total_energy, abs=1e-3)
+        assert np.abs(at.get_forces() - np.array(ref.forces)).max() < 1e-3

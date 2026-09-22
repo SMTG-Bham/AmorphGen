@@ -3,7 +3,7 @@
 AmorphGen supports multiple calculator backends through a unified factory: three machine-learning interatomic potentials (MLIPs) and two classical pair potentials.
 
 ```{note}
-**ASE convention pass-through.**  `amorphgen.utils.calculators.get_calculator()` is a thin wrapper around each backend's upstream ASE calculator (`MACECalculator`, `CHGNetCalculator`, `SevenNetCalculator`, plus the built-in classical calculators).  AmorphGen does **not** apply any custom unit conversion, stress-sign flip, or PBC override — energies are returned in eV, forces in eV/Å, stress in eV/Å³, and `atoms.pbc` is passed through unchanged.  This means cross-backend numerical consistency is inherited directly from the upstream MLIP package.  If you upgrade `mace-torch`, `chgnet`, or `sevenn` and observe a sudden density / energy shift, check the upstream calculator's release notes for unit-convention changes before assuming an AmorphGen regression.
+`amorphgen.utils.calculators.get_calculator()` is a thin wrapper around each backend's upstream ASE calculator (`MACECalculator`, `CHGNetCalculator`, `SevenNetCalculator`, plus the built-in classical calculators).  AmorphGen does **not** apply any custom unit conversion, stress-sign flip, or PBC override - energies are returned in eV, forces in eV/Å, stress in eV/Å³, and `atoms.pbc` is passed through unchanged.  This means cross-backend numerical consistency is inherited directly from the upstream MLIP package.  If you upgrade `mace-torch`, `chgnet`, or `sevenn` and observe a sudden density / energy shift, check the upstream calculator's release notes for unit-convention changes before assuming an AmorphGen regression.
 ```
 
 ## MLIP backends
@@ -18,7 +18,7 @@ calc = get_calculator(model="mace-mpa-0", device="auto")
 
 `device="auto"` picks CUDA → MPS → CPU automatically; pass `"cpu"` / `"cuda"` / `"mps"` explicitly to override.
 
-**Install:** `pip install amorphgen[mace]`
+Install: `pip install amorphgen[mace]`
 
 ### CHGNet
 
@@ -28,11 +28,11 @@ Crystal Hamiltonian Graph Neural Network. Good balance of speed and accuracy, es
 calc = get_calculator(model="chgnet")
 ```
 
-**Install:** `pip install amorphgen[chgnet]`
+Install: `pip install amorphgen[chgnet]`
 
-**Precision (dtype):** CHGNet is trained and benchmarked at `float32`. AmorphGen's CHGNet loader enforces this — passing `default_dtype="float64"` raises `NotImplementedError` with a clear message pointing the user to MACE, because CHGNet's `composition_model` submodule builds its input feature vectors via a path that bypasses `torch.get_default_dtype()` and crashes at forward time when the rest of the model is upcast. Keeping `float32` (the default) is the recommended path for MD; switch to MACE if you genuinely need `float64` for static-energy precision.
+Precision: CHGNet is trained and benchmarked at `float32`. AmorphGen's CHGNet loader enforces this, passing `default_dtype="float64"` raises `NotImplementedError` with a clear message pointing the user to MACE, because CHGNet's `composition_model` submodule builds its input feature vectors via a path that bypasses `torch.get_default_dtype()` and crashes at forward time when the rest of the model is upcast. Keeping `float32` (the default) is the recommended path for MD; switch to MACE if you genuinely need `float64` for static-energy precision.
 
-**MD performance heads-up:** CHGNet's `CHGNetCalculator.calculate()` rebuilds the atomic graph (neighbour list + edges + line graph) from scratch on every MD step. For systems above ~200 atoms or with high density (e.g. a-Ga₂O₃ at 400 atoms), the per-step cost on an A100 is around 500 ms — substantially slower than the AdvanceSoft H100 benchmark (≈ 84 ms/step at 400 atoms for Li₁₀GeP₂S₁₂) would predict, mostly because (a) denser oxides have more graph edges per atom and (b) the ASE → pymatgen → graph round-trip carries Python overhead. For large-system MD where speed matters, MACE (which caches neighbour lists internally) is 3–5× faster at the same system size.
+A note on MD speed: CHGNet's `CHGNetCalculator.calculate()` rebuilds the atomic graph (neighbour list + edges + line graph) from scratch on every MD step. For systems above ~200 atoms or with high density (e.g. a-Ga₂O₃ at 400 atoms), the per-step cost on an A100 is around 500 ms, substantially slower than the AdvanceSoft H100 benchmark (≈ 84 ms/step at 400 atoms for Li₁₀GeP₂S₁₂) would predict, mostly because (a) denser oxides have more graph edges per atom and (b) the ASE → pymatgen → graph round-trip carries Python overhead. For large-system MD where speed matters, MACE (which caches neighbour lists internally) is 3–5× faster at the same system size.
 
 ### SevenNet
 
@@ -47,10 +47,10 @@ calc = get_calculator(model="7net-omat")                    # OMat-trained
 
 For multi-fidelity models (`7net-mf-*`), AmorphGen defaults `modal='mpa'` (MPtrj+Alexandria, PBE). Override with the `modal` kwarg if you want `'omat24'` (PBE+U).
 
-**Install:** `pip install amorphgen[sevennet]` (no DGL dep, works on Mac/Linux)
+Install: `pip install amorphgen[sevennet]` (no DGL dep, works on Mac/Linux)
 
 :::{warning}
-**Use a separate environment for SevenNet.** SevenNet depends on `e3nn>=0.5`,
+Use a separate environment for SevenNet: it depends on `e3nn>=0.5`,
 while pre-trained MACE foundation models (`mace-mpa-0`, ...) were pickled
 with `e3nn==0.4.x`. e3nn 0.5+ changed the `_codegen` storage format from
 2-tuples to 3-tuples; loading a MACE foundation model with the newer e3nn
@@ -96,7 +96,7 @@ calc = get_calculator("lennard-jones", classical_params={
 
 ### Buckingham + Coulomb
 
-Buckingham short-range potential with Wolf summation for long-range Coulomb. V(r) = A*exp(-r/rho) - C/r^6 + q_i*q_j/(4*pi*eps0*r). Rigid-ion model (no core-shell).
+Buckingham short-range potential with Ewald summation for the long-range Coulomb term. V(r) = A*exp(-r/rho) - C/r^6 + q_i*q_j/(4*pi*eps0*r). Rigid-ion model (no core-shell). The Ewald real-space part runs over the pair cutoff with alpha = 3.5/cutoff, the reciprocal-space part is summed in NumPy; energies match a reference Ewald to 0.02 meV/atom. The damped-shifted Wolf sum is still available as `coulomb_method: wolf`, but note it is only approximate (about 10 % force error for an ionic melt at a 10 A cutoff), so use it for speed comparisons rather than production runs.
 
 ```python
 calc = get_calculator("buckingham", classical_params={
@@ -106,8 +106,8 @@ calc = get_calculator("buckingham", classical_params={
     },
     "charges": {"Si": 2.4, "O": -1.2},
     "cutoff": 10.0,
-    "alpha": 0.2,      # Wolf damping (1/A)
-    "coulomb": True,    # set False for Buckingham-only
+    "coulomb": True,           # set False for Buckingham-only
+    "coulomb_method": "ewald", # or "wolf" (approximate, faster)
 })
 ```
 

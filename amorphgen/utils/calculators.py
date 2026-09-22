@@ -364,16 +364,18 @@ def _load_classical(model: str, device: str = "cpu", **kwargs) -> Any:
     else:
         charges = cp.get("charges", {})
         coulomb = cp.get("coulomb", True)
-        alpha = cp.get("alpha", 0.2)
+        alpha = cp.get("alpha", None)
+        coulomb_method = cp.get("coulomb_method", "ewald")
         print(f"[Classical] Buckingham+Coulomb, {len(converted)} pair(s), "
               f"cutoff={cp.get('cutoff', 10.0)} A, "
-              f"coulomb={'on' if coulomb else 'off'}{dev_str}")
+              f"coulomb={coulomb_method if coulomb else 'off'}{dev_str}")
         return BuckinghamCalculator(
             params=converted,
             charges=charges,
             cutoff=cp.get("cutoff", 10.0),
             alpha=alpha,
             coulomb=coulomb,
+            coulomb_method=coulomb_method,
             device=device,
         )
 

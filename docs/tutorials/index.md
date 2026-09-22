@@ -8,7 +8,7 @@ Jupyter notebook tutorials demonstrating AmorphGen workflows.
 |----------|-------------|---------|--------|
 | [Tutorial 1: Quick-start tutorial](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T1_5min_intro/tutorial_1_5min_intro.ipynb) | Orientation: what AmorphGen does, the three workflows, decision tree, one live demo | CHGNet | a-SiO₂ |
 
-**Workflow tutorials** — each tutorial reports its own measured wall time on the CPU it was validated on:
+Workflow tutorials (each reports the wall time measured on the CPU it was validated on):
 
 | Tutorial | Description | Backend | System |
 |----------|-------------|---------|--------|
@@ -18,7 +18,7 @@ Jupyter notebook tutorials demonstrating AmorphGen workflows.
 | [Tutorial 5: Hybrid batch quench](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T5_mix_random_MQ/tutorial_5_batch_quench.ipynb) | Random gen → equilibrate → batch quench | CHGNet | TiO₂ |
 | [Tutorial 6: Classical potentials](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T6_classical_potential/tutorial_6_classical_potential.ipynb) | Buckingham+Coulomb relaxation, hybrid workflow | Classical | SiO₂, Al₂O₃, TiO₂ |
 
-**Application case studies** (assume familiarity with the workflow tutorials):
+Application case studies (these assume you have done the workflow tutorials):
 
 | Tutorial | Description | Backend | System |
 |----------|-------------|---------|--------|

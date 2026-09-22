@@ -100,3 +100,42 @@ class TestRandomGenResume:
         with pytest.warns(UserWarning, match="composition changed"):
             batch_random({"Al": 8, "O": 12}, n_structures=2,
                          output_dir=out, seed=42, resume=True)
+
+
+class TestSeedReproducibility:
+    """Per-structure seeds are derived from the structure index, so a resumed
+    run reproduces exactly the structures a fresh run would generate."""
+
+    def test_seed_helper_index_stable_and_retry_varying(self):
+        from amorphgen.pipeline.random_gen import _derive_structure_seed
+        # Deterministic for a fixed (base_seed, index, attempt)
+        assert _derive_structure_seed(42, 3, 0) == _derive_structure_seed(42, 3, 0)
+        # Distinct per index
+        seeds = {_derive_structure_seed(42, i, 0) for i in range(6)}
+        assert len(seeds) == 6
+        # Retries of the same index draw different randomness
+        assert _derive_structure_seed(42, 3, 0) != _derive_structure_seed(42, 3, 1)
+
+    def test_resume_reproduces_fresh_structures(self, tmp_path):
+        comp = {"Si": 8, "O": 16}
+        fresh = str(tmp_path / "fresh")
+        resumed = str(tmp_path / "resumed")
+
+        batch_random(comp, n_structures=4, output_dir=fresh, seed=123)
+
+        # Simulate an interruption: pre-seed the resume dir with the first
+        # two structures from the fresh run, then resume.
+        init = os.path.join(resumed, "random_initial")
+        os.makedirs(init, exist_ok=True)
+        for i in (0, 1):
+            src = os.path.join(fresh, "random_initial", f"random_{i:04d}.xyz")
+            write(os.path.join(init, f"random_{i:04d}.xyz"), read(src))
+        batch_random(comp, n_structures=4, output_dir=resumed, seed=123,
+                     resume=True)
+
+        # Indices generated on resume (2, 3) must match the fresh run exactly.
+        for i in (2, 3):
+            a = read(os.path.join(fresh, "random_initial", f"random_{i:04d}.xyz"))
+            b = read(os.path.join(resumed, "random_initial", f"random_{i:04d}.xyz"))
+            assert a.get_chemical_symbols() == b.get_chemical_symbols()
+            assert np.allclose(a.get_positions(), b.get_positions())

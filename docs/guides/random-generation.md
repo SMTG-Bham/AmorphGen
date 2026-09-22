@@ -27,33 +27,33 @@ The classifier uses an element-type rule (nonmetal / metalloid / metal membershi
 
 | Pair | Δχ | Type rule | Final class | Why it matters |
 |------|----|-----------|-------------|----------------|
-| Ga–As | 0.37 | ionic (metal+metalloid) | covalent | Shannon radii would give minsep ≈ 0.68 Å — atomic overlap |
+| Ga–As | 0.37 | ionic (metal+metalloid) | covalent | Shannon radii would give minsep ≈ 0.68 Å, atomic overlap |
 | In–P  | 0.41 | ionic | covalent | III–V semiconductor |
 | Si–C  | 0.65 | ionic | covalent | Carbide |
 | B–N   | 1.00 | ionic | ionic (at threshold) | Sits right on the cutoff; Shannon radii give reasonable BN minsep |
 | Ga–N  | 1.23 | ionic | ionic | Stays ionic |
 | Li–F  | 3.00 | ionic | ionic | Stays ionic (clearly ionic) |
 
-The Δχ refinement is applied to the metalloid–nonmetal, metalloid–metal, and metal–nonmetal branches. The metallic branch (metal–metal) and the pure-covalent branch (nonmetal–nonmetal, metalloid–metalloid) are unaffected because the type rule already gives the correct answer there. The 1.0 threshold is empirical — it cleanly separates III–V/II–VI semiconductors and carbides (covalent character ≥ 70% by Pauling's formula) from the polar-ionic borderline cases (GaN, ZnO, BeO) where Shannon ionic radii give sensible minsep values.
+The Δχ refinement is applied to the metalloid–nonmetal, metalloid–metal, and metal–nonmetal branches. The metallic branch (metal–metal) and the pure-covalent branch (nonmetal–nonmetal, metalloid–metalloid) are unaffected because the type rule already gives the correct answer there. The 1.0 threshold is empirical, it cleanly separates III–V/II–VI semiconductors and carbides (covalent character ≥ 70% by Pauling's formula) from the polar-ionic borderline cases (GaN, ZnO, BeO) where Shannon ionic radii give sensible minsep values.
 
 The bond classifier is exposed as `amorphgen.utils.radii.classify_bond(sym_a, sym_b)` for inspection.
 
-**Citations.** The electronegativity scale follows Pauling's original definition from bond-dissociation energies (Pauling 1932) as standardised in his textbook (Pauling 1960), with the specific numerical values used in AmorphGen taken from Allred's 1961 thermochemical revision — the values now in the CRC Handbook and most chemistry textbooks. References:
+The electronegativity scale follows Pauling's original definition from bond-dissociation energies (Pauling 1932) as standardised in his textbook (Pauling 1960), with the specific numerical values used in AmorphGen taken from Allred's 1961 thermochemical revision, the values now in the CRC Handbook and most chemistry textbooks. References:
 
-- Pauling, L. *J. Am. Chem. Soc.* **54**, 3570–3582 (1932) — original EN derivation.
-- Pauling, L. *The Nature of the Chemical Bond*, 3rd ed., Cornell Univ. Press (1960) — textbook scale.
-- Allred, A. L. *J. Inorg. Nucl. Chem.* **17**, 215–221 (1961) — **revised values used in the code** (`PAULING_EN` table in `amorphgen/utils/radii.py`).
+- Pauling, L. *J. Am. Chem. Soc.* **54**, 3570–3582 (1932), original EN derivation.
+- Pauling, L. *The Nature of the Chemical Bond*, 3rd ed., Cornell Univ. Press (1960), textbook scale.
+- Allred, A. L. *J. Inorg. Nucl. Chem.* **17**, 215–221 (1961), **revised values used in the code** (`PAULING_EN` table in `amorphgen/utils/radii.py`).
 
 #### Edge cases at the classifier boundary
 
-The Δχ = 1.0 threshold sits exactly where chemistry genuinely gets ambiguous — bonds with Δχ in the ~0.85–1.15 band have mixed ionic/covalent character. Testing the 50-system JOSS validation set, 54 of 55 cation–anion pairs (98%) agree between the per-pair Pauling classifier and the per-composition material-class radii bucket. The disagreement, and a few other compounds outside the 50-set that sit at the boundary, are listed below:
+The Δχ = 1.0 threshold sits exactly where chemistry genuinely gets ambiguous: bonds with Δχ in the ~0.85–1.15 band have mixed ionic/covalent character. Testing the 50-system JOSS validation set, 54 of 55 cation–anion pairs (98%) agree between the per-pair Pauling classifier and the per-composition material-class radii bucket. The disagreement, and a few other compounds outside the 50-set that sit at the boundary, are listed below:
 
 | System | Pair | Δχ | Material class expects | Pauling rule says | Reality |
 |---|---|---|---|---|---|
-| MgH₂ | Mg–H | 0.89 | ionic (hydride) | covalent | Rutile structure — predominantly ionic |
-| MnS  | Mn–S | 1.03 | covalent (chalcogenide) | ionic | α-MnS is rocksalt — ionic-leaning |
-| TiC  | Ti–C | 1.01 | covalent (carbide) | ionic | Rocksalt interstitial carbide — mixed bonding |
-| BN   | B–N  | 1.00 | ionic (nitride) | ionic (stays — strict `<`) | Sits exactly on cutoff |
+| MgH₂ | Mg–H | 0.89 | ionic (hydride) | covalent | Rutile structure, predominantly ionic |
+| MnS  | Mn–S | 1.03 | covalent (chalcogenide) | ionic | α-MnS is rocksalt, ionic-leaning |
+| TiC  | Ti–C | 1.01 | covalent (carbide) | ionic | Rocksalt interstitial carbide, mixed bonding |
+| BN   | B–N  | 1.00 | ionic (nitride) | ionic (stays, strict `<`) | Sits exactly on cutoff |
 
 These disagreements are **benign**: the bond classifier governs which radii produce the per-pair `minsep`, while the material classifier governs which radii produce the density estimate. The two answer different questions, and any modest inconsistency at the boundary is absorbed by the subsequent MLIP relaxation. If you generate one of these systems and the auto-derived density looks off (typically ±15–20% from experiment), set `--target-density` explicitly to bypass the auto path for that composition.
 
@@ -63,8 +63,8 @@ Cell volume is estimated by **class-aware sphere packing**: the composition is
 classified into a material class, each element is given a radius from the table
 appropriate to that class's bonding (Shannon ionic, Cordero covalent, or
 Goldschmidt metallic), and the cell is sized so the spheres fill it to the
-class's packing factor. Cation oxidation states — needed to select the right
-Shannon radius — are assigned automatically by charge balance, using a joint
+class's packing factor. Cation oxidation states, needed to select the right
+Shannon radius, are assigned automatically by charge balance, using a joint
 solver that resolves multivalent cations in mixed-cation / mixed-anion
 compounds (e.g. FeTiO3 -> Fe2+/Ti4+, SrTiO3 -> Sr2+/Ti4+) and sums the balance
 over every anion-former (oxynitrides, oxyfluorides).
@@ -96,22 +96,22 @@ split are decided by a cation-radius rule; `high_valent_oxide` is gated on
 oxidation state ≥ 5. Compositions that match no specific class fall back to a
 generic packing factor of 0.52 (Shannon ionic).
 
-Density is the weakest-calibrated part of the auto chain — it sizes a sensible
+Density is the weakest-calibrated part of the auto chain: it sizes a sensible
 starting cell, but a subsequent MLIP cell relaxation will correct it. Use
 `--target-density` to set the density explicitly when the experimental value is
 known.
 
-### Coordination-aware placement — "SC" (optional)
+### Coordination-aware placement ("SC", optional)
 
-With `--target-cn`, AmorphGen uses **SC ("Seed-Coordinate")** placement: each new atom is added as a bonded neighbour of an existing *under-coordinated* site — the **seed** — by placing it within that seed's bonding shell (`minsep ≤ d ≤ dmax`), which **coordinates** it. Over-coordinating a neighbour is rejected. This builds short-range order directly into the placement instead of relying on relaxation alone, giving more physical structures.
+With `--target-cn`, AmorphGen uses **SC ("Seed-Coordinate")** placement: each new atom is added as a bonded neighbour of an existing *under-coordinated* site (the **seed**) by placing it within that seed's bonding shell (`minsep ≤ d ≤ dmax`), which **coordinates** it. Over-coordinating a neighbour is rejected. This builds short-range order directly into the placement instead of relying on relaxation alone, giving more physical structures.
 
-**Where the name comes from.** SC is the placement half of the **Seed-Coordinate-Anneal (SCA)** algorithm of Youn et al., *Comput. Mater. Sci.* (2014). AmorphGen factors the *Anneal* step out into its own stages — the MLIP geometry optimisation (`--relax`) and the melt-quench / hybrid workflow — so the placement step is just **Seed-Coordinate** (hence "SC", not "SCA").
+SC is the placement half of the **Seed-Coordinate-Anneal (SCA)** algorithm of Youn et al., *Comput. Mater. Sci.* (2014). AmorphGen factors the *Anneal* step out into its own stages (the MLIP geometry optimisation (`--relax`) and the melt-quench / hybrid workflow) so the placement step is just **Seed-Coordinate** (hence "SC", not "SCA").
 
 Disable with `--no-sc` to fall back to plain random rejection sampling (no coordination bias).
 
 ### Transparency: the auto-derive log line
 
-Every `--random-gen` run writes a single one-line summary at the top of `random_gen.log` capturing every chemistry-informed decision the auto chain made — so you can see *why* a particular minsep / density / target CN was used without reading the code. Example for Ga₂O₃:
+Every `--random-gen` run writes a single one-line summary at the top of `random_gen.log` capturing every chemistry-informed decision the auto chain made, so you can see *why* a particular minsep / density / target CN was used without reading the code. Example for Ga₂O₃:
 
 ```
 [auto-derive] Ga16O24 → metal_oxide, OS{Ga:+3}, CN{Ga:5}, minsep{Ga-Ga:2.43 metallic | Ga-O:1.62 ionic Δχ=1.63 | O-O:2.24 anion-pack}, ρ=4.44 g/cm³ L=8.25 Å
@@ -127,7 +127,7 @@ Each field:
 | `minsep{pair:value class [Δχ=val]}` | Per-pair: bond class + Pauling Δχ (shown only when the ionic classification is at stake) + minsep value in Å |
 | `ρ=… g/cm³  L=… Å` | Auto-estimated mass density and cubic cell length |
 
-The line is grep-friendly: `grep "auto-derive" random_gen.log` retrieves it as a single line per generation run. Bond classes shown are `ionic`, `covalent`, `metallic`, and `anion-pack` (same-element nonmetal pairs use a separate anion-packing scale factor — see "Bond-type classifier" above).
+The line is grep-friendly: `grep "auto-derive" random_gen.log` retrieves it as a single line per generation run. Bond classes shown are `ionic`, `covalent`, `metallic`, and `anion-pack` (same-element nonmetal pairs use a separate anion-packing scale factor, see "Bond-type classifier" above).
 
 ## CLI examples
 
@@ -160,12 +160,12 @@ available:
 
 | Mode | Cell | Minseps | Use when |
 |---|---|---|---|
-| `expand` (default) | grows 5% per retry (≤4) | all kept physical | the density is an **estimate** — a later MLIP relaxation densifies back |
-| `reduce-minsep` | **held exactly fixed** | non-bonded pairs (same-element, anion–anion) softened 5% per retry (≤4, ~19% max); cation–anion **bonds never touched** | the density is the **experiment** — fixed-density film studies, isochoric comparisons, where silent cell expansion would corrupt the comparison |
-| `none` | held exactly fixed | all kept exact — **nothing is ever adjusted** | strict studies where both density AND minseps are controlled variables: a stall fails (or, in a batch, skips the structure after seed resampling) instead of adjusting anything — an honest "this combination is not placeable" |
+| `expand` (default) | grows 5% per retry (≤4) | all kept physical | the density is an estimate: a later MLIP relaxation densifies back |
+| `reduce-minsep` | **held exactly fixed** | non-bonded pairs (same-element, anion–anion) softened 5% per retry (≤4, ~19% max); cation–anion **bonds never touched** | the density is the experiment: fixed-density film studies, isochoric comparisons, where silent cell expansion would corrupt the comparison |
+| `none` | held exactly fixed | all kept exact, nothing is ever adjusted | strict studies where both density AND minseps are controlled variables: a stall fails (or, in a batch, skips the structure after seed resampling) instead of adjusting anything, an honest "this combination is not placeable" |
 
 In `reduce-minsep` mode the too-close non-bonded contacts are left for the
-relaxation to resolve — run at fixed cell (`--cell-filter none`) to keep the
+relaxation to resolve, run at fixed cell (`--cell-filter none`) to keep the
 density pinned through relaxation too. `batch_random`'s escalation ladder is
 mode-aware: in `reduce-minsep` mode it never touches `density_scale`.
 

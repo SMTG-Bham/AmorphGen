@@ -65,6 +65,6 @@ want to assemble custom diagnostics.
 
 ## Other utility modules
 
-- {doc}`calculators` — multi-backend calculator factory (``get_calculator``).
-- ``amorphgen.utils.classical`` — Lennard-Jones and Buckingham+Coulomb
+- {doc}`calculators`, multi-backend calculator factory (``get_calculator``).
+- ``amorphgen.utils.classical``, Lennard-Jones and Buckingham+Coulomb
   calculators; loaded via ``get_calculator("lennard-jones" | "buckingham", ...)``.

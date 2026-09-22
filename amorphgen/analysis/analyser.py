@@ -23,7 +23,7 @@ from .structure import (compute_density, compute_coordination,
                         compute_bond_distances, compute_all_angles,
                         compute_bond_angle_stats, build_neighbour_dict)
 from .rdf import (compute_rdf, compute_structure_factor,
-                  compute_averaged_rdf)
+                  compute_averaged_rdf, DEFAULT_SMEARING)
 from .rings import compute_ring_statistics
 from .voronoi import compute_voronoi
 from .energy import compute_energy_ranking
@@ -241,7 +241,7 @@ class StructureAnalyser:
 
     # ── RDF and S(q) ────────────────────────────────────────────────────
 
-    def rdf(self, pair=None, rmax=None, nbins=200, sigma=0.0):
+    def rdf(self, pair=None, rmax=None, nbins=200, sigma=DEFAULT_SMEARING):
         """Compute the radial distribution function g(r).
 
         Parameters
@@ -253,8 +253,9 @@ class StructureAnalyser:
         nbins : int
             Number of histogram bins (default 200).
         sigma : float
-            Gaussian smearing width in A (default 0.0 = no smearing).
-            Use 0.02-0.05 for comparison with experiment.
+            Gaussian smearing width in A (default ``DEFAULT_SMEARING`` =
+            0.05). Pass 0.0 for the raw histogram. S(q) methods are
+            unaffected (they always use the raw g(r)).
 
         Returns
         -------
@@ -296,7 +297,8 @@ class StructureAnalyser:
                                         rmax, weighting=weighting)
 
     def structure_factor_direct(self, qmax=15.0, nq=300,
-                                weighting="xray"):
+                                weighting="xray", sigma_q=0.0,
+                                partials=False):
         """Compute S(q) directly from atomic positions via the Debye
         formula at reciprocal-lattice q-vectors.
 
@@ -312,17 +314,30 @@ class StructureAnalyser:
         nq : int
             Number of q-bins for spherical averaging.
         weighting : {"xray", "neutron", "unweighted"}, default ``"xray"``
-            Per-element scattering factors. See
-            :func:`compute_structure_factor` for details.
+            Per-element scattering factors (q-dependent Waasmaier-Kirfel
+            form factors for x-rays, Sears scattering lengths for
+            neutrons). See :func:`compute_structure_factor` for details.
+        sigma_q : float, default 0.0
+            Gaussian re-binning width in 1/A, weighted by the number of
+            q-vectors per shell. Removes the low-q speckle of the direct
+            method without moving peaks; keep well below the FSDP width.
+            0 returns the raw shell averages.
+        partials : bool, default False
+            Also return the Faber-Ziman partial structure factors
+            ``S_ab(q)`` computed from the per-species amplitudes.
 
         Returns
         -------
         dict
-            ``{"q": list[float], "s_q": list[float], "n_per_bin": list[int]}``.
+            ``{"q": list[float], "s_q": list[float], "n_per_bin": list[int]}``,
+            plus ``"s_q_raw"`` when ``sigma_q > 0`` and ``"partials"``
+            (``{"A-B": list[float], ...}``) when ``partials=True``.
         """
         from .rdf import compute_structure_factor_direct
         return compute_structure_factor_direct(self.atoms_list, qmax, nq,
-                                               weighting=weighting)
+                                               weighting=weighting,
+                                               sigma_q=sigma_q,
+                                               partials=partials)
 
     def averaged_rdf(self, pair=None, rmax=None, nbins=200):
         """Compute RDF per structure with mean and standard deviation.
@@ -717,6 +732,10 @@ class StructureAnalyser:
         """
         if text is None:
             text = self.summary(show_angles=show_angles)
+        # Create the parent directory like --save-plot does, so a report path
+        # in a not-yet-existing folder doesn't abort the run.
+        parent = os.path.dirname(os.path.abspath(filepath))
+        os.makedirs(parent, exist_ok=True)
         with open(filepath, "w") as f:
             f.write(text)
         print(f"  Report saved: {filepath}")

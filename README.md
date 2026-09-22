@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  📚 <strong>Documentation:</strong> <a href="https://smtg-bham.github.io/AmorphGen/">smtg-bham.github.io/AmorphGen</a>
+  Documentation: <a href="https://smtg-bham.github.io/AmorphGen/">smtg-bham.github.io/AmorphGen</a>
 </p>
 
 ---
@@ -138,7 +138,7 @@ AmorphGen supports multiple calculator backends:
 
 Only install the backend(s) you need. Classical potentials (Lennard-Jones, Buckingham+Coulomb) are built-in and require no GPU. Use `amorphgen --list-models` to see all available models.
 
-> **ASE pass-through.** AmorphGen wraps each backend's upstream ASE calculator without modifying unit conventions, stress signs, or PBC handling — energies (eV), forces (eV/Å), stress (eV/Å³), and `atoms.pbc` are inherited directly from the upstream MLIP package. See [docs/guides/backends](https://smtg-bham.github.io/AmorphGen/guides/backends.html) for details.
+> **ASE pass-through.** AmorphGen wraps each backend's upstream ASE calculator without modifying unit conventions, stress signs, or PBC handling; this energies (eV), forces (eV/Å), stress (eV/Å³), and `atoms.pbc` are inherited directly from the upstream MLIP package. See [docs/guides/backends](https://smtg-bham.github.io/AmorphGen/guides/backends.html) for details.
 
 ---
 
@@ -150,11 +150,28 @@ Only install the backend(s) you need. Classical potentials (Lennard-Jones, Bucki
 | + MLIP relaxation & melt-quench MD | `pip install -e ".[mace]"` or `".[chgnet]"` | + PyTorch |
 | + everything (MACE + CHGNet) | `pip install -e ".[all]"` | + PyTorch |
 
+With pip, from source (once AmorphGen is on PyPI, `pip install "amorphgen[mace,chgnet]"` replaces the clone):
+
 ```bash
 git clone https://github.com/SMTG-Bham/AmorphGen.git
 cd AmorphGen
 pip install -e ".[mace,chgnet]"      # example: MACE + CHGNet
 pip install -e ".[all,dev]"          # everything + pytest
+```
+
+With conda, which keeps the install isolated and on HPC provides the CUDA toolchain. Create the environment with conda, then install into it with pip:
+
+```bash
+conda create -n amorphgen python=3.11
+conda activate amorphgen
+
+# from source (current):
+git clone https://github.com/SMTG-Bham/AmorphGen.git
+cd AmorphGen
+pip install -e ".[mace,chgnet]"
+
+# or, once released on PyPI:
+pip install "amorphgen[mace,chgnet]"
 ```
 
 > **MLIPs are optional.** The base package is deliberately torch-free.
@@ -178,7 +195,7 @@ pip install -e ".[all,dev]"          # everything + pytest
 > a release that supports e3nn 0.5+.
 
 > **GPU strongly recommended.** Use `--device cuda` or `"device": "auto"`.
-> Device auto-detection only runs when a job starts — on a login node with no GPU, no device message will appear until a stage is launched.
+> Device auto-detection only runs when a job starts. On a login node with no GPU, no device message will appear until a stage is launched.
 
 ---
 
@@ -381,7 +398,7 @@ This gives more control over optimisation settings (optimizer, cell filter,
 precision, convergence) and lets you inspect structures before committing
 to expensive relaxation.
 
-**Step 1 — Generate (default, no relaxation):**
+**Step 1: Generate (default, no relaxation):**
 
 ```bash
 amorphgen --random-gen \
@@ -402,7 +419,7 @@ paths = batch_random(
 )
 ```
 
-**Step 2 — Batch optimise:**
+**Step 2: Batch optimise:**
 
 ```bash
 amorphgen --batch-opt \
@@ -493,7 +510,7 @@ sa.plot(output_dir="plots/", angle_style="line")
 
 ## Generating multiple independent structures (batch quench)
 
-### Step 1 — Run Stages 1–4 with snapshot sampling
+### Step 1: Run Stages 1–4 with snapshot sampling
 
 ```bash
 amorphgen POSCAR \
@@ -502,7 +519,7 @@ amorphgen POSCAR \
     --work-dir melt_run/
 ```
 
-### Step 2 — Batch quench N independent runs from snapshots
+### Step 2: Batch quench N independent runs from snapshots
 
 ```bash
 amorphgen --batch-quench \
@@ -527,7 +544,7 @@ Each run gets its own subdirectory: `batch_run/run_0000/`, `batch_run/run_0001/`
 
 ### Resuming an interrupted batch
 
-If a batch job times out, resubmit with `--resume` — already-completed runs are skipped:
+If a batch job times out, resubmit with `--resume`; already-completed runs are skipped:
 
 ```bash
 amorphgen --batch-quench \
@@ -546,7 +563,7 @@ high-temperature equilibration to skip the slow heating stage:
 Random structure (target density)
     │
     ▼
-Optimise (positions only — preserves density)
+Optimise (positions only - preserves density)
     │
     ▼
 Equilibrate at T_melt (NVT, 20+ ps)
@@ -635,7 +652,7 @@ Common cooling rates:
 
 | Name | Backend | Notes |
 |------|---------|-------|
-| `mace-mpa-0` | MACE | **default** — MPTrj + sAlex |
+| `mace-mpa-0` | MACE | default (MPTrj + sAlex) |
 | `mace-omat-0-medium` | MACE | OMAT, excellent phonons (ASL license) |
 | `mace-matpes-r2scan` | MACE | MATPES, r²SCAN functional (ASL license) |
 | `chgnet` | CHGNet | Charge-informed, good CPU speed |
@@ -728,19 +745,19 @@ pipe = MeltQuenchPipeline(
 
 | Tutorial | Description |
 |----------|-------------|
-| [Tutorial 1](Tutorials/T1_5min_intro/tutorial_1_5min_intro.ipynb) | **Quick-start tutorial** — orientation: what it does, the three workflows, decision tree, one live demo (random + CHGNet relax on a-SiO₂) |
+| [Tutorial 1](Tutorials/T1_5min_intro/tutorial_1_5min_intro.ipynb) | Quick-start tutorial: orientation: what it does, the three workflows, decision tree, one live demo (random + CHGNet relax on a-SiO₂) |
 
-**Workflow tutorials** — each tutorial reports its own measured wall time on the CPU it was validated on:
+Workflow tutorials (each reports the wall time measured on the CPU it was validated on):
 
 | Tutorial | Description |
 |----------|-------------|
-| [Tutorial 2](Tutorials/T2_automated_random_gen/tutorial_2_automated_random_gen.ipynb) | **Zero-config random gen** — composition is the only input; auto-derive minsep, density, target CN, oxidation state across 8 material classes (Si, SiO₂, In₂O₃, CdTe, AlN, LiCl, TiO₂, Cu). Each structure is CHGNet-relaxed and saved to `output_T2/` |
-| [Tutorial 3](Tutorials/T3_random_gen/tutorial_3_random_generation.ipynb) | **Explicit control + ensemble analysis** — the opposite end of T2: hand-picked minsep (from crystalline bond lengths) and target density (from cited amorphous-thin-film references), 5-structure ensembles per system, quantitative RDF / energy / CN / bond-angle analysis vs the crystalline reference (In₂O₃, TiO₂, Al₂O₃, Ga₂O₃; MACE-MPA-0) |
+| [Tutorial 2](Tutorials/T2_automated_random_gen/tutorial_2_automated_random_gen.ipynb) | Zero-config random gen: composition is the only input; auto-derive minsep, density, target CN, oxidation state across 8 material classes (Si, SiO₂, In₂O₃, CdTe, AlN, LiCl, TiO₂, Cu). Each structure is CHGNet-relaxed and saved to `output_T2/` |
+| [Tutorial 3](Tutorials/T3_random_gen/tutorial_3_random_generation.ipynb) | Explicit control + ensemble analysis: the opposite end of T2: hand-picked minsep (from crystalline bond lengths) and target density (from cited amorphous-thin-film references), 5-structure ensembles per system, quantitative RDF / energy / CN / bond-angle analysis vs the crystalline reference (In₂O₃, TiO₂, Al₂O₃, Ga₂O₃; MACE-MPA-0) |
 | [Tutorial 4](Tutorials/T4_MQ_via_7_steps/tutorial_4_melt_quench.ipynb) | Full 7-stage melt-quench from crystalline SiO₂ (CHGNet on CPU; flip the backend toggle for MACE on GPU) |
 | [Tutorial 5](Tutorials/T5_mix_random_MQ/tutorial_5_batch_quench.ipynb) | Hybrid workflow: random gen → high-T equilibration → batch quench (TiO₂) |
 | [Tutorial 6](Tutorials/T6_classical_potential/tutorial_6_classical_potential.ipynb) | Classical potential (Buckingham+Coulomb) relaxation, no GPU needed (SiO₂, Al₂O₃, TiO₂) |
 
-**Application case studies** (assume familiarity with the workflow tutorials):
+Application case studies (these assume you have done the workflow tutorials):
 
 | Tutorial | Description |
 |----------|-------------|

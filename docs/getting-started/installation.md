@@ -4,7 +4,7 @@
 
 - Python 3.10, 3.11, or 3.12
 - ASE (Atomic Simulation Environment)
-- An MLIP backend **only** for MLIP relaxation / melt-quench MD — the base
+- An MLIP backend **only** for MLIP relaxation / melt-quench MD; the base
   install is deliberately torch-free
 
 ## Pick the install for your task
@@ -50,23 +50,23 @@ pip install "amorphgen[all,dev]"
 ```
 
 :::{warning}
-**Don't install MACE and SevenNet in the same environment.** SevenNet
+Do not install MACE and SevenNet in the same environment: SevenNet
 depends on `e3nn>=0.5`, while pre-trained MACE foundation models
 (`mace-mpa-0`, …) were pickled with `e3nn==0.4.x` and fail to load
 against the newer `e3nn`. The `[all]` extra therefore includes only
 MACE + CHGNet (not SevenNet).
 
-`[mace]`, `[chgnet]`, and `[sevennet]` are each fine on their own —
+`[mace]`, `[chgnet]`, and `[sevennet]` are each fine on their own;
 just don't combine `[mace]` and `[sevennet]`. The recommended pattern
 is two conda environments:
 
 ```bash
-# env A — MACE + CHGNet (default)
+# env A - MACE + CHGNet (default)
 conda create -n amorphgen python=3.11
 conda activate amorphgen
 pip install "amorphgen[mace,chgnet]"
 
-# env B — SevenNet + CHGNet (when SevenNet is required)
+# env B - SevenNet + CHGNet (when SevenNet is required)
 conda create -n amorphgen-sevennet python=3.11
 conda activate amorphgen-sevennet
 pip install "amorphgen[sevennet,chgnet]"
@@ -84,14 +84,37 @@ cd AmorphGen
 pip install -e ".[mace,chgnet,dev]"
 ```
 
+## Install with conda
+
+AmorphGen is not on conda-forge, but a conda environment is the cleanest way to
+isolate it; on HPC, conda manages the CUDA toolchain. Create the
+environment with conda, then install AmorphGen into it with pip:
+
+```bash
+conda create -n amorphgen python=3.11
+conda activate amorphgen
+
+# from PyPI (once released):
+pip install "amorphgen[mace,chgnet]"
+
+# or from source:
+git clone https://github.com/SMTG-Bham/AmorphGen.git
+cd AmorphGen
+pip install -e ".[mace,chgnet]"
+```
+
+CHGNet is safe alongside MACE or SevenNet; just don't put MACE and SevenNet in
+the same environment (see the warning above, or the {doc}`../guides/backends`
+page for the full explanation).
+
 ## Backend compatibility
 
 | Backend | PyPI package | GPU support | Mac (Apple Silicon) |
 |---------|-------------|-------------|---------------------|
-| MACE    | `mace-torch` | CUDA ✅ | CPU + MPS ✅ |
-| CHGNet  | `chgnet`    | CUDA ✅ | CPU + MPS ✅ |
-| SevenNet | `sevenn`   | CUDA ✅ | CPU + MPS ✅ |
-| Classical (LJ, Buckingham) | built-in | N/A | CPU ✅ |
+| MACE    | `mace-torch` | CUDA yes | CPU + MPS yes |
+| CHGNet  | `chgnet`    | CUDA yes | CPU + MPS yes |
+| SevenNet | `sevenn`   | CUDA yes | CPU + MPS yes |
+| Classical (LJ, Buckingham) | built-in | N/A | CPU yes |
 
 ## HPC setup (SLURM)
 

@@ -32,9 +32,9 @@ set -eu
 
 # ── Environment ────────────────────────────────────────────────────────────
 module purge
-module load bear-apps/2023a
-module load Miniforge3/24.1.2-0
-source activate amorphgen
+module load bear-apps/2023a/live
+module load Python/3.11.3-GCCcore-12.3.0
+source /rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/venvs/amorphgen/bin/activate
 
 ROOT=$(pwd)
 TASK=$(printf "%04d" ${SLURM_ARRAY_TASK_ID})

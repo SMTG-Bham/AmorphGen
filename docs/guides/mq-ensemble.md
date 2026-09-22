@@ -57,7 +57,7 @@ ga2o3_mq/
 
 The inner `run_NNNN/` is named after the source snapshot's index (parsed from the
 `snapshot_NNNN_frame*.xyz` filename), so `run_0007/` always corresponds to
-`snapshot_0007_*` — making it easy to trace any final structure back to its
+`snapshot_0007_*`, making it easy to trace any final structure back to its
 high-T starting frame.
 
 ### HPC job-array tip
@@ -65,7 +65,7 @@ high-T starting frame.
 When splitting the per-snapshot quenches across SLURM array tasks, point **all
 tasks at the same `quench_runs/`** output dir; AmorphGen names the per-task
 subdir from the snapshot index, so there's no collision. Don't pass each task
-its own `-o quench_runs/run_${TASK}` — that nests inside another `run_NNNN/`
+its own `-o quench_runs/run_${TASK}`, which nests inside another `run_NNNN/`
 created by `batch_quench` and gives you the unhelpful `quench_runs/run_0007/run_0007/`.
 
 A clean per-task command looks like:
@@ -83,15 +83,15 @@ amorphgen --batch-quench \
 A full SLURM array template ships with the package at
 `examples/run_quench_array_bluebear.slurm`.
 
-## Choosing protocol parameters — a note on methodology
+## Choosing protocol parameters: a note on methodology
 
 The defaults below match the common DFT-MD melt-quench protocol used in much of the amorphous-oxide literature (e.g. Kaewmeechai *et al.*, *Phys. Rev. B* 111, 035203, 2025), with one substitution forced by computational cost:
 
-- **Heating rate (Stage 3).** DFT melt-quench studies typically use **0.5–1 K/ps** heating ramps. With foundation MLIPs (chgnet, MACE, SevenNet) on a single GPU, that translates to days of wall time per ramp. The default below uses **100 K/ps**, which is ~100× faster while still producing fully thermalised liquid configurations after the long Stage-4 equilibration. **If you are publishing a comparison to DFT melt-quench, document the heating-rate substitution explicitly in your methods section.**
-- **Cooling rate (Stage 5).** **100 K/ps** matches the upper end of the cooling rates used in published DFT melt-quench studies of oxides (typical range 0.5–100 K/ps). Defensible without methodology notes.
-- **High-T anneal duration (Stage 4).** **100 ps** matches typical DFT MD high-T equilibration. Long enough that snapshots taken at uniform intervals are statistically independent samples of the liquid.
-- **Melt temperature (Stage 4).** AmorphGen's default is **3000 K** (`eq_high.T: 3000`), inside the training window of all supported MLIPs. The example YAML below sets **4000 K** as a deliberate override matching the protocol of Kaewmeechai *et al.* (PRB 111, 035203, 2025): well above oxide melting points (~2000 K typical) but **outside chgnet's training window**. MACE and SevenNet handle 4000 K reliably for most systems; with chgnet, drop back to 3000 K if you see instability or non-physical behaviour.
-- **Ensemble.** **NPT throughout** lets the cell volume relax to the equilibrium liquid density at high T, then back to amorphous-solid density on cooling. NVT is an alternative if you trust the input cell volume and want to constrain it; matches AmorphGen's `examples/hybrid_airss_mq.yaml` template.
+- Heating rate (Stage 3). DFT melt-quench studies typically use **0.5–1 K/ps** heating ramps. With foundation MLIPs (chgnet, MACE, SevenNet) on a single GPU, that translates to days of wall time per ramp. The default below uses **100 K/ps**, which is ~100× faster while still producing fully thermalised liquid configurations after the long Stage-4 equilibration. **If you are publishing a comparison to DFT melt-quench, document the heating-rate substitution explicitly in your methods section.**
+- Cooling rate (Stage 5). **100 K/ps** matches the upper end of the cooling rates used in published DFT melt-quench studies of oxides (typical range 0.5–100 K/ps). Defensible without methodology notes.
+- High-T anneal duration (Stage 4). **100 ps** matches typical DFT MD high-T equilibration. Long enough that snapshots taken at uniform intervals are statistically independent samples of the liquid.
+- Melt temperature (Stage 4). AmorphGen's default is **3000 K** (`eq_high.T: 3000`), inside the training window of all supported MLIPs. The example YAML below sets **4000 K** as a deliberate override matching the protocol of Kaewmeechai *et al.* (PRB 111, 035203, 2025): well above oxide melting points (~2000 K typical) but **outside chgnet's training window**. MACE and SevenNet handle 4000 K reliably for most systems; with chgnet, drop back to 3000 K if you see instability or non-physical behaviour.
+- Ensemble. **NPT throughout** lets the cell volume relax to the equilibrium liquid density at high T, then back to amorphous-solid density on cooling. NVT is an alternative if you trust the input cell volume and want to constrain it; matches AmorphGen's `examples/hybrid_airss_mq.yaml` template.
 
 ## Recommended `mq.yaml` for an oxide
 
@@ -107,7 +107,7 @@ opt:
   optimizer: LBFGS
   cell_filter: none
 
-# Stage 2: equilibrate at low T (NPT — let cell relax)
+# Stage 2: equilibrate at low T (NPT - let cell relax)
 eq_premelt:
   ensemble: NPT
   T: 300
@@ -129,7 +129,7 @@ melt:
 eq_high:
   ensemble: NPT
   T: 4000
-  steps: 100000         # 100 ps — generous; ensures snapshots are independent
+  steps: 100000         # 100 ps - generous; ensures snapshots are independent
   timestep: 0.5
   ttime: 25.0
 
@@ -173,7 +173,7 @@ amorphgen --batch-quench --snapshot-dir shared/stage4_eq_traj.xyz \
     --config mq.yaml --resume -o quench_runs/
 ```
 
-`--batch-quench` accepts a trajectory file directly (polymorphic `--snapshot-dir`) — internally extracts N snapshots, then runs the per-snapshot stages. Same final output as `--mq-ensemble` but split into two CLI invocations.
+`--batch-quench` accepts a trajectory file directly (polymorphic `--snapshot-dir`), internally extracts N snapshots, then runs the per-snapshot stages. Same final output as `--mq-ensemble` but split into two CLI invocations.
 
 ## HPC / Slurm split (best for parallelism)
 
@@ -188,7 +188,7 @@ sbatch 01_shared_bluebear.slurm
 sbatch --dependency=afterok:<JOBID> 02_quench_array_bluebear.slurm
 ```
 
-Example slurm scripts for BlueBEAR and Sulis ship in the AmorphGen repo under `examples/hpc/`. Both use `amorphgen --extract-snapshots` and `amorphgen --batch-quench --snapshot-dir snapshots/` internally — same dispatch as `--mq-ensemble`, just split for HPC parallelism.
+Example slurm scripts for BlueBEAR and Sulis ship in the AmorphGen repo under `examples/hpc/`. Both use `amorphgen --extract-snapshots` and `amorphgen --batch-quench --snapshot-dir snapshots/` internally, same dispatch as `--mq-ensemble`, just split for HPC parallelism.
 
 | Pattern | Wall time | Best for |
 |---------|-----------|----------|
@@ -199,7 +199,7 @@ Example slurm scripts for BlueBEAR and Sulis ship in the AmorphGen repo under `e
 
 | Interruption point | What `--resume` recovers |
 |--------------------|---------------------------|
-| Mid stages 1-4 | Skips completed stages, re-runs the interrupted one from start. (Frame-level resume is on the roadmap.) |
+| Mid stages 1-4 | Skips completed stages and continues the interrupted MD stage from its last saved trajectory frame; optimisation stages restart from the beginning. |
 | Between stage 4 and snapshot extraction | Skips stages 1-4, re-extracts snapshots, runs 5-7. |
 | Mid quench-runs | Skips completed runs (looks for `final_amorphous.xyz`), re-runs the interrupted one. |
 | After all done | Reports "all complete", returns. Idempotent. |

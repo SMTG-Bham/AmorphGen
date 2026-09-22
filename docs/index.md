@@ -27,15 +27,15 @@ AmorphGen exposes three routes to amorphous structures: **random placement** fro
 
 ---
 
-## Why AmorphGen?
+## What it does
 
-Amorphous materials play a key role in a wide range of technologies, including transparent conductors in displays, gate dielectrics in transistors, solid electrolytes in batteries, and chalcogenide phase-change memory. Generating realistic structural models of these materials usually requires writing custom MD scripts, choosing interatomic potential parameters for each new system, and managing a multi-stage simulation workflow. Existing tools force a trade-off: AIMD gives accuracy but is too expensive for screening; classical MD is fast but needs a fitted potential per composition.
+Making an amorphous model normally means writing your own MD scripts, picking a potential for each new composition and babysitting a multi-stage run. AIMD is accurate but too slow for more than a handful of structures; classical MD is fast but needs a fitted potential for every composition.
 
-AmorphGen simplifies amorphous structure generation by combining machine-learning interatomic potentials with an automated workflow. Users can provide a chemical formula or a crystalline structure, and the package runs a random-placement plus relaxation workflow, or a 7-stage melt-quench protocol with minimal CLI call. Calculator backends include MACE, CHGNet, and SevenNet, and classical pair potentials (Lennard-Jones, Buckingham+Coulomb) for systems where a fitted potential is preferred. All parameters – including minimum separations, density, temperatures, and cooling rates – are set automatically but can be overridden via CLI flags or YAML configuration.
+AmorphGen wraps the whole thing in one command. You give it a formula or a crystal structure; it runs either random placement plus relaxation or a 7-stage melt-quench, using MACE, CHGNet or SevenNet as the potential (or Lennard-Jones and Buckingham+Coulomb if you have parameters). Minimum separations, density, temperatures and cooling rates have sensible automatic values and can all be overridden from the command line or a YAML file.
 
-The output is a relaxed amorphous structure, the full MD trajectory, and built-in structure analysis tools. Outputs are written in VASP, CIF, and extended XYZ formats, ready as input for DFT property calculations (electronic structure, optical, mechanical) or as a starting point for further structural relaxation at higher levels of theory.
+You get the relaxed structure, the MD trajectory and an analysis mode (RDF, coordination, angles, rings, S(q)). Structures are written as VASP, CIF or extended XYZ, so they go straight into DFT or a further relaxation at a higher level of theory.
 
-**Designed for** researchers interested in modelling amorphous systems, including oxides, glasses, chalcogenides, nitrides, halides, and other disordered solids. Typical uses include preparing structures for DFT calculations, screening across compositions, and direct property prediction. The package has been applied to oxides (e.g. SiO₂, In₂O₃, TiO₂, Ga₂O₃, Al₂O₃, InGaZnO₄), halides (e.g. LiF, Li₂ZrCl₆), pnictides (e.g. GaAs), group-IV semiconductors (e.g. Si), nitrides (e.g. GaN, BN) and other compositions.
+It has been used for oxides (SiO₂, In₂O₃, TiO₂, Ga₂O₃, Al₂O₃, InGaZnO₄), halides (LiF, Li₂ZrCl₆), GaAs, Si, and nitrides (GaN, BN), mostly to prepare structures for DFT or to screen across compositions.
 
 ---
 
@@ -86,7 +86,7 @@ Place atoms into a cubic cell with automated minimum separations, density, and t
 
 `--hybrid-ensemble`
 
-Anneal a directory of disordered structures (e.g. random-gen outputs) through stages 4–7. Cheaper than MQ — skips the slow heat ramp.
+Anneal a directory of disordered structures (e.g. random-gen outputs) through stages 4–7. Cheaper than MQ because it skips the slow heat ramp.
 :::
 
 ::::
@@ -210,18 +210,18 @@ See {doc}`guides/hybrid-workflow`.
 
 ---
 
-## Key features
+## Features
 
-- **Random structure generation** -- generate amorphous structures from just a chemical formula (e.g. to model amorphous In₂O₃ for 16 formula units, `--composition "In2O3*16"`). Minimum separations, density, and coordination targets are derived automatically from Shannon ionic radii across material classes.
-- **7-stage melt-and-quench pipeline** -- from crystalline POSCAR to relaxed amorphous structure in a single command. Configurable temperatures, cooling rates, ensembles, and timesteps.
-- **`--mq-ensemble`** -- generate N independent amorphous structures from one crystalline input in a single CLI call: shared stages 1-4, then N independent quenches via auto-extracted snapshots from the stage-4 trajectory.
-- **`--hybrid-ensemble`** -- generate an amorphous ensemble starting from disordered structures (e.g. random-gen outputs). Anneals each at high T, quenches, equilibrates, and relaxes.
-- **Multiple calculator backends** -- MACE, CHGNet, SevenNet (MLIPs) and Lennard-Jones, Buckingham+Coulomb (classical). Swap with `--model` flag.
-- **Structure analysis** -- built-in RDF, coordination numbers, bond angles, ring statistics, and energy ranking. Gaussian smearing for experimental comparison.
-- **Plots** -- vector PDF output (`--save-pdf`), 300 DPI defaults, colour-blind-safe palette.
-- **Energy ranking** -- `--rank-from-log` parses random-gen / pipeline log files and ranks structures by total energy without re-evaluating the calculator.
-- **HPC ready** -- `--resume` recovers from SLURM walltime limits. Smart checkpoint detection restarts from the last completed stage.
-- **CLI and Python API** -- every feature accessible from both the command line and Python. Full YAML configuration support.
+- Random structure generation: generate amorphous structures from just a chemical formula (e.g. to model amorphous In₂O₃ for 16 formula units, `--composition "In2O3*16"`). Minimum separations, density, and coordination targets are derived automatically from Shannon ionic radii across material classes.
+- 7-stage melt-and-quench pipeline: from crystalline POSCAR to relaxed amorphous structure in a single command. Configurable temperatures, cooling rates, ensembles, and timesteps.
+- `--mq-ensemble`: generate N independent amorphous structures from one crystalline input in a single CLI call: shared stages 1-4, then N independent quenches via auto-extracted snapshots from the stage-4 trajectory.
+- `--hybrid-ensemble`: generate an amorphous ensemble starting from disordered structures (e.g. random-gen outputs). Anneals each at high T, quenches, equilibrates, and relaxes.
+- Multiple calculator backends: MACE, CHGNet, SevenNet (MLIPs) and Lennard-Jones, Buckingham+Coulomb (classical). Swap with `--model` flag.
+- Structure analysis: built-in RDF, coordination numbers, bond angles, ring statistics, and energy ranking. Gaussian smearing for experimental comparison.
+- Plots: vector PDF output (`--save-pdf`), 300 DPI defaults, colour-blind-safe palette.
+- Energy ranking: `--rank-from-log` parses random-gen / pipeline log files and ranks structures by total energy without re-evaluating the calculator.
+- HPC ready: `--resume` recovers from SLURM walltime limits. Smart checkpoint detection restarts from the last completed stage.
+- CLI and Python API: every feature accessible from both the command line and Python. Full YAML configuration support.
 
 ---
 
@@ -242,7 +242,7 @@ amorphgen --list-models   # see all 20+ model variants
 
 ## Authors & Contact
 
-**Maintainer:** [Chaiyawat Kaewmeechai](https://SMTG-Bham.github.io/), University of Birmingham<br>
+**Maintainer:** [Chaiyawat Kaewmeechai](https://cywkmc21.github.io/), University of Birmingham<br>
 **Email:** `c[dot]kaewmeechai[at]bham[dot]ac[dot]uk`
 
 **Bug reports / feature requests:** [Open an issue on GitHub](https://github.com/SMTG-Bham/AmorphGen/issues).<br>

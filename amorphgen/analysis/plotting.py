@@ -15,6 +15,8 @@ from __future__ import annotations
 import os
 import numpy as np
 
+from .rdf import DEFAULT_SMEARING
+
 # Okabe-Ito colour-blind-safe palette (RGB hex)
 _PALETTE = ["#0072B2", "#D55E00", "#009E73", "#CC79A7",
             "#F0E442", "#56B4E9", "#E69F00", "#000000"]
@@ -75,7 +77,7 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
                   rdf_pairs=None, angle_triplets=None,
                   rmax=None, normalise=True, angle_style="line",
                   save_csv=True, show_total_rdf=False,
-                  smearing=0.0,
+                  smearing=DEFAULT_SMEARING,
                   dpi=300, save_pdf=False, show_title=False):
     """
     Generate and save analysis plots and raw data.
@@ -336,7 +338,9 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
                 ha="center", va="bottom", fontsize=9,
                 color=_PALETTE[0], fontweight="bold")
         ax.set_xticks([x_pos])
-        ax.set_xticklabels(["AmorphGen"])
+        # Label the category by what it is (composition, ensemble size),
+        # not by the tool.
+        ax.set_xticklabels([f"{formula} (n = {len(rho_values)})"])
         ax.set_xlim(0.4, 1.6)
         ymin = rho_values.min() - 0.10 * max(0.05,
                                               rho_values.max() - rho_values.min())
@@ -363,7 +367,8 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
 
 
 def plot_sq(sq_result, output_dir=".", prefix="analysis", dpi=300,
-            save_pdf=False, weighting="xray", show_title=False):
+            save_pdf=False, weighting="xray", show_title=False,
+            method="direct"):
     """Plot the direct-method total structure factor S(q) + write a CSV.
 
     Direct (Debye) S(q) with Faber-Ziman normalisation (S(q→∞)=1). The FSDP
@@ -379,23 +384,42 @@ def plot_sq(sq_result, output_dir=".", prefix="analysis", dpi=300,
     os.makedirs(output_dir, exist_ok=True)
     q = np.array(sq_result["q"], dtype=float)
     s = np.array(sq_result["s_q"], dtype=float)
-    n = np.array(sq_result["n_per_bin"], dtype=int)
-    m = ~np.isnan(s) & (n > 0)
+    # n_per_bin exists only for the direct method (q-vectors per shell);
+    # the FT method has no such count.
+    n = (np.array(sq_result["n_per_bin"], dtype=int)
+         if "n_per_bin" in sq_result else None)
+    m = ~np.isnan(s) & ((n > 0) if n is not None else True)
 
     fig, ax = plt.subplots(figsize=(5.4, 4.0))
     ax.plot(q[m], s[m], lw=1.4, color=_PALETTE[0])
     ax.axhline(1.0, ls=":", color="grey", alpha=0.6)
+    # Conventional S(q) presentation starts at 0. Note the Faber-Ziman total
+    # can be negative at low q for multi-component x-ray weighting (down to
+    # -(<f^2>-<f>^2)/<f>^2); that part is clipped from the plot only -- the
+    # CSV keeps every value.
+    ax.set_ylim(bottom=0.0)
     ax.set_xlabel(r"$q$ ($\mathrm{\AA}^{-1}$)")
     ax.set_ylabel(r"$S(q)$")
     _apply_pub_style(ax)
     if show_title:
-        ax.set_title(f"Total S(q) — direct method, {weighting} weighting")
+        ax.set_title(f"Total S(q) — {method} method, {weighting} weighting")
     base = os.path.join(output_dir, f"{prefix}_sq")
     _save_fig(fig, base, dpi, save_pdf)
 
     with open(f"{base}.csv", "w", newline="") as fh:
         w = csv.writer(fh)
-        w.writerow(["q_invA", "s_q", "n_per_bin"])
-        for qi, si, ni in zip(q, s, n):
-            w.writerow([f"{qi:.5f}", "" if np.isnan(si) else f"{si:.6f}", ni])
+        raw = (np.array(sq_result["s_q_raw"], dtype=float)
+               if "s_q_raw" in sq_result else None)
+        if n is not None:
+            hdr = ["q_invA", "s_q", "n_per_bin"] + (["s_q_raw"] if raw is not None else [])
+            w.writerow(hdr)
+            for k, (qi, si, ni) in enumerate(zip(q, s, n)):
+                row = [f"{qi:.5f}", "" if np.isnan(si) else f"{si:.6f}", ni]
+                if raw is not None:
+                    row.append("" if np.isnan(raw[k]) else f"{raw[k]:.6f}")
+                w.writerow(row)
+        else:
+            w.writerow(["q_invA", "s_q"])
+            for qi, si in zip(q, s):
+                w.writerow([f"{qi:.5f}", "" if np.isnan(si) else f"{si:.6f}"])
     print(f"  Saved: {base}.csv")

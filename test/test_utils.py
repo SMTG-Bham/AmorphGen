@@ -109,6 +109,27 @@ class TestResolveRamp:
         temps = resolve_ramp(300, 2950, 100)
         assert 2950 in temps
 
+    def test_non_divisible_span_never_overshoots(self):
+        # 300 -> 3000 in steps of 700 is not divisible; the old range()-based
+        # melt ramp emitted 3100 (past the endpoint).
+        temps = resolve_ramp(300, 3000, 700)
+        assert max(temps) == 3000
+        assert temps[-1] == 3000
+
+    def test_float_step_supported(self):
+        # range() would raise TypeError on a float step.
+        temps = resolve_ramp(300, 1000, 250.5)
+        assert temps[0] == 300 and temps[-1] == 1000
+        assert all(t2 > t1 for t1, t2 in zip(temps, temps[1:]))
+
+    def test_mis_signed_step_does_not_hang_or_crash(self):
+        # A positive step for a cooling ramp used to give an empty list
+        # (IndexError) or, in the quench while-loop, an infinite loop.
+        # Direction is now inferred from the endpoints.
+        temps = resolve_ramp(3000, 300, +100)   # cooling, wrong sign
+        assert temps[0] == 3000 and temps[-1] == 300
+        assert all(t2 < t1 for t1, t2 in zip(temps, temps[1:]))
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Cell helpers

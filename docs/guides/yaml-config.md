@@ -3,7 +3,7 @@
 AmorphGen accepts a YAML config file via `--config <file>` (CLI) or `cfg_override=load_yaml_config(...)` (Python). YAML is recommended for any non-trivial workflow because it:
 
 - Keeps simulation parameters in version control alongside the code that produced them
-- Makes runs reproducible — one file describes the entire protocol
+- Makes runs reproducible: one file describes the entire protocol
 - Reads cleanly compared to a long CLI flag chain
 - Supports comments to document why each parameter is set
 
@@ -46,7 +46,7 @@ melt:
   rate: 100        # K/ps
 ```
 
-Only the keys you want to override need to be present — anything you omit falls back to the default.
+Only the keys you want to override need to be present; anything you omit falls back to the default.
 
 ## Example: full melt-quench pipeline
 
@@ -78,7 +78,7 @@ melt:
   timestep: 0.5
 
 eq_high:
-  ensemble: NPT       # NEW default — was NVT
+  ensemble: NPT       # NEW default - was NVT
   npt_method: mtk     # Nose-Hoover-chain canonical fluctuations
   T: 3000
   steps: 50000        # 50 ps
@@ -237,14 +237,14 @@ pipe.run()
 Both Stage 1 (initial crystal opt) and Stage 7 (final amorphous opt) use the structure-optimiser code. By default, both read from the same `opt:` block. If you want them to differ (e.g. a tighter `fmax` for the final amorphous structure, or `FrechetCellFilter` for full cell relaxation while Stage 1 keeps the cell fixed), add a separate `final_opt:` block:
 
 ```yaml
-# Stage 1 — initial crystal opt
+# Stage 1 - initial crystal opt
 opt:
   fmax: 0.05
   max_steps: 200
   optimizer: LBFGS
   cell_filter: none           # fixed cell for the crystal
 
-# Stage 7 — final amorphous opt (overrides only the keys you specify)
+# Stage 7 - final amorphous opt (overrides only the keys you specify)
 final_opt:
   fmax: 0.01                  # tighter convergence
   max_steps: 500
@@ -262,7 +262,7 @@ Any stage with `ensemble: NPT` accepts a `npt_method:` key that picks among thre
 |---|---|---|
 | `berendsen` *(default)* | `NPTBerendsen` | Robust during the 300 → 3000 K heating ramp. Averages are correct; fluctuation-derived quantities (heat capacity, isothermal compressibility) are not. |
 | `mtk` | `IsotropicMTKNPT` | Martyna-Tobias-Klein Nose-Hoover-chain NPT. **True canonical fluctuations.** Default for `eq_high`. May become unstable during rapid temperature ramps. |
-| `parrinello-rahman` | `MelchionnaNPT` | Nose-Hoover + Parrinello-Rahman **flexible cell** (volume *and* shape evolve). Useful for anisotropic glasses. Requires upper-triangular cell — ASE will raise otherwise. |
+| `parrinello-rahman` | `MelchionnaNPT` | Nose-Hoover + Parrinello-Rahman **flexible cell** (volume *and* shape evolve). Useful for anisotropic glasses. Requires upper-triangular cell, ASE will raise otherwise. |
 
 Recommended pattern: Berendsen on the heating and cooling ramps (stages 3, 5), MTK on the equilibration plateaux (stages 2, 4, 6). The current default config follows this for stages 3 and 4.
 
@@ -297,14 +297,33 @@ eq_high:
   T: 3000
 ```
 
+## The `analysis` block
+
+`--analyse` reads its defaults from an `analysis:` block; any CLI flag
+overrides the YAML value.
+
+```yaml
+analysis:
+  cutoff: auto-rdf        # or auto, or a number in A
+  smearing: 0.05          # RDF Gaussian smearing (A); 0 = raw histogram
+  per_structure: true
+  check_dimers: true
+  save_report: report.txt
+  save_plot: plots/
+  sq: true                # structure factor
+  sq_weighting: neutron   # xray | neutron | unweighted
+  sq_method: direct       # direct | ft
+  sq_smooth: 0.05         # re-binning width for the direct method (1/A); 0 = raw
+```
+
 ## Tips
 
-- **Keep YAMLs in version control.** They're tiny and document your protocol.
-- **Mix YAML + CLI** for parameter sweeps: a baseline YAML, with the swept variable on the CLI:
+- Keep YAMLs in version control. They're tiny and document your protocol.
+- Mix YAML + CLI for parameter sweeps: a baseline YAML, with the swept variable on the CLI:
   ```bash
   for rate in 50 100 200; do
       amorphgen POSCAR --config baseline.yaml --quench-rate $rate -o run_${rate}Kps/
   done
   ```
-- **Comment liberally** — `# ...` after any value explains *why* you chose it. Reviewers and future you will thank you.
-- **Pre-built examples** ship in `examples/`: `full_pipeline.yaml`, `hybrid_airss_mq.yaml`, `fast_test.yaml`, `reference_a_Ga2O3.yaml`.
+- Comment liberally: `# ...` after any value explains *why* you chose it. Reviewers and future you will thank you.
+- Pre-built examples ship in `examples/`: `full_pipeline.yaml`, `hybrid_airss_mq.yaml`, `fast_test.yaml`, `reference_a_Ga2O3.yaml`.

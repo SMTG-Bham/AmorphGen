@@ -349,3 +349,17 @@ class TestAmorphousCubicDefault:
         r = self._apply(self._args(hybrid_ensemble=True),
                         self._ov(opt="ExpCellFilter", fin="ExpCellFilter"))
         assert r["opt"]["cell_filter"] == "ExpCellFilter"
+
+
+def test_explicit_flag_equal_to_default_beats_yaml(tmp_path):
+    """--eq-high-ensemble NVT typed on the CLI (== parser default) must
+    override a YAML/DEFAULT_CONFIG value of NPT in explicit-only mode."""
+    from amorphgen.cli import _build_override, _get_parser
+    parser = _get_parser()
+    argv = ["--hybrid-ensemble", "--input-dir", str(tmp_path), "--config", "x.yaml",
+            "--eq-high-ensemble", "NVT", "--eq-low-T=300"]
+    args = parser.parse_args(argv)
+    ov = _build_override(args, parser, explicit_only=True, argv=argv)
+    assert ov["eq_high"]["ensemble"] == "NVT"
+    assert ov["eq_low"]["T"] == 300            # --flag=value form is detected too
+    assert ov.get("cool", {}).get("ensemble") is None   # not typed -> left to YAML/defaults

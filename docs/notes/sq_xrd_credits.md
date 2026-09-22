@@ -2,7 +2,7 @@
 orphan: true
 ---
 
-# How AmorphGen computes S(q) — and where the method comes from
+# How AmorphGen computes S(q), and where the method comes from
 
 A common (and reasonable) question from users about to publish:
 
@@ -44,23 +44,23 @@ The Python code that wires the standard equations together:
 - The XRD recipe documented in the analysis guide as a code snippet
 
 That's all. There is no AmorphGen "method" or "approximation" that
-needs to be cited separately — the implementation is a wrapper.
+needs to be cited separately, the implementation is a wrapper.
 
 ## Other packages that do exactly the same thing
 
 The reciprocal-lattice-sum approach for S(q) of periodic amorphous
 MD cells is implemented in at least:
 
-- **ISAACS** ([Le Roux & Petkov, *J. Appl. Cryst.* **43** (2010) 181](https://doi.org/10.1107/S0021889809051929))
-- **LiquidLib** ([Walter, Bian, Mendoza & Schweizer, *Comput. Phys. Commun.* **228** (2018) 209](https://doi.org/10.1016/j.cpc.2018.03.005))
-- **freud** ([Ramasubramani et al., *Comput. Phys. Commun.* **254** (2020) 107275](https://doi.org/10.1016/j.cpc.2020.107275))
-- **OVITO** ``StructureFactorModifier``
-- **DL_POLY** built-in S(q)
-- **VMD** plugins
+- ISAACS ([Le Roux & Petkov, *J. Appl. Cryst.* **43** (2010) 181](https://doi.org/10.1107/S0021889809051929))
+- LiquidLib ([Walter, Bian, Mendoza & Schweizer, *Comput. Phys. Commun.* **228** (2018) 209](https://doi.org/10.1016/j.cpc.2018.03.005))
+- freud ([Ramasubramani et al., *Comput. Phys. Commun.* **254** (2020) 107275](https://doi.org/10.1016/j.cpc.2020.107275))
+- OVITO ``StructureFactorModifier``
+- DL_POLY built-in S(q)
+- VMD plugins
 
 If AmorphGen gave a different answer to ISAACS or LiquidLib on the
 same trajectory, that would be a bug, not a feature. The numbers
-should agree — and they do, see the validation table below.
+should agree, and they do, see the validation table below.
 
 ## Validation evidence
 
@@ -69,9 +69,9 @@ established physics and other simulation codes:
 
 | Check | Expected | AmorphGen | ✓ |
 |---|---|---|---|
-| Asymptotic limit S(q→∞), X-ray, a-Ga₂O₃ | $\langle f^{2}\rangle/\langle f\rangle^{2} = 1.43$ (analytic) | 1.44 | ✅ |
-| FSDP intensity for a-Ga₂O₃ DFT-PBE0 ensemble | ~1.8 (GAP_500, Csányi group, separate code) ([Kaewmeechai et al. PRB **111** (2025) 035203](https://doi.org/10.1103/PhysRevB.111.035203)) | 2.00 | ✅ |
-| Experimental FSDP intensity for a-Ga₂O₃ X-ray S(Q) | 1.8–2.0 (same reference, Fig. S2b) | 2.00 | ✅ |
+| Asymptotic limit S(q→∞), X-ray, a-Ga₂O₃ | $\langle f^{2}\rangle/\langle f\rangle^{2} = 1.43$ (analytic) | 1.44 | yes |
+| FSDP intensity for a-Ga₂O₃ DFT-PBE0 ensemble | ~1.8 (GAP_500, Csányi group, separate code) ([Kaewmeechai et al. PRB **111** (2025) 035203](https://doi.org/10.1103/PhysRevB.111.035203)) | 2.00 | yes |
+| Experimental FSDP intensity for a-Ga₂O₃ X-ray S(Q) | 1.8–2.0 (same reference, Fig. S2b) | 2.00 | yes |
 
 The numbers cross-validate against an analytic limit, an independent
 simulation code, and laboratory experiment.
@@ -105,4 +105,4 @@ authors invent something?", the answer is unambiguous: it's the
 standard textbook approach, the same algorithm as ISAACS, LiquidLib,
 freud, OVITO and DL_POLY, and it validates against an analytic limit,
 an independent simulation code, and experiment. AmorphGen contributes
-the integration and ergonomics — not the physics.
+the integration and ergonomics, not the physics.

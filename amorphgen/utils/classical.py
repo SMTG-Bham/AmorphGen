@@ -201,7 +201,9 @@ class BuckinghamCalculator(Calculator):
 
     V(r) = A * exp(-r/rho) - C/r^6 + q_i * q_j / (4*pi*eps0*r)
 
-    The Coulomb term uses a Wolf summation for convergence under PBC.
+    The Coulomb term is evaluated by Ewald summation (default; real-space
+    sum over the neighbour list + reciprocal-space sum + self term) or, if
+    ``coulomb_method="wolf"``, by the damped-shifted Wolf sum.
     This is an approximation to full Ewald -- accurate for amorphous
     structures but not for crystalline long-range order.
 
@@ -215,9 +217,13 @@ class BuckinghamCalculator(Calculator):
         {"Si": 2.4, "O": -1.2}
     cutoff : float
         Cutoff distance in Angstrom.
-    alpha : float
-        Wolf summation damping parameter (1/Angstrom).
-        Default 0.2 works well for cutoff >= 8 A.
+    alpha : float, optional
+        Splitting/damping parameter (1/Angstrom). Default ``3.5/cutoff`` for
+        Ewald (real-space part converged at the cutoff), 0.2 for Wolf.
+    coulomb_method : {"ewald", "wolf"}, default "ewald"
+        Ewald reproduces the exact periodic Coulomb energy and forces; the
+        Wolf sum is faster but only approximate (~10 % force error for an
+        ionic melt at a 10 A cutoff).
     coulomb : bool
         If True, include Coulomb interactions. Default True.
     device : str
@@ -230,8 +236,9 @@ class BuckinghamCalculator(Calculator):
     _KE = 14.3996
 
     def __init__(self, params: dict, charges: dict | None = None,
-                 cutoff: float = 10.0, alpha: float = 0.2,
-                 coulomb: bool = True, device: str = "cpu", **kwargs):
+                 cutoff: float = 10.0, alpha: float | None = None,
+                 coulomb: bool = True, coulomb_method: str = "ewald",
+                 device: str = "cpu", **kwargs):
         super().__init__(**kwargs)
         self.pair_params = {}
         for (s1, s2), p in params.items():
@@ -239,7 +246,17 @@ class BuckinghamCalculator(Calculator):
             self.pair_params[(s2, s1)] = p
         self.charges = charges or {}
         self.cutoff = cutoff
-        self.alpha = alpha
+        coulomb_method = (coulomb_method or "ewald").lower()
+        if coulomb_method not in ("ewald", "wolf"):
+            raise ValueError(
+                f"coulomb_method must be 'ewald' or 'wolf', got {coulomb_method!r}")
+        self.coulomb_method = coulomb_method
+        # Ewald: alpha = 3.5/rc makes erfc(alpha*rc) ~ 7e-7, so the real-space
+        # sum is converged at the pair cutoff.  Wolf: 0.2 is the customary
+        # damping (note the Wolf scheme is only ~10 % accurate in forces for
+        # ionic melts at rc ~ 10 A; it is kept for speed / comparison).
+        self.alpha = float(alpha) if alpha is not None else (
+            3.5 / cutoff if coulomb_method == "ewald" else 0.2)
         self.coulomb = coulomb
         self.device = device
 
@@ -253,9 +270,13 @@ class BuckinghamCalculator(Calculator):
         # Neighbour list (CPU)
         ii, jj, dd, DD = neighbor_list("ijdD", self.atoms, cutoff=rc)
 
-        # Filter to unique pairs (i < j)
-        mask = ii < jj
+        # Unique pairs: i < j, plus i == j pairs (an atom with its own
+        # periodic image, which occur when cutoff > L/2).  The i == j image
+        # pairs are listed twice (+D and -D), so they enter the energy with
+        # weight 1/2; their force contributions cancel by symmetry.
+        mask = ii <= jj
         ii, jj, dd, DD = ii[mask], jj[mask], dd[mask], DD[mask]
+        pair_w = np.where(ii == jj, 0.5, 1.0)
         n_pairs = len(ii)
 
         # Vectorized parameter lookup via integer element indices
@@ -287,36 +308,89 @@ class BuckinghamCalculator(Calculator):
         # Lookup per-pair parameters via integer indexing (fully vectorized)
         ti = atom_type[ii]
         tj = atom_type[jj]
-        A_arr = A_table[ti, tj]
+        A_arr = A_table[ti, tj] * pair_w
         rho_arr = rho_table[ti, tj]
-        C_arr = C_table[ti, tj]
+        C_arr = C_table[ti, tj] * pair_w
         buck_valid = valid_table[ti, tj]
-        qi_arr = q_table[ti]
+        qi_arr = q_table[ti] * pair_w
         qj_arr = q_table[tj]
 
-        # Wolf self-energy correction
+        # Coulomb bookkeeping.  Ewald: the pair kernel below handles the
+        # real-space erfc part (unshifted); the reciprocal-space and self
+        # terms are added afterwards.  Wolf: shifted pair kernel + Wolf
+        # self term.
+        use_ewald = self.coulomb and bool(self.charges) and \
+            self.coulomb_method == "ewald"
         wolf_self = 0.0
         if self.coulomb and self.charges:
             q_atoms = np.array([self.charges.get(s, 0.0) for s in symbols])
-            wolf_self = -self._KE * np.sum(q_atoms ** 2) * (
-                _erfc(alpha * rc) / (2.0 * rc) + alpha / _sqrt(_pi)
-            )
+            if use_ewald:
+                wolf_self = -self._KE * np.sum(q_atoms ** 2) * alpha / _sqrt(_pi)
+            else:
+                wolf_self = -self._KE * np.sum(q_atoms ** 2) * (
+                    _erfc(alpha * rc) / (2.0 * rc) + alpha / _sqrt(_pi)
+                )
 
+        # For Ewald the pair kernel must not apply the Wolf shift: pass
+        # rc_shift = inf so erfc(alpha*rc)/rc -> 0 in the kernel.
+        rc_kernel = np.inf if use_ewald else rc
         if _use_gpu(self.device):
             energy, forces = self._calc_gpu(
                 n, ii, jj, dd, DD,
                 A_arr, rho_arr, C_arr, buck_valid,
-                qi_arr, qj_arr, alpha, rc, wolf_self,
+                qi_arr, qj_arr, alpha, rc_kernel, wolf_self,
             )
         else:
             energy, forces = self._calc_cpu(
                 n, ii, jj, dd, DD,
                 A_arr, rho_arr, C_arr, buck_valid,
-                qi_arr, qj_arr, alpha, rc, wolf_self,
+                qi_arr, qj_arr, alpha, rc_kernel, wolf_self,
             )
+
+        if use_ewald:
+            e_rec, f_rec = self._ewald_reciprocal(
+                self.atoms.cell[:], self.atoms.get_positions(), q_atoms, alpha)
+            energy += e_rec
+            forces = forces + f_rec
 
         self.results["energy"] = energy
         self.results["forces"] = forces
+
+    @staticmethod
+    def _ewald_reciprocal(cell, positions, q, alpha, tol=1e-8):
+        """Reciprocal-space Ewald energy and forces (numpy, any cell shape).
+
+        E_k = (KE 2pi/V) sum_{k!=0} exp(-k^2/4alpha^2)/k^2 |S(k)|^2,
+        S(k) = sum_j q_j exp(i k.r_j);  F_j = -dE_k/dr_j.
+        k-vectors are included while exp(-k^2/4alpha^2) > tol.
+        """
+        KE = BuckinghamCalculator._KE
+        cell = np.asarray(cell, dtype=float)
+        vol = abs(np.linalg.det(cell))
+        rec = 2.0 * np.pi * np.linalg.inv(cell).T          # rows: b1, b2, b3
+        k_max = 2.0 * alpha * np.sqrt(-np.log(tol))
+        # bounds per direction: |n_i| <= k_max / |b_i| is not exact for
+        # non-orthogonal cells; use the perpendicular widths instead.
+        widths = 2.0 * np.pi / np.linalg.norm(cell, axis=1)   # lower bound on |b_i|
+        nmax = np.ceil(k_max / widths).astype(int)
+        rng = [np.arange(-m, m + 1) for m in nmax]
+        n = np.array(np.meshgrid(*rng, indexing="ij")).reshape(3, -1).T
+        n = n[np.any(n != 0, axis=1)]
+        k = n @ rec                                          # (Nk, 3)
+        k2 = np.einsum("ij,ij->i", k, k)
+        keep = k2 <= k_max ** 2
+        k, k2 = k[keep], k2[keep]
+        A = np.exp(-k2 / (4.0 * alpha ** 2)) / k2            # (Nk,)
+        phase = k @ positions.T                              # (Nk, N)
+        cos_p, sin_p = np.cos(phase), np.sin(phase)
+        S_re = cos_p @ q
+        S_im = sin_p @ q
+        pref = KE * 2.0 * np.pi / vol
+        e_rec = pref * float(np.sum(A * (S_re ** 2 + S_im ** 2)))
+        # Im[S* e^{ik.r_j}] = S_re sin(k.r_j) - S_im cos(k.r_j)
+        im = S_re[:, None] * sin_p - S_im[:, None] * cos_p     # (Nk, N)
+        f = 2.0 * pref * q[None, :] * ((A[:, None] * im).T @ k).T  # (3, N)
+        return e_rec, f.T
 
     @staticmethod
     def _calc_cpu(n, ii, jj, dd, DD,

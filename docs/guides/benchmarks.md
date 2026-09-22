@@ -31,7 +31,7 @@ Random (SC) → Optimise → High-T equilibrate → Quench → Low-T equilibrate
 | **MACE MQ** | **2.25** | **4.0** | **100%** | — | — |
 | Experiment | 2.20 | 4.0 | ~100% | 109.5 ± 10 | 1.620 |
 
-**Key finding:** Both CHGNet and MACE MQ achieve 100% tetrahedral Si
+Both CHGNet and MACE MQ achieve 100% tetrahedral Si
 coordination. CHGNet MQ gives the tightest bond angle distribution
 (5.1° std vs 14.4° for static optimisation).
 
@@ -45,7 +45,7 @@ coordination. CHGNet MQ gives the tightest bond angle distribution
 | MACE MQ | 2.36 | 4.3 | 75% |
 | Experiment | 2.29 | 4.0 | ~100% |
 
-**Key finding:** Longer equilibration improves CN=4 fraction (90% with
+Longer equilibration improves CN=4 fraction (90% with
 long CHGNet MQ). Pure Si needs slow cooling rates for tetrahedral
 network formation.
 
@@ -59,7 +59,7 @@ network formation.
 | **MACE MQ** | **2.40** | **6.0** | **100%** | **5.4** | **56%** |
 | Experiment | 2.39 | 6.0 | 100% | 6.0 | 100% |
 
-**Key finding:** MACE is dramatically better for chloride systems —
+MACE is dramatically better for chloride systems:
 correct density (2.40 vs 1.76), perfect Zr octahedra (100% CN=6),
 and much improved Li coordination (56% vs 0-6% CN=6). CHGNet
 significantly underestimates the density of chloride systems.
@@ -245,7 +245,7 @@ report = convergence_report(
 ```
 
 Key convergence criteria:
-- **Energy drift** < 0.001 eV/atom/ps
-- **Block average test** PASSED (block means within 2× SEM)
-- **MSD** linear (liquid) at high T, plateau (glass) at low T
-- **RDF** overlapping across time windows
+- Energy drift < 0.001 eV/atom/ps
+- Block average test PASSED (block means within 2× SEM)
+- MSD linear (liquid) at high T, plateau (glass) at low T
+- RDF overlapping across time windows

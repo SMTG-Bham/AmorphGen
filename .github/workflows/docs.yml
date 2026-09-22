@@ -44,7 +44,8 @@ jobs:
           path: docs/_build/html
 
   deploy:
-    if: github.ref == 'refs/heads/main'
+    # Pages is only enabled on the public SMTG-Bham repository; skip on mirrors/forks
+    if: github.ref == 'refs/heads/main' && github.repository == 'SMTG-Bham/AmorphGen'
     needs: build
     runs-on: ubuntu-latest
     environment:

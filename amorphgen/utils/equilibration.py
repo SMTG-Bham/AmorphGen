@@ -33,7 +33,9 @@ Notes
   Log files are faster (no atomic positions to load) but only support
   energy, temperature, and block-average analyses.
   Trajectory files are needed for MSD, RDF, and CN analyses.
-- Default timestep is 1.0 fs, matching AmorphGen's default_config.py.
+- Default timestep is taken from AmorphGen's default_config.py (0.5 fs), so
+  the time axes are right for a default run. Trajectories are written every
+  TRAJ_LOG_INTERVAL MD steps; pass ``frame_stride`` if yours differ.
 """
 
 from __future__ import annotations
@@ -41,6 +43,15 @@ from __future__ import annotations
 import numpy as np
 from ase.io import read
 from ase.neighborlist import neighbor_list
+
+from .common import TRAJ_LOG_INTERVAL
+from ..configs.default_config import DEFAULT_CONFIG
+
+# Default MD timestep for the diagnostics, sourced from DEFAULT_CONFIG so the
+# time axes are right out of the box for a default AmorphGen run and cannot
+# drift from the pipeline. Always pass your run's actual timestep if it
+# differs.
+DEFAULT_TIMESTEP_FS: float = float(DEFAULT_CONFIG["melt"]["timestep"])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -174,11 +185,12 @@ def extract_energies(source, n_atoms: int | None = None
     return energies, energies / n_atoms
 
 
-def plot_energy_convergence(source, timestep_fs: float = 1.0,
+def plot_energy_convergence(source, timestep_fs: float = DEFAULT_TIMESTEP_FS,
                             window_ps: float = 0.5,
                             per_atom: bool = True,
                             n_atoms: int | None = None,
-                            ax=None):
+                            ax=None,
+                            frame_stride: int = TRAJ_LOG_INTERVAL):
     """
     Plot potential energy vs time with running average and linear drift.
 
@@ -187,7 +199,9 @@ def plot_energy_convergence(source, timestep_fs: float = 1.0,
     source : str or list
         Trajectory file, log file (.log), or list of Atoms.
     timestep_fs : float
-        MD timestep in femtoseconds (default 1.0, matching AmorphGen).
+        MD timestep in femtoseconds (defaults to AmorphGen's
+        ``DEFAULT_CONFIG`` value, 0.5 fs). Pass your run's actual timestep
+        if it differs.
     window_ps : float
         Running average window in picoseconds.
     n_atoms : int, optional
@@ -219,9 +233,11 @@ def plot_energy_convergence(source, timestep_fs: float = 1.0,
                                                               n_atoms)
         e = energies_per_atom if per_atom else energies_total
         n_steps = len(e)
-        time_ps = np.arange(n_steps) * timestep_fs / 1000.0
+        # One frame every frame_stride MD steps: real time = index*dt*stride.
+        time_ps = np.arange(n_steps) * timestep_fs * frame_stride / 1000.0
 
-    window_steps = max(1, int(window_ps * 1000 / timestep_fs))
+    # window_steps counts FRAMES: one frame spans timestep_fs*frame_stride fs.
+    window_steps = max(1, int(window_ps * 1000 / (timestep_fs * frame_stride)))
     e_avg = running_average(e, window_steps)
 
     # Linear fit to detect drift
@@ -320,8 +336,9 @@ def block_average_test(source, n_blocks: int = 4,
 
 def plot_block_averages(source, n_blocks: int = 4,
                         discard_fraction: float = 0.1,
-                        timestep_fs: float = 1.0,
-                        n_atoms: int | None = None, ax=None):
+                        timestep_fs: float = DEFAULT_TIMESTEP_FS,
+                        n_atoms: int | None = None, ax=None,
+                        frame_stride: int = TRAJ_LOG_INTERVAL):
     """Visualise block averaging: block means vs overall mean +/- 2*SEM."""
     import matplotlib
     matplotlib.use("Agg")
@@ -348,14 +365,15 @@ def plot_block_averages(source, n_blocks: int = 4,
     else:
         fig = ax.get_figure()
 
+    dt_frame = timestep_fs * frame_stride / 1000   # ps per frame
     for i in range(n_blocks):
-        t_start = (n_discard + i * block_size) * timestep_fs / 1000
-        t_end = (n_discard + (i + 1) * block_size) * timestep_fs / 1000
+        t_start = (n_discard + i * block_size) * dt_frame
+        t_end = (n_discard + (i + 1) * block_size) * dt_frame
         ax.hlines(bd["block_means"][i], t_start, t_end,
                   colors="steelblue", linewidths=2.5,
                   label="Block mean" if i == 0 else None)
 
-    t_prod_start = n_discard * timestep_fs / 1000
+    t_prod_start = n_discard * dt_frame
     ax.axhline(bd["overall_mean"], color="black", ls="--", lw=1,
                label=f"Mean: {bd['overall_mean']:.4f} eV/atom")
     ax.axhspan(bd["overall_mean"] - bd["threshold"],
@@ -381,13 +399,21 @@ def plot_block_averages(source, n_blocks: int = 4,
 # 3. Mean Square Displacement
 # ══════════════════════════════════════════════════════════════════════════════
 
-def compute_msd(traj, timestep_fs: float = 1.0,
-                by_element: bool = True) -> tuple[np.ndarray, dict]:
+def compute_msd(traj, timestep_fs: float = DEFAULT_TIMESTEP_FS,
+                by_element: bool = True,
+                frame_stride: int = TRAJ_LOG_INTERVAL) -> tuple[np.ndarray, dict]:
     """
     Compute MSD from trajectory using unwrapped positions.
 
     Handles both orthorhombic and non-orthorhombic cells via
     fractional coordinate unwrapping.
+
+    ``timestep_fs`` is the MD integration timestep. AmorphGen writes one
+    trajectory frame every ``frame_stride`` MD steps (``TRAJ_LOG_INTERVAL``,
+    default 100), so the real time between consecutive frames is
+    ``timestep_fs * frame_stride``. Pass ``frame_stride=1`` for a trajectory
+    that stores every step. Getting this wrong rescales the time axis (and
+    hence the fitted diffusion coefficient) by ``frame_stride``.
 
     Parameters
     ----------
@@ -428,7 +454,9 @@ def compute_msd(traj, timestep_fs: float = 1.0,
         positions[i] = positions[i - 1] + delta
 
     r0 = positions[0]
-    time_ps = np.arange(n_frames) * timestep_fs / 1000.0
+    # Frames are stored every frame_stride MD steps, so the wall time between
+    # frames is timestep_fs * frame_stride (fs). Dividing by 1000 -> ps.
+    time_ps = np.arange(n_frames) * timestep_fs * frame_stride / 1000.0
     msd_dict = {}
 
     if by_element:
@@ -443,7 +471,8 @@ def compute_msd(traj, timestep_fs: float = 1.0,
     return time_ps, msd_dict
 
 
-def plot_msd(traj, timestep_fs: float = 1.0, ax=None):
+def plot_msd(traj, timestep_fs: float = DEFAULT_TIMESTEP_FS, ax=None,
+             frame_stride: int = TRAJ_LOG_INTERVAL):
     """
     Plot MSD vs time per element. Fits diffusion coefficient D.
 
@@ -461,7 +490,8 @@ def plot_msd(traj, timestep_fs: float = 1.0, ax=None):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    time_ps, msd_dict = compute_msd(traj, timestep_fs=timestep_fs)
+    time_ps, msd_dict = compute_msd(traj, timestep_fs=timestep_fs,
+                                    frame_stride=frame_stride)
 
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 5))
@@ -499,8 +529,9 @@ def plot_msd(traj, timestep_fs: float = 1.0, ax=None):
 # 4. Temperature vs time
 # ══════════════════════════════════════════════════════════════════════════════
 
-def plot_temperature(source, timestep_fs: float = 1.0,
-                     T_target: float | None = None, ax=None):
+def plot_temperature(source, timestep_fs: float = DEFAULT_TIMESTEP_FS,
+                     T_target: float | None = None, ax=None,
+                     frame_stride: int = TRAJ_LOG_INTERVAL):
     """
     Plot instantaneous temperature vs time.
 
@@ -524,7 +555,7 @@ def plot_temperature(source, timestep_fs: float = 1.0,
     else:
         frames = _load_trajectory(source)
         temps = np.array([atoms.get_temperature() for atoms in frames])
-        time_ps = np.arange(len(temps)) * timestep_fs / 1000.0
+        time_ps = np.arange(len(temps)) * timestep_fs * frame_stride / 1000.0
         n_atoms = len(frames[0])
 
     if ax is None:
@@ -565,7 +596,9 @@ def _compute_partial_rdf_frame(atoms, p1: str, p2: str,
     """
     Compute partial RDF g(r) for one frame using neighbor_list.
 
-    Correctly handles same-species pairs (avoids double-counting).
+    Same-species pairs count both directions (i->j and j->i) and normalise
+    with the directed pair-density (n-1)/V, so g_AA(r) -> 1 at large r
+    (consistent with analysis.rdf.compute_rdf).
     """
     dr = rmax / nbins
     r_centres = np.linspace(dr / 2, rmax - dr / 2, nbins)
@@ -584,7 +617,11 @@ def _compute_partial_rdf_frame(atoms, p1: str, p2: str,
     mask = (syms[idx_i] == p1) & (syms[idx_j] == p2)
 
     if p1 == p2:
-        mask &= (idx_i < idx_j)
+        # Count both directions (i->j and j->i, as neighbor_list returns
+        # them) and normalise with the directed pair-density (n-1)/V. This
+        # matches analysis.rdf.compute_rdf and makes g_AA(r) -> 1 at large r.
+        # (Keeping i<j — undirected — while normalising with (n-1)/V would
+        # halve g_AA to ~0.5.)
         rho_target = (n_target - 1) / vol
     else:
         rho_target = n_target / vol
@@ -606,7 +643,8 @@ def _compute_partial_rdf_frame(atoms, p1: str, p2: str,
 
 def plot_rdf_time_windows(traj, pairs: list[tuple[str, str]] | None = None,
                           n_windows: int = 4, rmax: float = 4.0,
-                          nbins: int = 100, timestep_fs: float = 1.0):
+                          nbins: int = 100, timestep_fs: float = DEFAULT_TIMESTEP_FS,
+                          frame_stride: int = TRAJ_LOG_INTERVAL):
     """
     Overlay partial RDFs from different time windows.
 
@@ -640,8 +678,8 @@ def plot_rdf_time_windows(traj, pairs: list[tuple[str, str]] | None = None,
             end = start + window_size
             window_frames = frames[start:end]
 
-            t_start = start * timestep_fs / 1000
-            t_end = end * timestep_fs / 1000
+            t_start = start * timestep_fs * frame_stride / 1000
+            t_end = end * timestep_fs * frame_stride / 1000
 
             g_r = np.zeros(nbins)
             for atoms in window_frames:
@@ -669,7 +707,8 @@ def plot_rdf_time_windows(traj, pairs: list[tuple[str, str]] | None = None,
 def compute_cn_vs_time(traj, centre: str, neighbour: str,
                        cutoff: float | None = None,
                        window_size: int = 50,
-                       timestep_fs: float = 1.0
+                       timestep_fs: float = DEFAULT_TIMESTEP_FS,
+                       frame_stride: int = TRAJ_LOG_INTERVAL
                        ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Compute average coordination number vs time using a sliding window.
@@ -719,7 +758,7 @@ def compute_cn_vs_time(traj, centre: str, neighbour: str,
         cn_avg.append(np.mean(block))
         cn_std.append(np.std(block))
 
-    time_centres_ps = np.array(time_centres) * timestep_fs / 1000.0
+    time_centres_ps = np.array(time_centres) * timestep_fs * frame_stride / 1000.0
 
     return time_centres_ps, np.array(cn_avg), np.array(cn_std)
 
@@ -727,7 +766,8 @@ def compute_cn_vs_time(traj, centre: str, neighbour: str,
 def plot_cn_vs_time(traj, pairs: list[tuple[str, str, float]],
                     cutoffs: list[float] | None = None,
                     window_size: int = 50,
-                    timestep_fs: float = 1.0, ax=None):
+                    timestep_fs: float = DEFAULT_TIMESTEP_FS, ax=None,
+                    frame_stride: int = TRAJ_LOG_INTERVAL):
     """
     Plot CN vs time for multiple centre-neighbour pairs.
 
@@ -754,6 +794,7 @@ def plot_cn_vs_time(traj, pairs: list[tuple[str, str, float]],
         t, cn_avg, cn_std = compute_cn_vs_time(
             traj, centre, neigh, cutoff=cutoff,
             window_size=window_size, timestep_fs=timestep_fs,
+            frame_stride=frame_stride,
         )
         ax.errorbar(t, cn_avg, yerr=cn_std, fmt="o-", ms=4, capsize=3,
                     label=f"{centre}-{neigh} (expect {expected:.1f})")
@@ -771,7 +812,7 @@ def plot_cn_vs_time(traj, pairs: list[tuple[str, str, float]],
 # 7. All-in-one convergence report
 # ══════════════════════════════════════════════════════════════════════════════
 
-def convergence_report(source, timestep_fs: float = 1.0,
+def convergence_report(source, timestep_fs: float = DEFAULT_TIMESTEP_FS,
                        T_target: float | None = None,
                        n_atoms: int | None = None,
                        pairs_rdf: list[tuple[str, str]] | None = None,
@@ -779,7 +820,8 @@ def convergence_report(source, timestep_fs: float = 1.0,
                        cn_cutoffs: list[float] | None = None,
                        rmax: float = 4.0, n_blocks: int = 4,
                        output_dir: str | None = None,
-                       prefix: str = "convergence"):
+                       prefix: str = "convergence",
+                       frame_stride: int = TRAJ_LOG_INTERVAL):
     """
     Generate a comprehensive convergence report.
 
@@ -837,7 +879,7 @@ def convergence_report(source, timestep_fs: float = 1.0,
         frames = _load_trajectory(source)
         n_frames = len(frames)
         n_atoms = len(frames[0])
-        total_time_ps = n_frames * timestep_fs / 1000.0
+        total_time_ps = n_frames * timestep_fs * frame_stride / 1000.0
         elements = sorted(set(frames[0].get_chemical_symbols()))
 
     report = {
@@ -873,7 +915,8 @@ def convergence_report(source, timestep_fs: float = 1.0,
 
     # --- Energy convergence ---
     fig_e, drift = plot_energy_convergence(
-        source, timestep_fs=timestep_fs, n_atoms=n_atoms)
+        source, timestep_fs=timestep_fs, n_atoms=n_atoms,
+        frame_stride=frame_stride)
     report["energy_drift_eV_per_atom_per_ps"] = drift
     ok_drift = abs(drift) < 0.001
     lines.append(f"\nEnergy drift: {drift:.6f} eV/atom/ps "
@@ -894,7 +937,8 @@ def convergence_report(source, timestep_fs: float = 1.0,
 
     fig_b, _, _ = plot_block_averages(source, n_blocks=n_blocks,
                                       timestep_fs=timestep_fs,
-                                      n_atoms=n_atoms)
+                                      n_atoms=n_atoms,
+                                      frame_stride=frame_stride)
     _save_or_store(fig_b, "fig_blocks", "blocks")
 
     # --- Temperature ---
@@ -902,7 +946,7 @@ def convergence_report(source, timestep_fs: float = 1.0,
         fig_t, ax_t = plt.subplots(figsize=(10, 3))
         ax_t.plot(log_data['time_ps'], log_data['T_K'], alpha=0.6, lw=0.8,
                   color="orangered")
-        window = max(1, int(0.5 * 1000 / timestep_fs))
+        window = max(1, int(0.5 * 1000 / (timestep_fs * frame_stride)))
         t_avg = running_average(log_data['T_K'], window)
         ax_t.plot(log_data['time_ps'], t_avg, color="darkred", lw=1.5,
                   label="Running avg (0.5 ps)")
@@ -916,12 +960,13 @@ def convergence_report(source, timestep_fs: float = 1.0,
         fig_t.tight_layout()
     else:
         fig_t = plot_temperature(frames, timestep_fs=timestep_fs,
-                                 T_target=T_target)
+                                 T_target=T_target, frame_stride=frame_stride)
     _save_or_store(fig_t, "fig_temperature", "temperature")
 
     # --- MSD and RDF — only from trajectory, not log ---
     if not is_log:
-        fig_m, D_dict = plot_msd(frames, timestep_fs=timestep_fs)
+        fig_m, D_dict = plot_msd(frames, timestep_fs=timestep_fs,
+                                 frame_stride=frame_stride)
         report["diffusion_coefficients_cm2_s"] = D_dict
         lines.append("\nDiffusion coefficients:")
         for elem, D in D_dict.items():
@@ -932,14 +977,16 @@ def convergence_report(source, timestep_fs: float = 1.0,
         _save_or_store(fig_m, "fig_msd", "msd")
 
         fig_r = plot_rdf_time_windows(frames, pairs=pairs_rdf,
-                                      rmax=rmax, timestep_fs=timestep_fs)
+                                      rmax=rmax, timestep_fs=timestep_fs,
+                                      frame_stride=frame_stride)
         _save_or_store(fig_r, "fig_rdf_windows", "rdf_windows")
 
         # --- CN vs time (optional) ---
         if pairs_cn:
             fig_cn = plot_cn_vs_time(frames, pairs_cn,
                                      cutoffs=cn_cutoffs,
-                                     timestep_fs=timestep_fs)
+                                     timestep_fs=timestep_fs,
+                                     frame_stride=frame_stride)
             _save_or_store(fig_cn, "fig_cn", "cn")
     else:
         lines.append("\n(MSD, RDF, and CN require trajectory file, "
