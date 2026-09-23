@@ -44,7 +44,10 @@ def _gaussian_smear(r, g_r, sigma):
     x = np.arange(-window_size, window_size + 1) * dr
     kernel = np.exp(-x**2 / (2 * sigma**2))
     kernel /= kernel.sum()
-    return np.convolve(g_r, kernel, mode='same')
+    # Edge-pad before convolving: np.convolve(mode='same') zero-pads, which
+    # pulled the smoothed g(r) down to ~0.5 at rmax (and at r=0).
+    padded = np.pad(np.asarray(g_r, dtype=float), window_size, mode="edge")
+    return np.convolve(padded, kernel, mode='valid')
 
 
 def compute_rdf(atoms_list, pair=None, rmax=None, nbins=200,
@@ -530,11 +533,15 @@ def compute_structure_factor_direct(atoms_list, qmax=15.0, nq=300,
         recip_min = float(np.linalg.norm(recip, axis=1).min())
         if recip_min == 0:
             continue
-        n_max = int(np.ceil(qmax / recip_min)) + 1
+        # |n_i| <= qmax*|a_i|/(2 pi) is the exact bound for any cell shape
+        # (n_i = q.a_i / 2 pi); a single n_max from min|b_i| missed
+        # q-vectors in skewed cells.
+        a_len = np.linalg.norm(atoms.cell.array, axis=1)
+        n_max_i = np.ceil(qmax * a_len / (2.0 * np.pi)).astype(int) + 1
 
         # Build all integer triplets (n1,n2,n3), exclude origin, build q
-        ns = np.arange(-n_max, n_max + 1)
-        grid = np.array(np.meshgrid(ns, ns, ns, indexing="ij")).reshape(3, -1).T
+        ns = [np.arange(-m, m + 1) for m in n_max_i]
+        grid = np.array(np.meshgrid(*ns, indexing="ij")).reshape(3, -1).T
         # drop origin
         grid = grid[~np.all(grid == 0, axis=1)]
         q_vecs = grid @ recip                          # (M, 3)
@@ -640,8 +647,9 @@ def compute_structure_factor(atoms_list, pair=None, qmax=15.0, nq=300,
           useful for ensemble-vs-ensemble comparisons. Does NOT match
           experimental X-ray/neutron S(Q) in general because it omits
           per-element scattering weights.
-        * ``"xray"`` — Faber-Ziman partials weighted by atomic numbers
-          squared (Z_A·Z_B). The Z² approximation is exact only at
+        * ``"xray"`` — Faber-Ziman partials weighted by the q-dependent
+          atomic form factors f_A(q)·f_B(q) (Waasmaier-Kirfel 1995); f(0)=Z, so
+          a Z² description is exact only at
           q = 0; quantitatively good below q ~ 5 inverse-Angstrom
           (covers the FSDP and main-peak region).
         * ``"neutron"`` — same Faber-Ziman combination but weighted by

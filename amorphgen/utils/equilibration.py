@@ -319,7 +319,10 @@ def block_average_test(source, n_blocks: int = 4,
     sem = overall_std / np.sqrt(len(e_prod))
 
     max_deviation = np.max(np.abs(block_means - overall_mean))
-    threshold = 2 * sem
+    # A block mean scatters by std/sqrt(block_size), not by the whole-run
+    # SEM (std/sqrt(N)); the old threshold was sqrt(n_blocks) too strict and
+    # flagged genuinely equilibrated runs as "NOT EQUILIBRATED".
+    threshold = 2 * overall_std / np.sqrt(max(block_size, 1))
 
     is_equilibrated = bool(max_deviation < threshold)
 
@@ -565,7 +568,8 @@ def plot_temperature(source, timestep_fs: float = DEFAULT_TIMESTEP_FS,
 
     ax.plot(time_ps, temps, alpha=0.4, lw=0.5, color="orangered")
 
-    window = max(1, int(0.5 * 1000 / timestep_fs))
+    # 0.5 ps window in FRAMES: one frame spans timestep_fs*frame_stride fs.
+    window = max(1, int(0.5 * 1000 / (timestep_fs * frame_stride)))
     t_avg = running_average(temps, window)
     ax.plot(time_ps, t_avg, color="darkred", lw=1.5,
             label="Running avg (0.5 ps)")

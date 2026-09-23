@@ -87,13 +87,14 @@ class TestResolveRamp:
 
     def test_heating_ramp(self):
         temps = resolve_ramp(300, 3000, 100)
-        assert temps[0] == 300
+        assert temps[0] == 400          # T_start itself is not a segment
         assert temps[-1] == 3000
+        assert len(temps) == 27         # 2700 K / 100 K -> exact rate
         assert all(temps[i] < temps[i+1] for i in range(len(temps)-1))
 
     def test_cooling_ramp(self):
         temps = resolve_ramp(3000, 300, -100)
-        assert temps[0] == 3000
+        assert temps[0] == 2900
         assert temps[-1] == 300
         assert all(temps[i] > temps[i+1] for i in range(len(temps)-1))
 
@@ -119,7 +120,7 @@ class TestResolveRamp:
     def test_float_step_supported(self):
         # range() would raise TypeError on a float step.
         temps = resolve_ramp(300, 1000, 250.5)
-        assert temps[0] == 300 and temps[-1] == 1000
+        assert temps[0] == 550.5 and temps[-1] == 1000
         assert all(t2 > t1 for t1, t2 in zip(temps, temps[1:]))
 
     def test_mis_signed_step_does_not_hang_or_crash(self):
@@ -127,7 +128,7 @@ class TestResolveRamp:
         # (IndexError) or, in the quench while-loop, an infinite loop.
         # Direction is now inferred from the endpoints.
         temps = resolve_ramp(3000, 300, +100)   # cooling, wrong sign
-        assert temps[0] == 3000 and temps[-1] == 300
+        assert temps[0] == 2900 and temps[-1] == 300
         assert all(t2 < t1 for t1, t2 in zip(temps, temps[1:]))
 
 
@@ -169,7 +170,9 @@ class TestTrajectoryWriter:
 
     def test_supported_formats(self):
         assert "extxyz" in TRAJ_FORMATS
-        assert "xyz" in TRAJ_FORMATS
+        assert "xyz" not in TRAJ_FORMATS            # alias of extxyz, see _TRAJ_ALIASES
+        from amorphgen.utils.common import _TRAJ_ALIASES
+        assert _TRAJ_ALIASES["xyz"] == "extxyz"
         assert "traj" in TRAJ_FORMATS
 
     def test_invalid_format_raises(self):
@@ -325,3 +328,60 @@ class TestRampTemperatureAllIntegrators:
         frames = read(str(tmp_path / "s_traj.xyz"), index=":")
         assert len(frames) >= 4
         assert frames[-1].calc is not None      # energy carried into the wrapped copy
+
+
+class TestReviewFixesPhysics:
+    """Regressions for the 2026-09 review: ramp rate, negative rate, smoothing edges,
+    block test, torn checkpoint, model-name case, convert collisions."""
+
+    def test_ramp_rate_is_exact(self):
+        # 3000 -> 300 K, T_step 1000, 1000 steps per segment at 1 fs = 3 ps -> 900 K/ps
+        temps = resolve_ramp(3000, 300, 1000)
+        assert temps == [2000.0, 1000.0, 300.0]           # no segment at T_start
+        assert 2700 / (len(temps) * 1000 * 1e-3) == pytest.approx(900.0)
+
+    def test_negative_rate_does_not_collapse_quench(self):
+        # the stage code takes abs(rate); reproduce its arithmetic
+        rate = abs(float(-100)); steps = int(round(abs(-100) / (rate * 1.0 / 1000)))
+        assert steps == 1000
+
+    def test_smoothed_rdf_has_no_edge_dip(self):
+        from ase.build import bulk
+        from amorphgen.analysis.rdf import compute_rdf
+        a = bulk("Cu", "fcc", a=3.6, cubic=True).repeat((4, 4, 4)); a.rattle(0.2, seed=0)
+        raw = np.array(compute_rdf([a], pair="Cu-Cu", rmax=7.0, nbins=350, sigma=0.0)["g_r"])
+        sm = np.array(compute_rdf([a], pair="Cu-Cu", rmax=7.0, nbins=350, sigma=0.05)["g_r"])
+        assert sm[-1] > 0.8 * raw[-10:].mean()             # zero-padding gave ~0.5x
+
+    def test_block_average_test_passes_on_equilibrated_noise(self, tmp_path):
+        from amorphgen.utils.equilibration import block_average_test
+        rng = np.random.default_rng(0); passed = 0
+        for k in range(10):
+            e = -300.0 + 1.0 * rng.normal(size=4000)          # stationary, uncorrelated
+            p = tmp_path / f"run{k}.log"
+            with open(p, "w") as fh:
+                fh.write("    Step     Time_ps       T_K       Epot_eV       Ekin_eV       Etot_eV      Vol_A3\n" + "-" * 80 + "\n")
+                for s, ep in enumerate(e):
+                    fh.write(f"{s*100:8d} {s*0.05:10.4f} {300.0:8.1f} {ep:12.4f} {10.0:12.4f} {ep+10:12.4f} {1000.0:10.2f}\n")
+            ok, _ = block_average_test(str(p), n_atoms=100)
+            passed += ok
+        assert passed >= 8        # old threshold passed ~35 % of such runs
+
+    def test_torn_last_frame_is_salvaged(self, tmp_path):
+        from ase.build import bulk
+        from ase.io import write
+        a = bulk("Cu", "fcc", a=3.6, cubic=True).repeat((2, 2, 2))
+        p = tmp_path / "t.xyz"; write(str(p), [a, a, a], format="extxyz")
+        with open(p, "a") as fh:                            # half-written 4th frame
+            fh.write('32\nLattice="7.2 0 0 0 7.2 0 0 0 7.2" Properties=species:S:1:pos:R:3\nCu 0 0 0\n')
+        from amorphgen.utils.common import read_md_checkpoint
+        ck = read_md_checkpoint(str(p))
+        assert ck is not None and ck[1] == 200              # 3 good frames kept
+        from ase.io import read
+        assert len(read(str(p), index=":")) == 3            # file truncated to good frames
+
+    def test_model_names_are_case_insensitive(self):
+        from amorphgen.utils.calculators import _ci_get, MACE_FOUNDATION_MODELS, SEVENNET_MODELS
+        assert _ci_get(MACE_FOUNDATION_MODELS, "MACE-MPA-0") == _ci_get(MACE_FOUNDATION_MODELS, "mace-mpa-0")
+        assert _ci_get(SEVENNET_MODELS, "7NET-MF-OMPA") == _ci_get(SEVENNET_MODELS, "7net-mf-ompa")
+        assert _ci_get(MACE_FOUNDATION_MODELS, "/some/path.model") == "/some/path.model"

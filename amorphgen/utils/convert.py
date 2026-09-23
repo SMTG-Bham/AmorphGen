@@ -108,8 +108,13 @@ def convert(input_path: str,
               f"{output_dir}/  (format: {output_format})")
 
     written: list[str] = []
+    used_bases = set()
     for f in files:
-        base = os.path.splitext(os.path.basename(f))[0]
+        base, in_ext = os.path.splitext(os.path.basename(f))
+        # s.xyz and s.cif must not both become s.vasp
+        if base in used_bases:
+            base = f"{base}_{in_ext.lstrip('.')}"
+        used_bases.add(base)
         atoms = read(f)
         dest = os.path.join(output_dir, base + ext)
         if ase_format == "vasp" and sort:

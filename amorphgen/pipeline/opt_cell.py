@@ -172,6 +172,10 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt", **kwargs):
 
         for step in range(max_steps):
             optimizer.step()
+            # The manual step() loop bypasses ASE's irun(), so fire the
+            # observers ourselves or the .traj file is never written.
+            optimizer.nsteps += 1
+            optimizer.call_observers()
             energy = atoms.get_potential_energy()
             forces = target.get_forces()
             # Eager divergence guard: stop before a NaN/Inf is written to disk.

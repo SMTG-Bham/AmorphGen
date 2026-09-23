@@ -89,6 +89,9 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
     # Allow rate (K/ps) to auto-calculate steps_per_T
     rate = cfg.get("rate")
     if rate is not None:
+        rate = abs(float(rate))          # sign is set by the endpoints
+        if rate == 0:
+            raise ValueError("rate (K/ps) must be non-zero")
         steps = int(round(abs(T_step) / (rate * timestep_fs / 1000)))
         steps = max(steps, 1)
     else:
@@ -101,7 +104,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
 
     logger, traj = attach_outputs(dyn, atoms, logfile, trajfile,
                                   fmt=global_cfg.get("traj_format", "extxyz"),
-                                  append=elapsed > 0)
+                                  append=elapsed > 0, step_offset=elapsed)
 
     from ..utils.common import compute_density_gcm3
     density = compute_density_gcm3(atoms)

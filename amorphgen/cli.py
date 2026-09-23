@@ -78,6 +78,14 @@ class _ExamplesAction(argparse.Action):
         parser.exit()
 
 
+def _typed(*flags, argv=None):
+    """True if any of *flags* was typed on the command line (regardless of
+    whether its value equals the parser default)."""
+    argv = sys.argv[1:] if argv is None else argv
+    typed = {tok.split("=", 1)[0] for tok in argv if tok.startswith("-")}
+    return bool(typed.intersection(flags))
+
+
 def _DC(section, key):
     """Pipeline-stage CLI defaults come from DEFAULT_CONFIG (single source of truth)."""
     from .configs.default_config import DEFAULT_CONFIG
@@ -746,7 +754,7 @@ def _apply_amorphous_cubic_default(args, override, ff_default):
     if not (getattr(args, "hybrid_ensemble", False)
             or getattr(args, "batch_opt", False)):
         return override
-    if args.cell_filter != ff_default:
+    if _typed("-C", "--cell-filter"):
         return override  # user set -C explicitly -> respect it
     if not isinstance(override, dict):
         return override
@@ -783,7 +791,7 @@ def _run_convert(args, yaml_cfg: dict | None = None) -> None:
     fmt_default = parser.get_default("format")
 
     input_path = args.convert or yaml_block.get("input")
-    if args.format and args.format != fmt_default:
+    if args.format and _typed("--format"):
         output_format = args.format
     else:
         output_format = yaml_block.get("format", args.format or "vasp")
@@ -1036,6 +1044,14 @@ def main():
             # Leave None so the convert helper picks
             # "<input>_<format>/" as its automatic default.
             pass
+        elif getattr(args, "mq_ensemble", False):
+            args.work_dir = "mq_ensemble_run"
+        elif getattr(args, "hybrid_ensemble", False):
+            args.work_dir = "hybrid_run"
+        elif getattr(args, "extract_snapshots", None):
+            args.work_dir = "snapshots"
+        elif getattr(args, "batch_quench", False):
+            args.work_dir = "batch_quench_run"
         else:
             args.work_dir = "melt_quench_run"
 
@@ -1064,6 +1080,14 @@ def main():
         # No YAML: still pass only what was typed, so DEFAULT_CONFIG (the
         # documented defaults) fills the rest exactly as in YAML mode.
         override = _build_override(args, _get_parser(), explicit_only=True)
+
+    # --hybrid-ensemble / --batch-opt relax with the stage-7 ("final_opt")
+    # settings; let a YAML that only has an `opt:` block drive that relax
+    # instead of silently falling back to the defaults.
+    if (getattr(args, "hybrid_ensemble", False) or getattr(args, "batch_opt", False)) \
+            and isinstance(override, dict) and isinstance(override.get("opt"), dict):
+        merged = dict(override["opt"]); merged.update(override.get("final_opt") or {})
+        override["final_opt"] = merged
 
     # Amorphous-input modes default to a cubic (isotropic) cell filter.
     override = _apply_amorphous_cubic_default(
@@ -1105,9 +1129,9 @@ def main():
         # fall back to --n-runs for backwards compatibility.  --n-structures
         # has default 1, --n-runs has default 20, so pick the one the user
         # actually changed.
-        if args.n_structures != 1:
+        if _typed("-n", "--n-structures"):
             n_snap = args.n_structures
-        elif args.n_runs != 20:
+        elif _typed("--n-runs"):
             n_snap = args.n_runs
         else:
             n_snap = 20  # historical default
@@ -1158,7 +1182,7 @@ def main():
         # Parse cutoff: CLI > YAML > default "auto"
         cutoff = args.cutoff
         parser = _get_parser()
-        if cutoff == parser.get_default("cutoff") and "cutoff" in an_cfg:
+        if not _typed("--cutoff") and "cutoff" in an_cfg:
             cutoff = an_cfg["cutoff"]
         if cutoff not in ("auto", "auto-rdf"):
             try:
@@ -1234,8 +1258,7 @@ def main():
         # S(q): CLI flag > YAML (direct method, Faber-Ziman normalised)
         if args.sq or an_cfg.get("sq", False):
             sq_weighting = args.sq_weighting
-            if (sq_weighting == _get_parser().get_default("sq_weighting")
-                    and "sq_weighting" in an_cfg):
+            if (not _typed("--sq-weighting") and "sq_weighting" in an_cfg):
                 sq_weighting = an_cfg["sq_weighting"]
             L_min = min(min(a.cell.lengths()) for a in sa.atoms_list)
             q_min = 2 * 3.141592653589793 / L_min
@@ -1407,7 +1430,7 @@ def main():
         # n_structures: CLI > YAML > default (10)
         parser = _get_parser()
         n_structures = args.n_structures
-        if n_structures == parser.get_default("n_structures") and "n_structures" in rg_cfg:
+        if not _typed("-n", "--n-structures") and "n_structures" in rg_cfg:
             n_structures = rg_cfg["n_structures"]
 
         # target_density: CLI > YAML > None
@@ -1417,13 +1440,13 @@ def main():
 
         # density_scale: CLI > YAML > 1.0 (parser default)
         density_scale = args.density_scale
-        if density_scale == parser.get_default("density_scale") \
+        if not _typed("--density-scale") \
                 and "density_scale" in rg_cfg:
             density_scale = rg_cfg["density_scale"]
 
         # output_format: CLI > YAML > default
         output_format = args.format
-        if output_format == parser.get_default("format") and "output_format" in rg_cfg:
+        if not _typed("--format") and "output_format" in rg_cfg:
             output_format = rg_cfg["output_format"]
 
         # minsep: CLI > YAML > None (auto-generated)
@@ -1504,7 +1527,8 @@ def main():
             output_format=output_format,
             relax=do_relax,
             calc=calc,
-            fmax=args.fmax if args.fmax != 0.01 else 0.05,
+            fmax=(args.fmax if _typed("-f", "--fmax")
+                  else (override.get("opt", {}) or {}).get("fmax", 0.05)),
             max_relax_steps=args.opt_steps,
             optimizer=args.optimizer,
             cell_filter=cell_filter,

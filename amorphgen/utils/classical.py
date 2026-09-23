@@ -101,9 +101,12 @@ class LennardJonesCalculator(Calculator):
         # Neighbour list (always on CPU via ASE)
         ii, jj, dd, DD = neighbor_list("ijdD", self.atoms, cutoff=self.cutoff)
 
-        # Filter to unique pairs (i < j)
-        mask = ii < jj
+        # Unique pairs (i < j) plus atom/own-image pairs (i == j, cutoff >
+        # L/2), which are listed twice and therefore enter with weight 1/2;
+        # their force contributions cancel by symmetry.
+        mask = ii <= jj
         ii, jj, dd, DD = ii[mask], jj[mask], dd[mask], DD[mask]
+        pair_w = np.where(ii == jj, 0.5, 1.0)
 
         if len(ii) == 0:
             self.results["energy"] = 0.0
@@ -127,7 +130,7 @@ class LennardJonesCalculator(Calculator):
                 valid_table[i1, i2] = valid_table[i2, i1] = True
 
         ti, tj = atom_type[ii], atom_type[jj]
-        eps_arr = eps_table[ti, tj]
+        eps_arr = eps_table[ti, tj] * pair_w
         sig_arr = sig_table[ti, tj]
         valid = valid_table[ti, tj]
 
@@ -348,6 +351,11 @@ class BuckinghamCalculator(Calculator):
             )
 
         if use_ewald:
+            if self.atoms.get_volume() <= 0 or not any(self.atoms.pbc):
+                raise ValueError(
+                    "Ewald Coulomb needs a periodic cell (pbc=True, non-zero "
+                    "volume); use coulomb_method='wolf' with a large cutoff "
+                    "for an isolated cluster.")
             e_rec, f_rec = self._ewald_reciprocal(
                 self.atoms.cell[:], self.atoms.get_positions(), q_atoms, alpha)
             energy += e_rec
@@ -387,6 +395,11 @@ class BuckinghamCalculator(Calculator):
         S_im = sin_p @ q
         pref = KE * 2.0 * np.pi / vol
         e_rec = pref * float(np.sum(A * (S_re ** 2 + S_im ** 2)))
+        # Uniform neutralising background for a non-neutral cell (removes
+        # the alpha dependence of the energy); zero for neutral systems.
+        q_tot = float(np.sum(q))
+        if abs(q_tot) > 1e-12:
+            e_rec -= KE * np.pi * q_tot ** 2 / (2.0 * vol * alpha ** 2)
         # Im[S* e^{ik.r_j}] = S_re sin(k.r_j) - S_im cos(k.r_j)
         im = S_re[:, None] * sin_p - S_im[:, None] * cos_p     # (Nk, N)
         f = 2.0 * pref * q[None, :] * ((A[:, None] * im).T @ k).T  # (3, N)

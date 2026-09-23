@@ -97,7 +97,9 @@ def compute_bond_distances(atoms_list, max_cutoff, get_cutoff_fn,
         nbr_dict, syms = build_neighbour_dict(atoms, max_cutoff,
                                                get_cutoff_fn)
         for a in range(len(atoms)):
-            for _, sj, d, _ in nbr_dict[a]:
+            for j, sj, d, _ in nbr_dict[a]:
+                if j < a:            # each bond once (the list holds both directions)
+                    continue
                 s1 = syms[a]
                 key = f"{s1}-{sj}" if s1 <= sj else f"{sj}-{s1}"
                 if pair is not None and key != pair:
@@ -158,7 +160,11 @@ def compute_all_angles(atoms_list, max_cutoff, get_cutoff_fn,
                     # otherwise: skip (same-element non-bond in
                     # an anion-containing compound)
                     continue
-                # Different-element or single-element case:
+                # Different-element or single-element case. In an
+                # anion-containing compound a metal-metal contact (e.g.
+                # Mg-Zn in (Mg,Zn)O) is a second-shell contact, not a bond.
+                if bond_type == "metallic" and has_anion_bond:
+                    continue
                 if bond_type == "ionic" or bond_type == "metallic" or \
                    bond_type == "covalent":
                     bonding_pairs.add((s1, s2))

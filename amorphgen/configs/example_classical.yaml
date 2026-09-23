@@ -3,7 +3,7 @@
 # ============================================================================
 # Usage:
 #   amorphgen POSCAR --config classical.yaml
-#   amorphgen --random-gen SiO2 --relax --config classical.yaml
+#   amorphgen --random-gen --composition "SiO2*8" --relax -C none --config classical.yaml
 #
 # Classical potentials run on CPU — no GPU needed.
 # ============================================================================

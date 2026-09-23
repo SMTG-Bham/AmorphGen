@@ -20,6 +20,7 @@ Example YAML::
 
 from __future__ import annotations
 
+import re
 import yaml
 
 
@@ -172,6 +173,20 @@ def _validate_config(cfg: dict, path: str) -> tuple[list[str], list[str]]:
     return warnings, errors
 
 
+_SCI = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)[eE][+-]?\d+$")
+
+
+def _coerce_sci_notation(obj):
+    """PyYAML 1.1 reads ``1e-3`` (no dot) as a string; turn such strings into floats."""
+    if isinstance(obj, dict):
+        return {k: _coerce_sci_notation(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_coerce_sci_notation(v) for v in obj]
+    if isinstance(obj, str) and _SCI.match(obj.strip()):
+        return float(obj)
+    return obj
+
+
 def load_yaml_config(path: str) -> dict:
     """
     Load a YAML configuration file and return it as a dict.
@@ -199,6 +214,8 @@ def load_yaml_config(path: str) -> dict:
     """
     with open(path, "r") as f:
         cfg = yaml.safe_load(f)
+
+        cfg = _coerce_sci_notation(cfg)
 
     if cfg is None:
         raise ValueError(f"YAML config file is empty: {path}")

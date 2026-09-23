@@ -71,6 +71,17 @@ MACE_FOUNDATION_MODELS: dict[str, str] = {
 # ── CHGNet identifiers ───────────────────────────────────────────────────────
 CHGNET_MODELS: set[str] = {"chgnet"}
 
+
+def _ci_get(registry: dict, name: str):
+    """Case-insensitive registry lookup (``MACE-MPA-0`` == ``mace-mpa-0``)."""
+    if name in registry:
+        return registry[name]
+    low = name.lower()
+    for k, v in registry.items():
+        if k.lower() == low:
+            return v
+    return name
+
 # ── SevenNet identifiers ────────────────────────────────────────────────────
 # Maps short name → SevenNet checkpoint name passed to SevenNetCalculator.
 SEVENNET_MODELS: dict[str, str] = {
@@ -168,7 +179,7 @@ def _load_mace(model: str, device: str, model_path: str | None = None,
         return MACECalculator(model_paths=model_path, device=device, **kwargs)
 
     # Resolve short-name → internal string / URL
-    resolved = MACE_FOUNDATION_MODELS.get(model, model)
+    resolved = _ci_get(MACE_FOUNDATION_MODELS, model)
 
     if os.path.isfile(resolved):
         # Local .model file
@@ -294,7 +305,7 @@ def _load_sevennet(model: str, device: str, **kwargs) -> Any:
             "See: https://github.com/MDIL-SNU/SevenNet"
         )
 
-    checkpoint = SEVENNET_MODELS.get(model, model)
+    checkpoint = _ci_get(SEVENNET_MODELS, model)
     # Multi-fidelity (mf) models need a modal selection
     if "mf" in checkpoint and "modal" not in kwargs:
         kwargs["modal"] = "mpa"
@@ -341,6 +352,8 @@ def _load_classical(model: str, device: str = "cpu", **kwargs) -> Any:
 
     # Convert string-keyed pair dicts to tuple keys
     # YAML gives {"Si-O": {...}} but calculators expect {("Si","O"): {...}}
+    import copy as _copy
+    cp = _copy.deepcopy(cp)          # never mutate the caller's config (YAML/JSON-safe)
     params = cp.get("params", {})
     converted = {}
     for key, val in params.items():

@@ -325,7 +325,12 @@ def resolve_ramp(T_start: float, T_end: float, T_step: float) -> list[float]:
     cooling ramp) can no longer produce an empty list or an infinite loop.
     Float steps are supported. ``T_end`` is always the final entry, even when
     the span is not an integer multiple of the step, and the ramp never
-    overshoots past ``T_end``.
+    overshoots past ``T_end``. ``T_start`` itself is NOT in the list: the
+    system already sits at ``T_start`` when the ramp begins, so the segments
+    are the *targets* T_start+step, T_start+2*step, ..., T_end. With
+    ``steps_per_T`` MD steps per segment the realised rate then equals the
+    configured one (an extra segment at T_start used to lower it by
+    n/(n+1)).
 
     Raises
     ------
@@ -344,7 +349,7 @@ def resolve_ramp(T_start: float, T_end: float, T_step: float) -> list[float]:
     n = int(np.ceil(span / step - 1e-9))
     sign = 1.0 if T_end >= T_start else -1.0
 
-    temps = [round(T_start + sign * step * k, 2) for k in range(n)]
+    temps = [round(T_start + sign * step * k, 2) for k in range(1, n)]
     temps.append(round(T_end, 2))
     # Near-divisible spans can round the last interior point onto T_end.
     if len(temps) >= 2 and abs(temps[-1] - temps[-2]) < 1e-9:
@@ -356,7 +361,11 @@ def resolve_ramp(T_start: float, T_end: float, T_step: float) -> list[float]:
 # Trajectory formats
 # ═════════════════════════════════════════════════════════════════════════════
 
-TRAJ_FORMATS = {"extxyz", "xyz", "traj", "lammps-dump"}
+# Only formats that store cell, pbc AND momenta (needed for frame-level
+# resume) and that ASE can both write and read.  "xyz" is accepted as an
+# alias of extxyz; lammps-dump is read-only in ASE and was removed.
+TRAJ_FORMATS = {"extxyz", "traj"}
+_TRAJ_ALIASES = {"xyz": "extxyz"}
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -371,7 +380,8 @@ class MDLogger:
     kinetic energy (eV), total energy (eV), and volume (Å³).
     """
 
-    def __init__(self, logfile: str, mode: str = "w"):
+    def __init__(self, logfile: str, mode: str = "w", step_offset: int = 0):
+        self.step_offset = int(step_offset)
         self._fh = open(logfile, mode)
         if mode != "a":     # resumed runs continue the existing table
             header = (f"{'Step':>8s}  {'Time_ps':>10s}  {'T_K':>8s}  "
@@ -382,8 +392,8 @@ class MDLogger:
             self._fh.flush()
 
     def log(self, dyn, atoms):
-        step = dyn.nsteps
-        t_ps = dyn.get_time() / units.fs / 1000.0
+        step = dyn.nsteps + self.step_offset
+        t_ps = (dyn.get_time() + self.step_offset * dyn.dt) / units.fs / 1000.0
         T = atoms.get_temperature()
         epot = atoms.get_potential_energy()
         ekin = atoms.get_kinetic_energy()
@@ -416,6 +426,7 @@ class TrajectoryWriter:
                  append: bool = False):
         self.filename = filename
         self.fmt = fmt.lower()
+        self.fmt = _TRAJ_ALIASES.get(self.fmt, self.fmt)
         if self.fmt not in TRAJ_FORMATS:
             raise ValueError(
                 f"Unknown trajectory format '{fmt}'. "
@@ -457,7 +468,7 @@ TRAJ_LOG_INTERVAL = 100
 
 def attach_outputs(dyn, atoms, logfile: str, trajfile: str,
                    fmt: str = "extxyz", interval: int = TRAJ_LOG_INTERVAL,
-                   append: bool = False):
+                   append: bool = False, step_offset: int = 0):
     """
     Attach an MDLogger and TrajectoryWriter to *dyn*.
 
@@ -472,7 +483,7 @@ def attach_outputs(dyn, atoms, logfile: str, trajfile: str,
 
     Returns (logger, traj_writer) so they can be closed later.
     """
-    logger = MDLogger(logfile, mode="a" if append else "w")
+    logger = MDLogger(logfile, mode="a" if append else "w", step_offset=step_offset)
     traj = TrajectoryWriter(trajfile, fmt=fmt, append=append)
 
     state = {"skip": append}   # skip the duplicate step-0 write on resume
@@ -515,28 +526,37 @@ def attach_outputs(dyn, atoms, logfile: str, trajfile: str,
 
 
 def read_md_checkpoint(trajfile: str, interval: int = TRAJ_LOG_INTERVAL):
-    """Last frame + elapsed MD steps from a partial stage trajectory.
+    """Last complete frame of an MD trajectory and the MD steps it represents.
 
-    Frames are written every *interval* steps starting at step 0, so a file
-    with ``n`` frames corresponds to ``(n - 1) * interval`` completed steps.
     The returned frame carries the MD momenta (extxyz stores them), so the
-    resumed run continues with the same velocities; only the thermostat RNG
-    state / barostat scaling state is lost — negligible in equilibrium MD.
+    stage can continue from it. A trajectory whose LAST frame was torn by a
+    walltime kill is truncated to its complete frames (which are kept) rather
+    than discarded whole.
 
-    Returns
-    -------
-    (ase.Atoms, int) or None
-        ``(last_frame, elapsed_steps)``, or ``None`` when there is no usable
-        checkpoint (missing, unreadable, or single-frame file — a torn file
-        from a mid-write kill falls back to a fresh stage run).
+    Returns ``None`` when the file is missing, empty or unreadable.
     """
-    if not os.path.exists(trajfile):
+    if not (trajfile and os.path.isfile(trajfile)):
         return None
     try:
         frames = read(trajfile, index=":")
     except Exception:
-        return None
-    if not isinstance(frames, list) or len(frames) < 2:
+        from ase.io import iread
+        frames = []
+        try:
+            for fr in iread(trajfile, index=":"):
+                frames.append(fr)
+        except Exception:
+            pass
+        if not frames:
+            return None
+        import warnings
+        warnings.warn(f"{trajfile}: last frame is incomplete (interrupted "
+                      f"write); keeping the {len(frames)} complete frame(s).")
+        try:
+            write(trajfile, frames)
+        except Exception:
+            pass
+    if len(frames) < 2:      # frame 0 is the starting structure: nothing done
         return None
     return frames[-1], (len(frames) - 1) * interval
 

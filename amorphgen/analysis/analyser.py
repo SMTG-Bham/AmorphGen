@@ -141,7 +141,18 @@ class StructureAnalyser:
             return self.cutoff
         key1 = f"{s1}-{s2}"
         key2 = f"{s2}-{s1}"
-        return self.cutoff.get(key1, self.cutoff.get(key2, self._max_cutoff))
+        if key1 in self.cutoff:
+            return self.cutoff[key1]
+        if key2 in self.cutoff:
+            return self.cutoff[key2]
+        if not hasattr(self, "_warned_pairs"):
+            self._warned_pairs = set()
+        if key1 not in self._warned_pairs:
+            self._warned_pairs.add(key1)
+            import warnings
+            warnings.warn(f"no cutoff for pair {key1}; treating it as not bonded "
+                          f"(add it to the cutoff dict to include it)")
+        return 0.0
 
     def _build_neighbour_dict(self, atoms):
         return build_neighbour_dict(atoms, self._max_cutoff, self._get_cutoff)

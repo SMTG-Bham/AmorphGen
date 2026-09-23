@@ -79,7 +79,11 @@ def _reduce_nonbonded_minsep(minsep: dict, factor: float) -> dict:
     reduced = dict(minsep)
     for pair in reduced:
         s1, s2 = pair.split("-")
-        if s1 == s2 or (s1 in NONMETALS and s2 in NONMETALS):
+        if s1 == s2:
+            reduced[pair] = reduced[pair] * factor
+        elif s1 in NONMETALS and s2 in NONMETALS and \
+                _classify_bond(s1, s2) not in ("covalent", "ionic"):
+            # anion-anion packing (O-O, Cl-Cl...) only; P-O, S-O, C-N are bonds
             reduced[pair] = reduced[pair] * factor
     return reduced
 
@@ -314,7 +318,7 @@ def _repair_undercoordination(
             new_pos = positions[idx] + rng.standard_normal(3) * 0.5
 
         # Wrap into cell.
-        new_pos = new_pos - L * np.floor(new_pos / L) if pbc else new_pos
+        new_pos = new_pos - L * np.floor(new_pos / L)   # keep inside the box (pbc or not)
 
         # Minsep check against all other placed atoms.
         others_idx = np.arange(n_placed)
@@ -1282,6 +1286,7 @@ def batch_random(
         attempt = 0          # retry counter for the CURRENT structure index
         failures = 0
         retry_level = 0
+        user_minsep = dict(kwargs["minsep"]) if kwargs.get("minsep") else None
         current_minsep = dict(kwargs.get("minsep") or minsep_log)
         base_density_scale = float(kwargs.get("density_scale", 1.0))
 
@@ -1362,15 +1367,23 @@ def batch_random(
                     #   "none": nothing may be adjusted — no rungs at all;
                     #       seed resampling above is the only retry, then skip
                     mode = kwargs.get("retry_mode", "expand")
-                    expand_rungs = 3 if mode == "expand" else 0
+                    fixed_cell = kwargs.get("target_density") is not None or \
+                        kwargs.get("cell_length_ang") is not None
+                    if mode == "expand" and fixed_cell and retry_level == 1:
+                        _log("  [Auto-retry] density/cell fixed by the user: "
+                             "skipping the cell-expansion rungs", lf)
+                    expand_rungs = 3 if (mode == "expand" and not fixed_cell) else 0
                     minsep_rungs = 0 if mode == "none" else 3
                     if retry_level <= expand_rungs:
                         factor = [0.92, 0.85, 0.78][retry_level - 1]
                         kwargs["density_scale"] = base_density_scale * factor
-                        _log(f"  [Auto-retry] Expanding cell "
-                             f"(density_scale x{factor:.2f} -> "
+                        _log(f"  [WARNING] Auto-retry expanding cell: density "
+                             f"reduced to {factor*100:.0f}% of the requested "
+                             f"value (density_scale x{factor:.2f} -> "
                              f"{kwargs['density_scale']:.3f}); cell ~"
-                             f"{(1.0/factor)**(1/3.0)*100-100:.0f}% larger", lf)
+                             f"{(1.0/factor)**(1/3.0)*100-100:.0f}% larger. "
+                             f"Use --target-density / --retry-mode reduce-minsep "
+                             f"if the density must be kept.", lf)
                         continue
                     elif retry_level <= expand_rungs + minsep_rungs:
                         reduction = 0.05 * (retry_level - expand_rungs)
@@ -1390,6 +1403,9 @@ def batch_random(
                              f"retries. Consider using --target-density.", lf)
                         retry_level = 0
                         kwargs["density_scale"] = base_density_scale
+                        kwargs.pop("minsep", None) if not user_minsep else None
+                        if user_minsep:
+                            kwargs["minsep"] = dict(user_minsep)
                         generated += 1
                         attempt = 0
                 continue

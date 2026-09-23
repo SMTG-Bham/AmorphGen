@@ -108,7 +108,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high", **kwargs):
 
     logger, traj = attach_outputs(dyn, atoms, logfile, trajfile,
                                   fmt=global_cfg.get("traj_format", "extxyz"),
-                                  append=elapsed > 0)
+                                  append=elapsed > 0, step_offset=elapsed)
 
     from ..utils.common import compute_density_gcm3
     density = compute_density_gcm3(atoms)

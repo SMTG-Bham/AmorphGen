@@ -131,6 +131,38 @@ orphan: true
 
 ### Fixed
 
+- **Review round 2 (~40 findings), the ones that changed results silently:**
+  temperature ramps ran one extra segment at `T_start`, so the realised rate was
+  n/(n+1) of the configured one (0.68× for T_step 1000); a negative `rate` collapsed a
+  quench to one step per segment; the block-average equilibration test compared block
+  means with the whole-run SEM (√n_blocks too strict); Gaussian-smoothed g(r) fell to
+  ~0.5 at rmax because `np.convolve(mode='same')` zero-pads; bond angles in mixed-cation
+  oxides included cation–cation contacts (Mg–Zn–O); bond counts were doubled; the
+  direct S(q) could miss q-vectors in skewed cells; the Voronoi/temperature running
+  window ignored the frame stride. All fixed.
+- **Crashes / lost output:** the optimiser `.traj` was never written (manual `step()`
+  loop bypassed ASE's observers); `traj_format: xyz` broke `--resume` and `lammps-dump`
+  could not be written (formats are now `extxyz` and `traj`, `xyz` an alias); a torn
+  last trajectory frame discarded the whole checkpoint (now truncated to the complete
+  frames); `convert` overwrote `s.xyz`/`s.cif` → `s.vasp`; mixed-case model names
+  (`MACE-MPA-0`) failed; Ewald raised an unhelpful error without a cell and had no
+  neutralising background for non-neutral cells; LJ dropped self-image pairs beyond L/2;
+  resumed MD logs restarted Step/Time at 0; a pair missing from a user cutoff dict fell
+  back to the largest cutoff instead of "not bonded".
+- **Config / CLI:** values typed with their default value were ignored in several modes
+  (`-C FrechetCellFilter`, `-n 1` in `--extract-snapshots`, `-f 0.01` with `--relax`,
+  `--format`, `--cutoff`, `--sq-weighting`); YAML `opt:` was dropped by
+  `--hybrid-ensemble`/`--batch-opt` and `--random-gen --relax`; `1e-3` in YAML was read
+  as a string; `--mq-ensemble`, `--hybrid-ensemble`, `--batch-quench` and
+  `--extract-snapshots` all defaulted to `melt_quench_run/`; `_load_classical` mutated
+  the caller's config.
+- **Random-gen retry ladder:** the cell-expansion rungs are skipped (with a log line)
+  when the density or cell length is fixed by the user, instead of silently doing
+  nothing; a density cut by expansion is now logged as a WARNING with the percentage; a
+  reduced minsep no longer carries over after a skipped structure; covalent
+  nonmetal–nonmetal bonds (P–O, S–O, C–N) are no longer softened by `reduce-minsep`;
+  atoms stay inside the box with `pbc=False`.
+
 - **Ring statistics used the wrong nodes.** Auto-detection of the ring network
   sorted element symbols, so for SiO₂ it took O as the ring node and reported
   3-rings for cristobalite; single-element networks (a-Si) were routed through a
@@ -189,7 +221,7 @@ orphan: true
 - Trajectory-based time axes (and fitted diffusion coefficient) off by the trajectory stride: `compute_msd`/`plot_msd` (and the other trajectory-fed diagnostics (`plot_energy_convergence`, `plot_temperature`, `plot_block_averages`, `plot_rdf_time_windows`, `compute_cn_vs_time`/`plot_cn_vs_time`, `convergence_report`)) assumed one MD step per frame, but AmorphGen writes one frame per `TRAJ_LOG_INTERVAL` (100) steps. The time axis was 100× too short (and `D` 100× too large, which could misclassify a frozen system as liquid); running-average windows were likewise 100× too wide. All now take a `frame_stride` parameter (default `TRAJ_LOG_INTERVAL`). **Behaviour change:** on a *trajectory* input these functions now interpret the frame spacing as `timestep_fs × frame_stride`; a script analysing a non-AmorphGen trajectory that stores every step must pass `frame_stride=1` to keep the old time axis. Log-file inputs (which carry a real time column) are unchanged.
 - Melt/quench temperature ramps hardened. The melt ramp used `range()` (crashed on a float `T_step`, and overshot the endpoint on a non-divisible span); the quench ramp used a `while` loop with no guard against a zero or mis-signed `T_step` (infinite loop) and dropped the endpoint on a non-divisible span. Both now use `resolve_ramp`, which infers direction from the endpoints, supports float steps, always lands exactly on `T_end`, and never overshoots.
 - Classical calculators + variable-cell now fail clearly: Lennard-Jones and Buckingham implement only energy+forces (no stress), so an NPT stage (or a cell-filter relaxation, including the default `cell_filter='cubic'` of `--random-gen --relax`) used to crash with an opaque ASE `PropertyNotImplementedError`. A capability guard now raises an actionable error up front (use a stress-capable MLIP, or a fixed cell + NVT).
-- **`--random-gen` resume is now seed-stable.** Per-structure seeds are derived from the structure *index* (via `SeedSequence`) rather than a running counter that advanced on every attempt and was not advanced for skipped indices, so a `--resume` run now reproduces exactly the structures a fresh run would generate, while retries of a failed placement still draw fresh randomness. **Behaviour change:** the seed→structure mapping changed, so a given `--seed` value now produces *different* (but reproducible and resume-stable) structures than it did before this release. Regenerate rather than expecting old seeds to reproduce old structures.
+- **`--random-gen` resume is now seed-stable.** Per-structure seeds are derived from the structure *index* (via `SeedSequence`) rather than a running counter that advanced on every attempt and was not advanced for skipped indices, so a `--resume` run now reproduces exactly the structures a fresh run would generate, while retries of a failed placement still draw fresh randomness. **Behaviour change:** the seed→structure mapping changed, so a given `seed` (YAML `random_gen: seed:` / API `seed=`) now produces *different* (but reproducible and resume-stable) structures than it did before this release. Regenerate rather than expecting old seeds to reproduce old structures.
 - Melt/quench ramp is validated before any file is touched. The ramp schedule (including the zero-step check) is now resolved *before* `attach_outputs` opens the log/trajectory, so a bad `T_step` raises without first truncating an existing trajectory.
 - Diagnostic time axes default to the pipeline timestep. The trajectory diagnostics in `utils.equilibration` defaulted `timestep_fs=1.0` while `DEFAULT_CONFIG` runs at 0.5 fs, giving a 2× time axis (and D/2) on default-config trajectories analysed with library defaults. The default is now sourced from `DEFAULT_CONFIG` and the docstring corrected. Always pass your run's actual timestep if it differs.
 - Three neutron scattering lengths corrected. `_NEUTRON_B` (the `weighting="neutron"` table) was checked entry-by-entry against the printed Sears (1992) Table 1. Fifty-two of fifty-five matched; three did not and are now the Sears values: **Cd 5.1 → 4.87**, **W 4.755 → 4.86**, **Au 7.90 → 7.63** fm (2–5% errors). Neutron-weighted S(q) for systems containing these elements changes accordingly; all other elements, and all x-ray/unweighted results, are unaffected. The x-ray form-factor table was likewise spot-checked digit-for-digit against the printed Waasmaier–Kirfel table (N, O, F, Ni, Cu, Zn, Ga, Ge, As); two last-digit transcription differences (Ni b₂, Cu b₁, effect on f(q) ≈ 5×10⁻⁶) were aligned to the print. Both tables are now pinned to their printed sources by a regression test.
