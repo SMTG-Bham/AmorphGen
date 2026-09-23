@@ -6,12 +6,7 @@ orphan: true
 
 A common (and reasonable) question from users about to publish:
 
-> *Is this S(q) implementation a standard method, or is it something
-> the AmorphGen developers invented?*
 
-Short answer: **standard method, our Python wiring.** Nothing about
-the physics or the algorithm is new. This page documents what comes
-from where, and how to cite the work in a paper.
 
 ## What's standard physics
 
