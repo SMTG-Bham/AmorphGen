@@ -162,6 +162,7 @@ def build_md_dynamics(atoms, ensemble: str = "NVT", T: float = 300.0,
                       npt_method: str = "berendsen",
                       taup_factor: float = 10.0,
                       compressibility_GPa: float = 100.0,
+                      rng=None,
                       **kwargs):
     """
     Create an NVT or NPT ASE dynamics object.
@@ -241,6 +242,8 @@ def build_md_dynamics(atoms, ensemble: str = "NVT", T: float = 300.0,
     dt = timestep * units.fs
 
     if ensemble.upper() == "NVT":
+        if rng is not None:
+            kwargs["rng"] = rng          # seeded thermostat noise
         dyn = Langevin(atoms, timestep=dt, temperature_K=T,
                        friction=friction / units.fs, **kwargs)
         return dyn
@@ -315,6 +318,26 @@ def build_md_dynamics(atoms, ensemble: str = "NVT", T: float = 300.0,
 # ═════════════════════════════════════════════════════════════════════════════
 # Temperature ramp
 # ═════════════════════════════════════════════════════════════════════════════
+
+def stage_rng(seed, stage: int, run_index: int = 0):
+    """Per-stage, per-run NumPy Generator derived from the global ``seed``.
+
+    ``None`` seed -> ``None`` (ASE's default, unseeded, generator). The stream
+    depends only on (seed, stage, run_index), so stage 4 of run 7 draws the
+    same thermostat noise whatever ran before it or on another machine.
+    """
+    if seed is None:
+        return None
+    return np.random.default_rng(
+        np.random.SeedSequence([int(seed), int(stage), int(run_index)]))
+
+
+def run_index_from_cwd() -> int:
+    """Index of a ``run_NNNN`` working directory (batch / ensemble modes), else 0."""
+    import re
+    m = re.search(r"run_(\d+)", os.path.basename(os.getcwd()))
+    return int(m.group(1)) if m else 0
+
 
 def resolve_ramp(T_start: float, T_end: float, T_step: float) -> list[float]:
     """

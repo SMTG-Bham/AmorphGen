@@ -93,8 +93,10 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high", **kwargs):
 
     default_T = {"premelt": 300, "high": 3000, "low": 300}
     T = cfg.get("T", default_T.get(stage, 300))
+    from ..utils.common import stage_rng, run_index_from_cwd
+    rng = stage_rng(global_cfg.get("seed"), int(stage_label), run_index_from_cwd())
     if needs_velocity_init(atoms, elapsed):
-        MaxwellBoltzmannDistribution(atoms, temperature_K=T)
+        MaxwellBoltzmannDistribution(atoms, temperature_K=T, rng=rng)
 
     dyn = build_md_dynamics(
         atoms, ensemble=ensemble, T=T,
@@ -104,6 +106,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high", **kwargs):
         npt_method=cfg.get("npt_method", "berendsen"),
         taup_factor=cfg.get("taup_factor", 10.0),
         compressibility_GPa=cfg.get("compressibility_GPa", 100.0),
+        rng=rng,
     )
 
     logger, traj = attach_outputs(dyn, atoms, logfile, trajfile,

@@ -71,6 +71,13 @@ orphan: true
 
 ### Added
 
+- **Global `seed` / `--seed`** for end-to-end reproducibility. Previously only the
+  random placement was seeded; the velocity initialisation and the Langevin thermostat
+  of stages 2–6 used ASE's unseeded generator, so two runs from the same seed gave
+  different trajectories. A top-level `seed:` now derives a separate NumPy stream per
+  stage and per run directory (SeedSequence) for both. Limits (GPU MLIP forces,
+  frame-level resume) are documented in the YAML guide.
+
 - **Polyhedral connectivity analysis** (`--connectivity`, `StructureAnalyser.polyhedral_connectivity()`,
   YAML `connectivity: true`): corner/edge/face sharing between cation-centred polyhedra
   and the fraction of cations in edge- or face-sharing pairs, the descriptor that

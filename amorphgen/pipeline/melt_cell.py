@@ -32,6 +32,8 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
     ase.Atoms — melted structure at T_end
     """
     global_cfg = merge_config(DEFAULT_CONFIG, cfg_override)
+    from ..utils.common import stage_rng, run_index_from_cwd
+    rng = stage_rng(global_cfg.get("seed"), 3, run_index_from_cwd())
     cfg = global_cfg["melt"]
     ensemble = cfg.get("ensemble", "NPT").upper()
 
@@ -73,7 +75,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
 
     T_start = cfg["T_start"]
     if needs_velocity_init(atoms, elapsed):
-        MaxwellBoltzmannDistribution(atoms, temperature_K=T_start)
+        MaxwellBoltzmannDistribution(atoms, temperature_K=T_start, rng=rng)
 
     dyn = build_md_dynamics(
         atoms, ensemble=ensemble, T=T_start,
@@ -83,6 +85,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
         npt_method=cfg.get("npt_method", "berendsen"),
         taup_factor=cfg.get("taup_factor", 10.0),
         compressibility_GPa=cfg.get("compressibility_GPa", 100.0),
+        rng=rng,
     )
 
     # Temperature ramp -- resolved BEFORE attach_outputs so a bad schedule

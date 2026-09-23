@@ -319,6 +319,34 @@ analysis:
   connectivity: true      # corner/edge/face sharing of cation polyhedra
 ```
 
+## Reproducibility: the `seed` key
+
+A top-level `seed:` (or `--seed INT` on the command line) makes a run
+reproducible end to end. The same integer seeds the random placement in
+`--random-gen` and, in every MD stage, the Maxwell–Boltzmann velocity
+initialisation and the Langevin thermostat noise. Each stage and each run
+directory (`run_0007/`) gets its own stream derived from the seed, so stage 4 of
+run 7 draws the same noise whatever ran before it.
+
+```yaml
+seed: 42
+```
+
+What this does and does not guarantee:
+
+- Same seed, same CPU, same package versions: bit-identical structures and
+  trajectories. This holds for the classical potentials and for MLIPs on CPU.
+- On a GPU, MLIP forces are not bit-reproducible, so two runs with the same seed
+  start identically and diverge after a few thousand steps. Averages agree;
+  individual frames do not.
+- A frame-level `--resume` restarts the thermostat noise from a fresh stream, so
+  a resumed run matches a fresh one statistically, not step for step.
+- NPT stages (Berendsen, MTK) contain no randomness beyond the initial
+  velocities.
+
+Without a seed (the default) placement is still reproducible if `random_gen:
+seed:` is set, but the MD stages are not.
+
 ## Tips
 
 - Keep YAMLs in version control. They're tiny and document your protocol.

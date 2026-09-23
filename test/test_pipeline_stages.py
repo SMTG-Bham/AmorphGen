@@ -204,3 +204,55 @@ class TestCalcInjection:
         # No get_calculator() call, no backend factory — the exact object back.
         assert pipe._get_calc() is emt_calc
         assert pipe._get_calc() is emt_calc  # stable across calls
+
+
+class TestGlobalSeedReproducibility:
+    """A global `seed` must make the MD stages bit-reproducible (velocities +
+    Langevin noise), per stage and per run directory."""
+
+    def _eq(self, seed, tmp_path, sub="run_0003"):
+        import os
+        from ase.build import bulk
+        from ase.calculators.emt import EMT
+        from amorphgen.pipeline import equilibrate
+        d = tmp_path / sub; d.mkdir(parents=True, exist_ok=True); cwd = os.getcwd(); os.chdir(d)
+        try:
+            a = bulk("Cu", "fcc", a=3.6, cubic=True).repeat((2, 2, 2)); a.calc = EMT()
+            out = equilibrate.run(a, cfg_override={"seed": seed, "eq_high": {
+                "ensemble": "NVT", "T": 600, "steps": 30, "timestep": 1.0}},
+                calc=EMT(), stage="high")
+            return out.get_positions().copy()
+        finally:
+            os.chdir(cwd)
+
+    def test_same_seed_same_trajectory(self, tmp_path):
+        assert np.allclose(self._eq(7, tmp_path / "a"), self._eq(7, tmp_path / "b"))
+
+    def test_different_seed_or_run_differs(self, tmp_path):
+        p = self._eq(7, tmp_path / "a")
+        assert not np.allclose(p, self._eq(8, tmp_path / "b"))
+        assert not np.allclose(p, self._eq(7, tmp_path / "c", sub="run_0004"))   # per-run stream
+
+    def test_quench_stage_is_seeded_too(self, tmp_path):
+        import os
+        from ase.build import bulk
+        from ase.calculators.emt import EMT
+        from amorphgen.pipeline import quench
+        res = []
+        for k in range(2):
+            d = tmp_path / f"q{k}"; d.mkdir(); cwd = os.getcwd(); os.chdir(d)
+            try:
+                a = bulk("Cu", "fcc", a=3.6, cubic=True).repeat((2, 2, 2)); a.calc = EMT()
+                out = quench.run(a, cfg_override={"seed": 3, "quench": {
+                    "ensemble": "NVT", "T_start": 600, "T_end": 300, "T_step": -150,
+                    "steps_per_T": 10, "timestep": 1.0}}, calc=EMT())
+                res.append(out.get_positions().copy())
+            finally:
+                os.chdir(cwd)
+        assert np.allclose(res[0], res[1])
+
+    def test_cli_seed_flag_reaches_override(self):
+        from amorphgen.cli import _get_parser, _build_override
+        p = _get_parser(); argv = ["POSCAR", "--seed", "11"]
+        ov = _build_override(p.parse_args(argv), p, explicit_only=True, argv=argv)
+        assert ov["seed"] == 11

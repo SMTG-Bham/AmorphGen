@@ -29,6 +29,10 @@ DEFAULT_CONFIG = {
     # ── Trajectory output format ──────────────────────────────────────────────
     # One of: "extxyz", "xyz", "traj", "lammps-dump"
     "traj_format": "extxyz",
+    # Global seed: None = non-reproducible MD noise. An int seeds the velocity
+    # initialisation and the Langevin thermostat of every MD stage (per-stage,
+    # per-run streams via SeedSequence) and, in --random-gen, the placement.
+    "seed": None,
 
     # ── Stage 1 & 7: structure optimisation ───────────────────────────────────
     "opt": {

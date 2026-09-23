@@ -206,6 +206,13 @@ def _add_arguments(p):
     g_pipe.add_argument("--stages", nargs="+", type=int,
                         default=[1, 2, 3, 4, 5, 6, 7], metavar="N",
                         help="Stages to run.")
+    g_pipe.add_argument("--seed", type=int, default=None, metavar="INT",
+                        help="Global random seed: seeds random placement AND "
+                             "the velocity initialisation / Langevin noise of "
+                             "every MD stage (per stage and per run). Same seed, "
+                             "same CPU and versions -> identical output; on a GPU "
+                             "MLIP forces are not bit-reproducible, so trajectories "
+                             "diverge after a few thousand steps.")
     g_pipe.add_argument("--timestep", type=float, default=0.5,
                         help="MD timestep in fs (applies to all MD stages).")
     # Stage 2
@@ -667,6 +674,7 @@ def _build_override(args, parser, explicit_only: bool = False,
 
     mapping = {
         "model": get("model"),
+        "seed": get("seed"),
         "model_path": get("model_path"),
         "device": get("device"),
         "default_dtype": get("default_dtype"),
@@ -1542,6 +1550,8 @@ def main():
             dmax_factor=args.dmax_factor,
             repair_iters=args.repair_iters,
             retry_mode=args.retry_mode,
+            seed=(args.seed if args.seed is not None
+                  else rg_cfg.get("seed", override.get("seed"))),
             resume=args.resume,
         )
         return

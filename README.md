@@ -267,6 +267,13 @@ pipe.run(stages=[5, 6, 7], input_file="stage4_eq_high.xyz")
 
 ## YAML configuration
 
+Add `seed: 42` at the top level (or `--seed 42` on the command line) to make a
+run reproducible: it seeds the random placement and the velocity initialisation
+and thermostat noise of every MD stage. Same seed, same CPU and same package
+versions give bit-identical output; on a GPU, MLIP forces are not
+bit-reproducible and trajectories diverge after a few thousand steps.
+
+
 Instead of passing many CLI flags, you can define settings in a YAML file:
 
 ```yaml
@@ -479,29 +486,71 @@ Coordination-aware placement produces structures with correct coordination from 
 
 ## Structure analysis
 
-Analyse optimised structures for density, coordination, bond distances,
-angles, and RDF:
+`--analyse` takes a directory of structures (xyz, extxyz, cif, vasp) and reports
+density, bond lengths, coordination numbers, bond angles and partial RDFs. The
+same run can add the structure factor, ring statistics, polyhedral connectivity,
+Voronoi indices, a close-contact check and a validation against literature
+ranges. Every quantity that is plotted is also written as a CSV.
 
 ```bash
-# Auto cutoff (default)
+# Summary to the terminal
 amorphgen --analyse --input-dir optimised_structures/
 
-# Save report and plots
+# Report + figures (RDF, coordination, angles, density) + CSVs
 amorphgen --analyse --input-dir optimised_structures/ \
     --save-report report.txt --save-plot plots/
 
-# RDF-based auto cutoff
-amorphgen --analyse --input-dir optimised_structures/ --cutoff auto-rdf
+# Neutron S(q) by the direct (Debye) method, with ring statistics,
+# corner/edge-sharing analysis and Voronoi indices for Ge
+amorphgen --analyse --input-dir optimised_structures/ \
+    --sq --sq-weighting neutron --rings --connectivity --voronoi Ge \
+    --save-report report.txt --save-plot plots/
+
+# Compare with literature ranges (a-Ga2O3, a-SiO2, a-GeO2, a-HfO2 ship in examples/)
+amorphgen --analyse --input-dir optimised_structures/ \
+    --reference examples/reference_a_GeO2.yaml
 ```
+
+Notes on the options:
+
+- `--sq` computes S(q) at the reciprocal-lattice q-vectors of each cell, so the
+  first sharp diffraction peak is resolved without the truncation of a Fourier
+  transform of g(r). Weighting is `xray` (q-dependent Waasmaier–Kirfel form
+  factors), `neutron` (Sears scattering lengths) or `unweighted`; `--sq-method ft`
+  gives the g(r) transform for comparison. A box of about 20 Å (roughly 500 atoms)
+  is needed to see the FSDP.
+- `--rings` counts the shortest ring per network edge, with the network former
+  (Si, Ge, ...) as nodes; `--rings Ge-O` sets the pair explicitly.
+- `--connectivity` reports corner-, edge- and face-sharing between cation-centred
+  polyhedra and the fraction of cations in edge-sharing pairs, which separates a
+  corner-sharing network glass from a random packing with the same coordination.
+- `--check-dimers` flags unphysical close contacts (O–O peroxide, N–N) per structure.
+- `--smearing SIGMA` sets the Gaussian smearing of g(r) (default 0.05 Å; 0 for the
+  raw histogram). `--cutoff` is `auto-rdf` (first minimum of g(r)), `auto` (radii
+  table) or a number in Å.
+
+Files written by `--save-plot DIR`: `analysis_rdf`, `analysis_cn`,
+`analysis_angles`, `analysis_density`, and with the matching flag `analysis_sq`,
+`analysis_rings`, `analysis_connectivity`, `analysis_voronoi`, each as PNG (and
+PDF with `--save-pdf`) plus CSV.
+
+The same analysis from Python:
 
 ```python
-from amorphgen.utils.analysis import StructureAnalyser
+from amorphgen.analysis import StructureAnalyser
 
-sa = StructureAnalyser("optimised_structures/", cutoff="auto")
-sa.summary()
+sa = StructureAnalyser("optimised_structures/")      # a directory or a list of files
+print(sa.summary())
+rdf  = sa.rdf(pair="Ge-O", sigma=0.05)              # r, g_r
+sq   = sa.structure_factor_direct(weighting="neutron", sigma_q=0.05, partials=True)
+rings = sa.ring_statistics()                         # ring_sizes, counts, fractions
+conn  = sa.polyhedral_connectivity()                 # corner/edge/face sharing
 sa.save_report("report.txt")
-sa.plot(output_dir="plots/", angle_style="line")
+sa.plot(output_dir="plots/")
 ```
+
+The analysis guide in the documentation covers the S(q) conventions and the
+reference-YAML format.
 
 ---
 
