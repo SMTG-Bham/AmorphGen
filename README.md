@@ -36,11 +36,10 @@ Composition  (e.g. "In2O3*16"  or  In=32,O=48)
          │
    ┌─────▼──────────────────────────────────────────┐
    │  Auto-derive  minsep, density, target CN       │
-   │  from Shannon ionic / metallic radii           │
    └─────┬──────────────────────────────────────────┘
          │
    ┌─────▼──────────────────────────────────────────┐
-   │  Random / coordination-aware placement         │
+   │  Random atoms                                  │
    └─────┬──────────────────────────────────────────┘
          │
    ┌─────▼──────────────────────────────────────────┐
@@ -102,7 +101,7 @@ Directory of disordered structures  (e.g. --random-gen outputs)
          │
    ┌─────▼──────────────────────────────────────────┐
    │  Stage 4  High-T equilibration   T_melt        │
-   │           NVT/NPT,  20+ ps                     │
+   │           NVT/NPT                              │
    └─────┬──────────────────────────────────────────┘
          │
    ┌─────▼──────────────────────────────────────────┐
