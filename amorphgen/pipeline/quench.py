@@ -50,7 +50,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
     # ramp_resume_position. The legacy filename lets a run interrupted
     # under a pre-rename AmorphGen still resume after upgrade.
     from ..utils.common import (resume_md_stage, needs_velocity_init,
-                                ramp_resume_position, resolve_ramp)
+                                ramp_resume_position, resolve_ramp, set_md_temperature)
     ck_atoms, elapsed = resume_md_stage(trajfile, kwargs.get("resume"), "5",
                                         legacy_trajfile="stage5_quench.xyz")
     if ck_atoms is not None:
@@ -117,7 +117,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
     for idx, T in enumerate(temps):
         if idx < k0:
             continue
-        dyn.set_temperature(temperature_K=T)
+        set_md_temperature(dyn, T)
         run_steps = steps - offset if idx == k0 else steps
         note = f"  (resumed, {run_steps} steps left)" if (idx == k0 and offset) else ""
         print(f"  -> T = {T:7.1f} K{note}")

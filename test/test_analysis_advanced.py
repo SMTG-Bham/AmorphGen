@@ -182,3 +182,51 @@ class TestAnalyserIntegration:
         text = analyser_with_energies.per_structure_summary()
         assert isinstance(text, str)
         assert len(text) > 0
+
+
+class TestRingNodeSelection:
+    """Ring nodes must be the network former (cation), not the alphabetically first element."""
+
+    def test_cristobalite_auto_bond_pair_gives_six_rings(self):
+        from ase.spacegroup import crystal
+        from amorphgen.analysis.rings import compute_ring_statistics
+        crist = crystal(["Si", "O"], basis=[(0, 0, 0), (0.125, 0.125, 0.125)], spacegroup=227,
+                        cellpar=[7.16, 7.16, 7.16, 90, 90, 90]).repeat((2, 2, 2))
+        r = compute_ring_statistics([crist], cutoff=2.0)          # bond_pair auto-detected
+        assert r["ring_sizes"] == [6] and r["fractions"][0] == pytest.approx(100.0)
+
+    def test_diamond_single_element_gives_six_rings(self):
+        from ase.build import bulk
+        from amorphgen.analysis.rings import compute_ring_statistics
+        si = bulk("Si", "diamond", a=5.43).repeat((3, 3, 3))
+        r = compute_ring_statistics([si], cutoff=2.6)
+        assert r["ring_sizes"] == [6]
+
+
+class TestPolyhedralConnectivity:
+    def _sa(self, atoms, tmp_path):
+        from ase.io import write
+        from amorphgen.analysis import StructureAnalyser
+        write(str(tmp_path / "s.xyz"), atoms, format="extxyz")
+        return StructureAnalyser(str(tmp_path / "s.xyz"), cutoff="auto")
+
+    def test_cristobalite_is_all_corner_sharing(self, tmp_path):
+        from ase.spacegroup import crystal
+        crist = crystal(["Si", "O"], basis=[(0, 0, 0), (0.125, 0.125, 0.125)], spacegroup=227,
+                        cellpar=[7.16, 7.16, 7.16, 90, 90, 90]).repeat((2, 2, 2))
+        r = self._sa(crist, tmp_path).polyhedral_connectivity()
+        assert r["anion"] == "O" and r["cations"] == ["Si"]
+        assert r["link_percent"]["corner"] == pytest.approx(100.0)
+        assert r["cation_edge_or_face_percent"] == pytest.approx(0.0)
+
+    def test_rutile_edge_sharing_chains(self, tmp_path):
+        # rutile TiO2: every Ti shares edges with 2 Ti (chains along c) and corners with 8
+        from ase.spacegroup import crystal
+        rut = crystal(["Ti", "O"], basis=[(0, 0, 0), (0.305, 0.305, 0)], spacegroup=136,
+                      cellpar=[4.59, 4.59, 2.96, 90, 90, 90]).repeat((2, 2, 3))
+        r = self._sa(rut, tmp_path).polyhedral_connectivity()
+        assert r["cation_edge_or_face_percent"] == pytest.approx(100.0)
+        ti = r["per_species"]["Ti"]
+        assert ti["mean_edge_links"] == pytest.approx(2.0)
+        assert ti["mean_corner_links"] == pytest.approx(8.0)
+        assert r["link_percent"]["edge"] == pytest.approx(20.0)

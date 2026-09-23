@@ -71,6 +71,18 @@ orphan: true
 
 ### Added
 
+- **Polyhedral connectivity analysis** (`--connectivity`, `StructureAnalyser.polyhedral_connectivity()`,
+  YAML `connectivity: true`): corner/edge/face sharing between cation-centred polyhedra
+  and the fraction of cations in edge- or face-sharing pairs, the descriptor that
+  separates a corner-sharing network glass from a random packing with the same
+  short-range order. Validated on cristobalite (100 % corner) and rutile (2 edge + 8
+  corner links per Ti).
+
+- **`--rings [PAIR]` and `--voronoi [ELEMENT]`** for `--analyse` (YAML: `rings:`, `voronoi:`
+  in the `analysis` block). Ring statistics and Voronoi indices were previously
+  reachable only from YAML and only printed; they are now printed, appended to
+  `--save-report`, and written as `analysis_rings.{csv,png}` / `analysis_voronoi.csv`.
+
 - MLIP-optional install: torch is no longer a core dependency, the base
   `pip install` is lightweight (random-gen + analysis + classical potentials),
   and MACE/CHGNet/SevenNet arrive only via extras (`[mace]`, `[chgnet]`,
@@ -118,6 +130,35 @@ orphan: true
 - Per-structure wall-time logging in `--random-gen --relax`: each structure's log shows `Wall time: X.XX s (N steps, Y s/step)` for diagnosing slowdowns.
 
 ### Fixed
+
+- **Ring statistics used the wrong nodes.** Auto-detection of the ring network
+  sorted element symbols, so for SiO₂ it took O as the ring node and reported
+  3-rings for cristobalite; single-element networks (a-Si) were routed through a
+  bridging atom of the same species and also gave 3-rings. Nodes are now the
+  least electronegative element (cation / network former) with the most
+  electronegative as bridge, and single-element networks use the direct bonds:
+  cristobalite and diamond both report 6-rings. **Re-run any ring statistics
+  produced without an explicit `bond_pair`.**
+- **Heating/cooling ramps crashed with `npt_method: mtk`** (`IsotropicMTKNPT`
+  has no `set_temperature`) and with `parrinello-rahman` (the trajectory hook
+  wrapped the live atoms between segments, which ASE's NPT integrator rejects).
+  A `set_md_temperature` helper updates every integrator's target temperature,
+  and the hook now writes a wrapped copy (with energy/forces) instead.
+- **`--random-gen` dropped the automatic CN tolerance** (`target_cn, _ = ...`),
+  so CLI and batch runs placed with tolerance 0 while the Python API used the
+  class default (e.g. 2 for alloys) and failed placement more often.
+- **Batch "reduce M-M minsep" rung used a CN-unaware table**, replacing the
+  CN-aware minseps generate_random builds (Si–O 1.33 → 1.44 Å for SiO₂), so the
+  step meant to ease placement made it harder. The batch path now builds the
+  same CN-aware table.
+- **Pipeline defaults differed with and without `--config`.** CLI parser
+  defaults (eq_high NVT 10 000 steps, eq_premelt 50 000, eq_low 10 000)
+  disagreed with `DEFAULT_CONFIG` (NPT/MTK 20 000, 100 000, 20 000), so a YAML
+  containing only `model:` silently changed the protocol. Parser defaults now
+  come from `DEFAULT_CONFIG` and only typed flags are passed as overrides in
+  both modes. **Behaviour change:** bare-CLI runs now use the documented
+  `DEFAULT_CONFIG` protocol (stage 4 NPT/MTK, longer equilibrations); pass the
+  flags explicitly to keep the previous values.
 
 - **Buckingham+Coulomb: Ewald summation replaces the Wolf sum.** The Wolf
   (damped-shifted) Coulomb sum used by `BuckinghamCalculator` was checked

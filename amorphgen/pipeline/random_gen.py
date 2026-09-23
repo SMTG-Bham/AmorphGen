@@ -1178,9 +1178,13 @@ def batch_random(
     target_cn = kwargs.get("target_cn")
     # If target_cn not specified, auto-detect for logging
     if target_cn is None:
-        target_cn, _ = _auto_target_cn(composition)
+        target_cn, auto_tol = _auto_target_cn(composition)
         if target_cn is not None:
             kwargs["target_cn"] = target_cn
+            # Keep the automatic tolerance too; dropping it made every
+            # CLI / batch run stricter (tolerance 0) than the Python API.
+            if kwargs.get("cn_tolerance") is None:
+                kwargs["cn_tolerance"] = auto_tol
     dmax_user = kwargs.get("dmax")
 
     # Pre-compute minsep and cell for logging
@@ -1192,8 +1196,12 @@ def batch_random(
 
     minsep_log = kwargs.get("minsep")
     if minsep_log is None:
+        # Same CN-aware table generate_random builds internally, so the
+        # batch "reduce M-M minsep" rung softens the real values instead
+        # of swapping in a CN-unaware (larger) table.
         minsep_log = _default_minsep(symbols_all,
-                                     scale=kwargs.get("minsep_scale", 0.85))
+                                     scale=kwargs.get("minsep_scale", 0.85),
+                                     target_cn=kwargs.get("target_cn"))
 
     td = kwargs.get("target_density")
     ds = kwargs.get("density_scale", 1.0)

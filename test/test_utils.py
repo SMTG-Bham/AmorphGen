@@ -305,3 +305,23 @@ class TestResumeHelpers:
                 == TRAJ_LOG_INTERVAL)
         assert (inspect.signature(read_md_checkpoint).parameters["interval"].default
                 == TRAJ_LOG_INTERVAL)
+
+
+class TestRampTemperatureAllIntegrators:
+    """Heating/cooling ramps must be able to change T for every npt_method (Tier 2, EMT)."""
+
+    @pytest.mark.parametrize("method", ["berendsen", "mtk", "parrinello-rahman"])
+    def test_set_md_temperature_and_logging_hook_across_segments(self, method, tmp_path):
+        from ase.build import bulk
+        from ase.calculators.emt import EMT
+        from ase.io import read
+        from amorphgen.utils.common import build_md_dynamics, set_md_temperature, attach_outputs
+        atoms = bulk("Cu", "fcc", a=3.6, cubic=True).repeat((2, 2, 2)); atoms.calc = EMT()
+        dyn = build_md_dynamics(atoms, ensemble="NPT", T=300.0, timestep=1.0, npt_method=method)
+        attach_outputs(dyn, atoms, str(tmp_path / "s.log"), str(tmp_path / "s_traj.xyz"), interval=2)
+        dyn.run(4)
+        set_md_temperature(dyn, 400.0)          # IsotropicMTKNPT has no set_temperature
+        dyn.run(4)                              # NPT (PR) refuses if the atoms were wrapped in between
+        frames = read(str(tmp_path / "s_traj.xyz"), index=":")
+        assert len(frames) >= 4
+        assert frames[-1].calc is not None      # energy carried into the wrapped copy

@@ -423,3 +423,30 @@ def plot_sq(sq_result, output_dir=".", prefix="analysis", dpi=300,
             for qi, si in zip(q, s):
                 w.writerow([f"{qi:.5f}", "" if np.isnan(si) else f"{si:.6f}"])
     print(f"  Saved: {base}.csv")
+
+
+def plot_rings(rings, output_dir, label="auto", dpi=300, save_pdf=False,
+               show_title=False):
+    """Bar chart of the ring-size distribution (percent of network edges)."""
+    import os
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    os.makedirs(output_dir, exist_ok=True)
+    sizes = list(rings["ring_sizes"]); frac = list(rings["fractions"])
+    fig, ax = plt.subplots(figsize=(5.0, 3.4), dpi=dpi)
+    ax.bar(sizes, frac, color="#2a78d6", width=0.7)
+    ax.set_xlabel("ring size (network nodes)")
+    ax.set_ylabel("fraction of edges (%)")
+    ax.set_xticks(sizes)
+    for sp in ("top", "right"):
+        ax.spines[sp].set_visible(False)
+    if show_title:
+        ax.set_title(f"Ring statistics ({label})")
+    fig.tight_layout()
+    base = os.path.join(output_dir, "analysis_rings")
+    fig.savefig(base + ".png")
+    if save_pdf:
+        fig.savefig(base + ".pdf")
+    plt.close(fig)
+    return base + ".png"

@@ -334,3 +334,113 @@ def format_dimer_report(result: dict) -> str:
                      f"discarding them from the ensemble.")
     lines.append("=" * 65)
     return "\n".join(lines)
+
+
+def compute_polyhedral_connectivity(atoms_list, max_cutoff, get_cutoff_fn,
+                                    cation=None, anion=None) -> dict:
+    """Corner-, edge- and face-sharing between cation-centred polyhedra.
+
+    Two cations are *linked* when they share at least one anion neighbour
+    (within the pair cutoff).  One shared anion = corner-sharing, two =
+    edge-sharing, three or more = face-sharing.  Reports the linkage
+    distribution and, per cation, how many are involved in at least one
+    edge- or face-sharing link (the quantity that separates a corner-
+    sharing network glass such as a-SiO2 / a-GeO2 from a random packing).
+
+    Parameters
+    ----------
+    cation, anion : str, optional
+        Element symbols.  Default: anion = most electronegative element,
+        cations = every other element (pooled, and also reported per species).
+    """
+    try:
+        from ..utils.radii import PAULING_EN
+    except ImportError:  # pragma: no cover
+        from amorphgen.utils.radii import PAULING_EN
+    syms0 = sorted(set(atoms_list[0].get_chemical_symbols()))
+    if anion is None:
+        anion = max(syms0, key=lambda s: PAULING_EN.get(s, 2.0))
+    cations = [cation] if cation else [s for s in syms0 if s != anion]
+    if not cations:
+        return {"error": "single-element system: no cation/anion split"}
+
+    link = Counter()                      # corner / edge / face counts
+    per_species = {c: {"n": 0, "edge_or_face": 0, "face": 0,
+                       "corner_links": 0, "edge_links": 0, "face_links": 0}
+                   for c in cations}
+    per_structure_edge = []
+    n_cat_total = 0; n_ef_total = 0
+
+    for atoms in atoms_list:
+        nbrs, syms = build_neighbour_dict(atoms, max_cutoff, get_cutoff_fn)
+        an_of = {}
+        for i, s in enumerate(syms):
+            if s in cations:
+                an_of[i] = {j for (j, sj, d, v) in nbrs[i] if sj == anion}
+        # cation pairs through a shared anion
+        shared = defaultdict(int)
+        for i, aset in an_of.items():
+            for a in aset:
+                for (j, sj, d, v) in nbrs[a]:
+                    if sj in cations and j > i:
+                        shared[(i, j)] += 1
+        ef = set(); face = set(); links_of = defaultdict(lambda: Counter())
+        for (i, j), n in shared.items():
+            kind = "corner" if n == 1 else ("edge" if n == 2 else "face")
+            link[kind] += 1
+            links_of[i][kind] += 1; links_of[j][kind] += 1
+            if n >= 2:
+                ef.update((i, j))
+            if n >= 3:
+                face.update((i, j))
+        n_cat = len(an_of); n_cat_total += n_cat; n_ef_total += len(ef)
+        per_structure_edge.append(100.0 * len(ef) / n_cat if n_cat else 0.0)
+        for i in an_of:
+            ps = per_species[syms[i]]
+            ps["n"] += 1; ps["edge_or_face"] += (i in ef); ps["face"] += (i in face)
+            for kind in ("corner", "edge", "face"):
+                ps[f"{kind}_links"] += links_of[i][kind]
+
+    total_links = sum(link.values())
+    out = {
+        "cations": cations, "anion": anion,
+        "n_links": total_links,
+        "link_percent": {k: (100.0 * link[k] / total_links if total_links else 0.0)
+                         for k in ("corner", "edge", "face")},
+        "cation_edge_or_face_percent": (100.0 * n_ef_total / n_cat_total
+                                        if n_cat_total else 0.0),
+        "per_structure_edge_percent": per_structure_edge,
+        "per_species": {},
+    }
+    for c, ps in per_species.items():
+        n = ps["n"] or 1
+        out["per_species"][c] = {
+            "n_atoms": ps["n"],
+            "edge_or_face_percent": 100.0 * ps["edge_or_face"] / n,
+            "face_percent": 100.0 * ps["face"] / n,
+            "mean_corner_links": ps["corner_links"] / n,
+            "mean_edge_links": ps["edge_links"] / n,
+            "mean_face_links": ps["face_links"] / n,
+        }
+    return out
+
+
+def format_connectivity_report(r: dict) -> str:
+    if "error" in r:
+        return f"\n  Polyhedral connectivity: {r['error']}"
+    lp = r["link_percent"]
+    lines = [f"\n  Polyhedral connectivity ({'/'.join(r['cations'])}-centred, "
+             f"shared {r['anion']} neighbours):",
+             f"    cation-cation links: {r['n_links']} "
+             f"(corner {lp['corner']:.1f}%, edge {lp['edge']:.1f}%, face {lp['face']:.1f}%)",
+             f"    cations in >=1 edge/face-sharing pair: "
+             f"{r['cation_edge_or_face_percent']:.1f}%"]
+    for c, ps in r["per_species"].items():
+        lines.append(f"    {c}: {ps['n_atoms']} atoms, edge/face-sharing {ps['edge_or_face_percent']:.1f}%, "
+                     f"links per atom corner {ps['mean_corner_links']:.2f} / edge "
+                     f"{ps['mean_edge_links']:.2f} / face {ps['mean_face_links']:.2f}")
+    if len(r["per_structure_edge_percent"]) > 1:
+        v = np.array(r["per_structure_edge_percent"])
+        lines.append(f"    per-structure edge/face-sharing cations: "
+                     f"{v.mean():.1f} +/- {v.std():.1f}% (min {v.min():.1f}, max {v.max():.1f})")
+    return "\n".join(lines)

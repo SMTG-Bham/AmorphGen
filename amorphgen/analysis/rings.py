@@ -15,22 +15,22 @@ def compute_ring_statistics(atoms_list, bond_pair=None, cutoff=None,
     For each edge in the network graph (A-B-A path through bridging B),
     find the shortest ring by BFS excluding that edge.
     """
-    # Auto-detect bond pair
+    # Auto-detect bond pair: ring NODES are the least electronegative
+    # element (network former / cation, e.g. Si in SiO2) and the BRIDGES
+    # are the most electronegative one (anion).  Sorting symbols
+    # alphabetically (old behaviour) picked O as the node for SiO2 and
+    # reported 3-rings for cristobalite instead of 6-rings.
     if bond_pair is None:
-        try:
-            from ..pipeline.random_gen import _classify_bond
-        except ImportError:
-            from amorphgen.pipeline.random_gen import _classify_bond
         unique = sorted(set(atoms_list[0].get_chemical_symbols()))
-        for s1 in unique:
-            for s2 in unique:
-                if s1 != s2 and _classify_bond(s1, s2) == "ionic":
-                    bond_pair = (s1, s2)
-                    break
-            if bond_pair:
-                break
-        if bond_pair is None:
+        if len(unique) == 1:
             bond_pair = (unique[0], unique[0])
+        else:
+            try:
+                from ..utils.radii import PAULING_EN
+            except ImportError:
+                from amorphgen.utils.radii import PAULING_EN
+            en = lambda sym: PAULING_EN.get(sym, 2.0)
+            bond_pair = (min(unique, key=en), max(unique, key=en))
 
     ring_counts = Counter()
 
@@ -54,15 +54,20 @@ def compute_ring_statistics(atoms_list, bond_pair=None, cutoff=None,
             if (si == p1 and sj == p2) or (si == p2 and sj == p1):
                 adj[idx_i[k]].add(idx_j[k])
 
-        # Build network graph: p1-p1 edges through bridging p2
+        # Build network graph: p1-p1 edges through bridging p2, or the
+        # direct p1-p1 bonds for a single-element network (a-Si, a-Ge, C).
         p1_indices = [i for i in range(n) if syms[i] == p1]
         net_adj = defaultdict(set)
-        for a in p1_indices:
-            for bridge in adj[a]:
-                if syms[bridge] == p2:
-                    for b in adj[bridge]:
-                        if b != a and syms[b] == p1:
-                            net_adj[a].add(b)
+        if p1 == p2:
+            for a in p1_indices:
+                net_adj[a] = {b for b in adj[a] if b != a}
+        else:
+            for a in p1_indices:
+                for bridge in adj[a]:
+                    if syms[bridge] == p2:
+                        for b in adj[bridge]:
+                            if b != a and syms[b] == p1:
+                                net_adj[a].add(b)
 
         # For each edge, find shortest ring
         counted_edges = set()

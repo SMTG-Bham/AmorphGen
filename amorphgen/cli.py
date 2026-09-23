@@ -78,6 +78,12 @@ class _ExamplesAction(argparse.Action):
         parser.exit()
 
 
+def _DC(section, key):
+    """Pipeline-stage CLI defaults come from DEFAULT_CONFIG (single source of truth)."""
+    from .configs.default_config import DEFAULT_CONFIG
+    return DEFAULT_CONFIG[section][key]
+
+
 def _get_parser():
     """Build and return the argument parser (without parsing)."""
     p = argparse.ArgumentParser(
@@ -85,6 +91,9 @@ def _get_parser():
         formatter_class=_HelpFormatter,
         epilog=_EXAMPLES,
     )
+    from . import __version__
+    p.add_argument("--version", action="version",
+                   version=f"amorphgen {__version__}")
     return _add_arguments(p)
 
 
@@ -199,40 +208,40 @@ def _add_arguments(p):
     g_pipe.add_argument("--eq-premelt-steps", type=int, default=50000,
                         help="Stage 2 MD steps.")
     # Stage 3
-    g_pipe.add_argument("--melt-ensemble", default="NPT",
+    g_pipe.add_argument("--melt-ensemble", default=_DC("melt", "ensemble"),
                         choices=["NVT", "NPT"], help="Stage 3 ensemble.")
-    g_pipe.add_argument("--melt-T-start", type=int, default=300,
+    g_pipe.add_argument("--melt-T-start", type=int, default=_DC("melt", "T_start"),
                         help="Stage 3 T_start (K).")
-    g_pipe.add_argument("--melt-T-end", type=int, default=3000,
+    g_pipe.add_argument("--melt-T-end", type=int, default=_DC("melt", "T_end"),
                         help="Stage 3 T_end (K).")
-    g_pipe.add_argument("--melt-T-step", type=int, default=100,
+    g_pipe.add_argument("--melt-T-step", type=int, default=_DC("melt", "T_step"),
                         help="Stage 3 ramp segment (K).")
-    g_pipe.add_argument("--melt-steps-per-T", type=int, default=1000,
+    g_pipe.add_argument("--melt-steps-per-T", type=int, default=_DC("melt", "steps_per_T"),
                         help="Stage 3 steps per segment.")
     # Stage 4
-    g_pipe.add_argument("--eq-high-ensemble", default="NVT",
+    g_pipe.add_argument("--eq-high-ensemble", default=_DC("eq_high", "ensemble"),
                         choices=["NVT", "NPT"], help="Stage 4 ensemble.")
-    g_pipe.add_argument("--eq-high-T", type=int, default=3000,
+    g_pipe.add_argument("--eq-high-T", type=int, default=_DC("eq_high", "T"),
                         help="Stage 4 T (K).")
-    g_pipe.add_argument("--eq-high-steps", type=int, default=10000,
+    g_pipe.add_argument("--eq-high-steps", type=int, default=_DC("eq_high", "steps"),
                         help="Stage 4 MD steps.")
     # Stage 5
-    g_pipe.add_argument("--quench-ensemble", default="NVT",
+    g_pipe.add_argument("--quench-ensemble", default=_DC("quench", "ensemble"),
                         choices=["NVT", "NPT"], help="Stage 5 ensemble.")
-    g_pipe.add_argument("--quench-T-start", type=int, default=3000,
+    g_pipe.add_argument("--quench-T-start", type=int, default=_DC("quench", "T_start"),
                         help="Stage 5 T_start (K).")
-    g_pipe.add_argument("--quench-T-end", type=int, default=300,
+    g_pipe.add_argument("--quench-T-end", type=int, default=_DC("quench", "T_end"),
                         help="Stage 5 T_end (K).")
-    g_pipe.add_argument("--quench-T-step", type=int, default=-100,
+    g_pipe.add_argument("--quench-T-step", type=int, default=_DC("quench", "T_step"),
                         help="Stage 5 ramp segment (K, negative = cooling).")
-    g_pipe.add_argument("--quench-steps-per-T", type=int, default=1000,
+    g_pipe.add_argument("--quench-steps-per-T", type=int, default=_DC("quench", "steps_per_T"),
                         help="Stage 5 steps per segment.")
     # Stage 6
-    g_pipe.add_argument("--eq-low-ensemble", default="NVT",
+    g_pipe.add_argument("--eq-low-ensemble", default=_DC("eq_low", "ensemble"),
                         choices=["NVT", "NPT"], help="Stage 6 ensemble.")
-    g_pipe.add_argument("--eq-low-T", type=int, default=300,
+    g_pipe.add_argument("--eq-low-T", type=int, default=_DC("eq_low", "T"),
                         help="Stage 6 T (K).")
-    g_pipe.add_argument("--eq-low-steps", type=int, default=10000,
+    g_pipe.add_argument("--eq-low-steps", type=int, default=_DC("eq_low", "steps"),
                         help="Stage 6 MD steps.")
 
     # ── Random generation ─────────────────────────────────────────────────────
@@ -351,6 +360,22 @@ def _add_arguments(p):
                            "(default 0.05; 0 = raw). Keep well below the "
                            "FSDP width (~0.3 1/A). Raw values are always "
                            "kept in the CSV as s_q_raw.")
+    g_an.add_argument("--rings", nargs="?", const="auto", default=None, metavar="PAIR",
+                      help="Ring statistics (shortest-ring per network edge). "
+                           "Optional PAIR such as Ge-O selects the node-bridge "
+                           "pair; default auto (least electronegative element as "
+                           "nodes). Printed, appended to --save-report, and "
+                           "written as analysis_rings.{csv,png} under --save-plot.")
+    g_an.add_argument("--voronoi", nargs="?", const="all", default=None, metavar="ELEMENT",
+                      help="Voronoi indices <n3 n4 n5 n6> for all atoms or for "
+                           "ELEMENT only. Printed, appended to --save-report, and "
+                           "written as analysis_voronoi.csv under --save-plot.")
+    g_an.add_argument("--connectivity", action="store_true",
+                      help="Polyhedral connectivity: corner/edge/face sharing "
+                           "between cation-centred polyhedra and the fraction "
+                           "of cations in edge-sharing pairs. Printed, appended "
+                           "to --save-report, analysis_connectivity.csv under "
+                           "--save-plot.")
     g_an.add_argument("--check-dimers", action="store_true",
                       help="Report unphysical close contacts (O-O peroxide, "
                            "Cl-Cl, metal-metal dimers) below 0.85 x the "
@@ -1036,7 +1061,9 @@ def main():
         # Merge: YAML first, then CLI on top
         override = merge_config(yaml_cfg, cli_override)
     else:
-        override = _build_override(args, _get_parser())
+        # No YAML: still pass only what was typed, so DEFAULT_CONFIG (the
+        # documented defaults) fills the rest exactly as in YAML mode.
+        override = _build_override(args, _get_parser(), explicit_only=True)
 
     # Amorphous-input modes default to a cubic (isotropic) cell filter.
     override = _apply_amorphous_cubic_default(
@@ -1248,22 +1275,88 @@ def main():
             else:
                 print("  (pass --save-plot DIR to write the S(q) PNG + CSV)")
 
-        # Extra analysis from YAML
-        if "ring_bond_pair" in an_cfg:
-            pair = tuple(an_cfg["ring_bond_pair"])
+        # Ring statistics and Voronoi indices: CLI flag > YAML key.
+        # (YAML: rings: true | "Ge-O"; voronoi: true | "Ge"; the older
+        # ring_bond_pair / voronoi_element keys are still honoured.)
+        rings_opt = args.rings
+        if rings_opt is None:
+            y = an_cfg.get("rings", an_cfg.get("ring_bond_pair"))
+            if y is True:
+                rings_opt = "auto"
+            elif isinstance(y, (list, tuple)):
+                rings_opt = "-".join(y)
+            elif isinstance(y, str):
+                rings_opt = y
+        if rings_opt:
+            pair = None if rings_opt == "auto" else tuple(rings_opt.split("-"))
             rings = sa.ring_statistics(bond_pair=pair)
-            print(f"\n  Ring statistics ({pair[0]}-{pair[1]}):")
-            for s, c, f in zip(rings['ring_sizes'], rings['counts'],
-                               rings['fractions']):
-                print(f"    {s}-ring: {c} ({f:.1f}%)")
+            label = f"{pair[0]}-{pair[1]}" if pair else "auto"
+            lines = [f"\n  Ring statistics (nodes-bridge: {label}, shortest ring per edge):"]
+            for sz, c, f in zip(rings["ring_sizes"], rings["counts"], rings["fractions"]):
+                lines.append(f"    {sz:2d}-ring: {c:6d}  ({f:5.1f}%)")
+            ring_text = "\n".join(lines)
+            print(ring_text)
+            if report_path:
+                with open(report_path, "a") as rf:
+                    rf.write("\n" + ring_text + "\n")
+            if plot_dir:
+                os.makedirs(plot_dir, exist_ok=True)
+                with open(os.path.join(plot_dir, "analysis_rings.csv"), "w") as fh:
+                    fh.write("ring_size,count,fraction_percent\n")
+                    for sz, c, f in zip(rings["ring_sizes"], rings["counts"], rings["fractions"]):
+                        fh.write(f"{sz},{c},{f:.4f}\n")
+                from .analysis.plotting import plot_rings
+                plot_rings(rings, output_dir=plot_dir, label=label,
+                           dpi=plot_kwargs.get("dpi", 300),
+                           save_pdf=plot_kwargs.get("save_pdf", False),
+                           show_title=plot_kwargs.get("show_title", False))
+                print(f"  Saved: {os.path.join(plot_dir, 'analysis_rings.csv')} / .png")
 
-        if "voronoi_element" in an_cfg:
-            elem = an_cfg["voronoi_element"]
+        if args.connectivity or an_cfg.get("connectivity", False):
+            from .analysis.structure import format_connectivity_report
+            conn = sa.polyhedral_connectivity()
+            conn_text = format_connectivity_report(conn)
+            print(conn_text)
+            if report_path:
+                with open(report_path, "a") as rf:
+                    rf.write("\n" + conn_text + "\n")
+            if plot_dir and "error" not in conn:
+                os.makedirs(plot_dir, exist_ok=True)
+                with open(os.path.join(plot_dir, "analysis_connectivity.csv"), "w") as fh:
+                    fh.write("quantity,value\n")
+                    for k in ("corner", "edge", "face"):
+                        fh.write(f"link_percent_{k},{conn['link_percent'][k]:.4f}\n")
+                    fh.write(f"cation_edge_or_face_percent,{conn['cation_edge_or_face_percent']:.4f}\n")
+                    for i, v in enumerate(conn["per_structure_edge_percent"]):
+                        fh.write(f"structure_{i}_edge_or_face_percent,{v:.4f}\n")
+                print(f"  Saved: {os.path.join(plot_dir, 'analysis_connectivity.csv')}")
+
+        vor_opt = args.voronoi
+        if vor_opt is None:
+            y = an_cfg.get("voronoi", an_cfg.get("voronoi_element"))
+            if y is True:
+                vor_opt = "all"
+            elif isinstance(y, str):
+                vor_opt = y
+        if vor_opt:
+            elem = None if vor_opt == "all" else vor_opt
             vor = sa.voronoi(element=elem)
-            print(f"\n  Voronoi ({elem}): {vor['total_atoms']} atoms, "
-                  f"mean faces={vor['mean_faces']:.1f}")
-            for idx, count, pct in vor['top_10'][:5]:
-                print(f"    {idx}: {pct:.1f}%")
+            lines = [f"\n  Voronoi indices <n3 n4 n5 n6> ({elem or 'all atoms'}): "
+                     f"{vor['total_atoms']} atoms, mean faces = {vor['mean_faces']:.2f}"]
+            for idx, count, pct in vor["top_10"]:
+                lines.append(f"    {str(idx):16s} {count:6d}  ({pct:5.1f}%)")
+            vor_text = "\n".join(lines)
+            print(vor_text)
+            if report_path:
+                with open(report_path, "a") as rf:
+                    rf.write("\n" + vor_text + "\n")
+            if plot_dir:
+                os.makedirs(plot_dir, exist_ok=True)
+                with open(os.path.join(plot_dir, "analysis_voronoi.csv"), "w") as fh:
+                    fh.write("voronoi_index,count,percent\n")
+                    for idx, count, pct in vor["top_10"]:
+                        fh.write(f"\"{idx}\",{count},{pct:.4f}\n")
+                print(f"  Saved: {os.path.join(plot_dir, 'analysis_voronoi.csv')}")
 
         # Validation against literature reference YAML
         ref_path = args.reference or an_cfg.get("reference")

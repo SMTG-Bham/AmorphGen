@@ -381,6 +381,22 @@ class StructureAnalyser:
         return compute_ring_statistics(
             self.atoms_list, bond_pair, cutoff, max_ring, self._get_cutoff)
 
+    def polyhedral_connectivity(self, cation=None, anion=None):
+        """Corner/edge/face sharing between cation-centred polyhedra.
+
+        Two cations sharing one anion neighbour are corner-sharing, two
+        anions edge-sharing, three or more face-sharing. Returns the
+        linkage distribution, the percentage of cations in at least one
+        edge- or face-sharing pair (near 0 in a-SiO2 / a-GeO2; tens of
+        percent in unrelaxed random placements), per-species means and
+        per-structure values. See
+        :func:`amorphgen.analysis.structure.compute_polyhedral_connectivity`.
+        """
+        from .structure import compute_polyhedral_connectivity
+        return compute_polyhedral_connectivity(
+            self.atoms_list, self._max_cutoff, self._get_cutoff,
+            cation=cation, anion=anion)
+
     def voronoi(self, element=None):
         """Compute Voronoi tessellation indices (n3, n4, n5, n6).
 

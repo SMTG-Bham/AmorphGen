@@ -139,3 +139,23 @@ class TestSeedReproducibility:
             b = read(os.path.join(resumed, "random_initial", f"random_{i:04d}.xyz"))
             assert a.get_chemical_symbols() == b.get_chemical_symbols()
             assert np.allclose(a.get_positions(), b.get_positions())
+
+
+def test_batch_path_keeps_auto_cn_tolerance_and_cn_aware_minsep(tmp_path, monkeypatch):
+    """batch_random must forward the automatic CN tolerance and build the same
+    CN-aware minsep table as generate_random (regression for the CLI path)."""
+    import amorphgen.pipeline.random_gen as rg
+    from ase import Atoms
+    captured = {}
+    comp = {"Cu": 8, "Zr": 8}                        # alloy: auto tolerance is 2
+
+    def fake_generate(composition, seed=None, **kwargs):
+        captured.update(kwargs)
+        n = sum(composition.values())
+        return Atoms("Cu8Zr8", positions=np.random.default_rng(0).uniform(0, 8, (n, 3)),
+                     cell=[8, 8, 8], pbc=True)
+    monkeypatch.setattr(rg, "generate_random", fake_generate)
+    rg.batch_random(comp, n_structures=1, output_dir=str(tmp_path), output_format="xyz")
+    target_cn, auto_tol = rg._auto_target_cn(comp)
+    assert captured.get("target_cn") == target_cn
+    assert captured.get("cn_tolerance") == auto_tol and auto_tol > 0

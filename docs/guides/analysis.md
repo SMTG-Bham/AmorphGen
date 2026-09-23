@@ -649,6 +649,9 @@ amorphgen --analyse \
 | `--sq-method` | `direct` (default): Debye sum at the reciprocal-lattice q-vectors, resolves the FSDP. `ft`: Fourier transform of g(r), smoother but damps the FSDP. |
 | `--sq-smooth SIGMA_Q` | Gaussian re-binning width in Å⁻¹ for the direct S(q) (default 0.05; 0 = raw). Raw values are kept in the CSV. |
 | `--check-dimers` | Report unphysical close contacts (O–O peroxide, N–N) per structure. |
+| `--rings [PAIR]` | Ring statistics (shortest ring per network edge). Nodes default to the least electronegative element; `--rings Ge-O` sets nodes–bridge explicitly. Added to the report; `analysis_rings.{csv,png}` under ``--save-plot``. |
+| `--voronoi [ELEMENT]` | Voronoi indices <n3 n4 n5 n6> for all atoms or one element. Added to the report; `analysis_voronoi.csv` under ``--save-plot``. |
+| `--connectivity` | Corner/edge/face sharing between cation-centred polyhedra (two cations sharing one anion = corner, two = edge, three or more = face) and the percentage of cations in at least one edge- or face-sharing pair, which is near zero in a corner-sharing network glass and tens of percent in a random packing. Added to the report; `analysis_connectivity.csv` under ``--save-plot``. |
 | `--dpi N` | PNG DPI (default 300). |
 | `--show-title` | Add titles to each plot (default off, captions usually clearer in figures). |
 
@@ -667,6 +670,9 @@ For each ensemble, ``--analyse --save-plot DIR`` writes:
 | `analysis_density.png` / `.pdf` | Per-structure density violin with jittered scatter and mean ± std label. |
 | `analysis_density.csv` | One row per structure: ``structure_index, density_g_per_cm3``. |
 | `analysis_sq.png` / `.pdf`, `analysis_sq.csv` | With ``--sq``: S(q) and, for the direct method, the raw un-smoothed values and the number of q-vectors per bin. |
+| `analysis_rings.png` / `.csv` | With ``--rings``: ring-size distribution (size, count, percent of edges). |
+| `analysis_voronoi.csv` | With ``--voronoi``: the ten most common Voronoi indices with counts and percentages. |
+| `analysis_connectivity.csv` | With ``--connectivity``: corner/edge/face link percentages and the edge-sharing cation fraction, overall and per structure. |
 
 ## Python API
 

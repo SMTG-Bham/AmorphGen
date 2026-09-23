@@ -493,8 +493,21 @@ def attach_outputs(dyn, atoms, logfile: str, trajfile: str,
             state["skip"] = False
             return
         logger.log(dyn, atoms)
-        atoms.wrap()
-        traj.write(atoms)
+        # Write a wrapped COPY: wrapping the live atoms between run()
+        # segments makes ASE's NPT (parrinello-rahman) integrator refuse
+        # to continue ("modified the atoms"), and it is not needed for
+        # the integration.  Energies/forces are carried over so the
+        # trajectory frames stay self-contained.
+        img = atoms.copy()
+        img.wrap()
+        calc = getattr(atoms, "calc", None)
+        if calc is not None and getattr(calc, "results", None):
+            from ase.calculators.singlepoint import SinglePointCalculator
+            res = {k: calc.results[k] for k in ("energy", "forces", "stress")
+                   if k in calc.results}
+            if res:
+                img.calc = SinglePointCalculator(img, **res)
+        traj.write(img)
 
     dyn.attach(_observe, interval=interval)
 
@@ -586,6 +599,32 @@ def ramp_resume_position(elapsed: int, steps_per_T: int, n_temps: int):
 # ═════════════════════════════════════════════════════════════════════════════
 # Config merging
 # ═════════════════════════════════════════════════════════════════════════════
+
+def set_md_temperature(dyn, T: float) -> None:
+    """Change the target temperature of a running ASE dynamics object.
+
+    Langevin, NPTBerendsen and the Melchionna/NPT integrators expose
+    ``set_temperature``; ``IsotropicMTKNPT`` (npt_method "mtk") does not,
+    so its thermostat and barostat kT are updated directly.  Used by the
+    heating and cooling ramps.
+    """
+    if hasattr(dyn, "set_temperature"):
+        dyn.set_temperature(temperature_K=T)
+        return
+    kT = T * units.kB
+    hit = False
+    for obj in (dyn, getattr(dyn, "_thermostat", None), getattr(dyn, "_barostat", None)):
+        if obj is None:
+            continue
+        if hasattr(obj, "_kT"):
+            obj._kT = kT; hit = True
+        if hasattr(obj, "_temperature_K"):
+            obj._temperature_K = T; hit = True
+    if not hit:
+        raise AttributeError(
+            f"{type(dyn).__name__} has no set_temperature and no known "
+            f"temperature attribute; cannot ramp its temperature.")
+
 
 def merge_config(defaults: dict, overrides: dict | None) -> dict:
     """Deep-merge *overrides* into a copy of *defaults*."""

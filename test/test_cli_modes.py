@@ -250,3 +250,48 @@ class TestRankFromLogMode:
         out = capsys.readouterr().out
         # Lowest-energy entry should be 0001 (-53.123).
         assert "0001" in out
+
+
+class TestRingsAndVoronoiFlags:
+    """--rings / --voronoi print sections, extend the report and write CSVs."""
+
+    def _sio2(self, tmp_path):
+        from ase.spacegroup import crystal
+        crist = crystal(["Si", "O"], basis=[(0, 0, 0), (0.125, 0.125, 0.125)], spacegroup=227,
+                        cellpar=[7.16, 7.16, 7.16, 90, 90, 90]).repeat((2, 2, 2))
+        crist.rattle(0.05, seed=1)
+        src = tmp_path / "in"; src.mkdir()
+        write(str(src / "s.xyz"), crist, format="extxyz")
+        return src
+
+    def test_rings_and_voronoi(self, tmp_path, monkeypatch, capsys):
+        src = self._sio2(tmp_path); plots = tmp_path / "plots"; rep = tmp_path / "r" / "report.txt"
+        _run_cli(["--analyse", "--input-dir", str(src), "--rings", "--voronoi", "Si",
+                  "--save-plot", str(plots), "--save-report", str(rep)], monkeypatch)
+        out = capsys.readouterr().out
+        assert "Ring statistics" in out and " 6-ring:" in out       # cristobalite: 6-rings, Si nodes
+        assert "Voronoi indices" in out
+        text = rep.read_text()
+        assert "Ring statistics" in text and "Voronoi indices" in text
+        assert (plots / "analysis_rings.csv").exists() and (plots / "analysis_rings.png").exists()
+        assert (plots / "analysis_voronoi.csv").exists()
+        assert "6," in (plots / "analysis_rings.csv").read_text()
+
+    def test_rings_explicit_pair(self, tmp_path, monkeypatch, capsys):
+        src = self._sio2(tmp_path)
+        _run_cli(["--analyse", "--input-dir", str(src), "--rings", "Si-O"], monkeypatch)
+        assert "nodes-bridge: Si-O" in capsys.readouterr().out
+
+
+def test_connectivity_flag(tmp_path, monkeypatch, capsys):
+    from ase.spacegroup import crystal
+    crist = crystal(["Si", "O"], basis=[(0, 0, 0), (0.125, 0.125, 0.125)], spacegroup=227,
+                    cellpar=[7.16, 7.16, 7.16, 90, 90, 90]).repeat((2, 2, 2))
+    src = tmp_path / "in"; src.mkdir(); write(str(src / "s.xyz"), crist, format="extxyz")
+    plots = tmp_path / "plots"; rep = tmp_path / "report.txt"
+    _run_cli(["--analyse", "--input-dir", str(src), "--connectivity", "--cutoff", "auto",
+              "--save-plot", str(plots), "--save-report", str(rep)], monkeypatch)
+    out = capsys.readouterr().out
+    assert "Polyhedral connectivity" in out and "corner 100.0%" in out
+    assert "Polyhedral connectivity" in rep.read_text()
+    assert (plots / "analysis_connectivity.csv").exists()

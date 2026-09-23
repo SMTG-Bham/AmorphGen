@@ -363,3 +363,25 @@ def test_explicit_flag_equal_to_default_beats_yaml(tmp_path):
     assert ov["eq_high"]["ensemble"] == "NVT"
     assert ov["eq_low"]["T"] == 300            # --flag=value form is detected too
     assert ov.get("cool", {}).get("ensemble") is None   # not typed -> left to YAML/defaults
+
+
+def test_version_flag(capsys):
+    from amorphgen import __version__
+    from amorphgen.cli import _get_parser
+    with pytest.raises(SystemExit) as e:
+        _get_parser().parse_args(["--version"])
+    assert e.value.code == 0
+    assert __version__ in capsys.readouterr().out
+
+
+def test_pipeline_parser_defaults_come_from_default_config():
+    """With or without --config, an untyped stage setting must resolve to DEFAULT_CONFIG."""
+    from amorphgen.cli import _get_parser, _build_override
+    from amorphgen.configs.default_config import DEFAULT_CONFIG as D
+    p = _get_parser()
+    assert p.get_default("eq_high_ensemble") == D["eq_high"]["ensemble"]
+    assert p.get_default("eq_high_steps") == D["eq_high"]["steps"]
+    assert p.get_default("eq_low_steps") == D["eq_low"]["steps"]
+    assert p.get_default("quench_steps_per_T") == D["quench"]["steps_per_T"]
+    # nothing typed -> nothing overridden (DEFAULT_CONFIG wins in both modes)
+    assert _build_override(p.parse_args([]), p, explicit_only=True, argv=[]) == {}
