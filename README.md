@@ -215,7 +215,7 @@ amorphgen --random-gen --composition In=32,O=48 --relax --device cpu
 # Full 7-stage pipeline with MACE (default)
 amorphgen POSCAR --device cuda
 
-# Use CHGNet (faster on CPU)
+# Use CHGNet 
 amorphgen POSCAR --model chgnet --device cpu
 
 # List all available models
