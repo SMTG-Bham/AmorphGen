@@ -388,6 +388,15 @@ def _add_arguments(p):
                            "smoother but damps/shifts the FSDP; use for "
                            "comparison with FT-based codes. Both are "
                            "Faber-Ziman weighted.")
+    g_an.add_argument("--sq-partials", action="store_true",
+                      help="With --sq (direct method): also report the "
+                           "Faber-Ziman partial structure factors S_ab(q) "
+                           "for every element pair. Printed as first-peak "
+                           "positions, added as s_<A-B> columns to "
+                           "analysis_sq.csv and drawn in "
+                           "analysis_sq_partials.png. Independent of "
+                           "--sq-weighting (the weighting only combines "
+                           "the partials into the total).")
     g_an.add_argument("--sq-smooth", type=float, default=None, metavar="SIGMA_Q",
                       help="Gaussian re-binning width (1/A) for the direct "
                            "S(q), weighted by q-vectors per shell; reduces "
@@ -1328,14 +1337,30 @@ def main():
             sq_smooth = args.sq_smooth
             if sq_smooth is None:
                 sq_smooth = float(an_cfg.get("sq_smooth", DEFAULT_SQ_SMOOTH))
+            sq_partials = bool(args.sq_partials or an_cfg.get("sq_partials", False))
             if sq_method == "ft":
                 sq_result = sa.structure_factor(weighting=sq_weighting)
+                if sq_partials:
+                    print("  Note: --sq-partials needs the direct method; "
+                          "partials skipped for --sq-method ft.")
             else:
                 sq_result = sa.structure_factor_direct(weighting=sq_weighting,
-                                                       sigma_q=sq_smooth)
+                                                       sigma_q=sq_smooth,
+                                                       partials=sq_partials)
                 if sq_smooth > 0:
                     print(f"  S(q) re-binned with sigma_q = {sq_smooth:.2f} "
                           f"1/A (n_per_bin-weighted); raw values kept in CSV")
+                if sq_partials:
+                    import numpy as _np
+                    _q = _np.asarray(sq_result["q"], dtype=float)
+                    print("  Faber-Ziman partials S_ab(q), first peak below 3 A^-1:")
+                    for pair, s_ab in sq_result["partials"].items():
+                        s_ab = _np.asarray(s_ab, dtype=float)
+                        m = (_q > q_min) & (_q < 3.0) & ~_np.isnan(s_ab)
+                        if m.any():
+                            k = _np.argmax(_np.where(m, s_ab, -_np.inf))
+                            print(f"    {pair:<8s} q = {_q[k]:.2f} A^-1, "
+                                  f"S = {s_ab[k]:.2f}")
             if plot_dir:
                 from .analysis.plotting import plot_sq
                 plot_sq(sq_result, output_dir=plot_dir,

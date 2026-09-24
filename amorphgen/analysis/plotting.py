@@ -375,6 +375,10 @@ def plot_sq(sq_result, output_dir=".", prefix="analysis", dpi=300,
     region is resolvable down to q_min ≈ 2π/L, so small boxes leave the
     low-q part noisy — the CSV includes ``n_per_bin`` so shells built from
     only 1-3 reciprocal vectors can be identified.
+
+    When ``sq_result`` carries ``"partials"`` (``partials=True`` on the
+    direct method), the Faber-Ziman partials S_ab(q) are added to the CSV
+    as ``s_<A-B>`` columns and drawn in ``{prefix}_sq_partials.png``.
     """
     import csv
     import matplotlib
@@ -406,17 +410,38 @@ def plot_sq(sq_result, output_dir=".", prefix="analysis", dpi=300,
     base = os.path.join(output_dir, f"{prefix}_sq")
     _save_fig(fig, base, dpi, save_pdf)
 
+    partials = sq_result.get("partials") or {}
+    if partials:
+        fig2, ax2 = plt.subplots(figsize=(5.4, 4.0))
+        for i, (pair, s_ab) in enumerate(partials.items()):
+            s_ab = np.array(s_ab, dtype=float)
+            mm = ~np.isnan(s_ab) & ((n > 0) if n is not None else True)
+            ax2.plot(q[mm], s_ab[mm], lw=1.3, color=_PALETTE[i % len(_PALETTE)],
+                     label=rf"$S_{{\mathrm{{{pair.replace('-', '')}}}}}(q)$")
+        ax2.axhline(1.0, ls=":", color="grey", alpha=0.6)
+        ax2.set_xlabel(r"$q$ ($\mathrm{\AA}^{-1}$)")
+        ax2.set_ylabel(r"$S_{ab}(q)$")
+        ax2.legend(frameon=False, fontsize=8)
+        _apply_pub_style(ax2)
+        if show_title:
+            ax2.set_title("Faber-Ziman partial structure factors")
+        _save_fig(fig2, f"{base}_partials", dpi, save_pdf)
+
     with open(f"{base}.csv", "w", newline="") as fh:
         w = csv.writer(fh)
         raw = (np.array(sq_result["s_q_raw"], dtype=float)
                if "s_q_raw" in sq_result else None)
+        pcols = [(f"s_{p}", np.array(v, dtype=float)) for p, v in partials.items()]
         if n is not None:
-            hdr = ["q_invA", "s_q", "n_per_bin"] + (["s_q_raw"] if raw is not None else [])
+            hdr = (["q_invA", "s_q", "n_per_bin"] + (["s_q_raw"] if raw is not None else [])
+                   + [c for c, _ in pcols])
             w.writerow(hdr)
             for k, (qi, si, ni) in enumerate(zip(q, s, n)):
                 row = [f"{qi:.5f}", "" if np.isnan(si) else f"{si:.6f}", ni]
                 if raw is not None:
                     row.append("" if np.isnan(raw[k]) else f"{raw[k]:.6f}")
+                for _, v in pcols:
+                    row.append("" if np.isnan(v[k]) else f"{v[k]:.6f}")
                 w.writerow(row)
         else:
             w.writerow(["q_invA", "s_q"])

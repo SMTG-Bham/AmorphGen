@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import numpy as np
 from pathlib import Path
 
 import pytest
@@ -192,6 +193,25 @@ class TestAnalyseMode:
         else:
             assert "n_per_bin" not in header
             assert "truncated at r = L/2" in out
+
+    def test_sq_partials_flag(self, tmp_path, monkeypatch, capsys):
+        """--sq-partials adds Faber-Ziman S_ab(q) columns, a partials PNG and
+        a printed first-peak table; skipped with a note for --sq-method ft."""
+        rng = np.random.default_rng(0)
+        a = Atoms("Si32O64", positions=rng.uniform(0, 12, (96, 3)),
+                  cell=[12, 12, 12], pbc=True)
+        src = tmp_path / "sio.xyz"; write(str(src), a, format="extxyz")
+        plots = tmp_path / "plots"
+        _run_cli(["--analyse", str(src), "--sq", "--sq-partials",
+                  "--save-plot", str(plots)], monkeypatch)
+        out = capsys.readouterr().out
+        assert "Faber-Ziman partials S_ab(q)" in out and "O-Si" in out
+        header = (plots / "analysis_sq.csv").read_text().splitlines()[0].split(",")
+        assert {"s_Si-Si", "s_O-Si", "s_O-O"} <= set(header)
+        assert (plots / "analysis_sq_partials.png").exists()
+        _run_cli(["--analyse", str(src), "--sq", "--sq-partials", "--sq-method", "ft",
+                  "--save-plot", str(tmp_path / "p2")], monkeypatch)
+        assert "partials skipped" in capsys.readouterr().out
 
 
 # ─── --analyse with --reference ───────────────────────────────────────────

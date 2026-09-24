@@ -314,6 +314,7 @@ analysis:
   sq_weighting: neutron   # xray | neutron | unweighted
   sq_method: direct       # direct | ft
   sq_smooth: 0.05         # re-binning width for the direct method (1/A); 0 = raw
+  sq_partials: true       # also the Faber-Ziman partials S_ab(q) (direct method)
   rings: true             # or a nodes-bridge pair such as Ge-O
   voronoi: Ge             # or true for all atoms
   connectivity: true      # corner/edge/face sharing of cation polyhedra

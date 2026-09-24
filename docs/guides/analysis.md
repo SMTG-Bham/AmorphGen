@@ -203,7 +203,13 @@ amorphgen --analyse --input-dir DIR --sq --sq-weighting neutron --save-plot plot
 ```
 
 writes ``analysis_sq.png`` and ``analysis_sq.csv`` (columns ``q_invA``,
-``s_q``, ``s_q_raw`` and ``n_per_bin``). From Python:
+``s_q``, ``s_q_raw`` and ``n_per_bin``). Add ``--sq-partials`` to also get
+the Faber-Ziman partials S_ab(q) for every element pair: their first-peak
+positions are printed, ``s_<A-B>`` columns are appended to the CSV and
+``analysis_sq_partials.png`` is written. The partials do not depend on
+``--sq-weighting``; the weighting only decides how they are combined into
+the total, so the same partials underlie the X-ray and the neutron total.
+From Python:
 
 ```python
 sq = sa.structure_factor_direct(weighting="xray")                 # total S(q)

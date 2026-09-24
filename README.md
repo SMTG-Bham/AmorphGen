@@ -530,8 +530,9 @@ Notes on the options:
   first sharp diffraction peak is resolved without the truncation of a Fourier
   transform of g(r). Weighting is `xray` (q-dependent Waasmaier–Kirfel form
   factors), `neutron` (Sears scattering lengths) or `unweighted`; `--sq-method ft`
-  gives the g(r) transform for comparison. A box of about 20 Å (roughly 500 atoms)
-  is needed to see the FSDP.
+  gives the g(r) transform for comparison. `--sq-partials` adds the Faber-Ziman
+  partials S_ab(q) of every element pair to the CSV and a second plot. A box of
+  about 20 Å (roughly 500 atoms) is needed to see the FSDP.
 - `--rings` counts the shortest ring per network edge, with the network former
   (Si, Ge, ...) as nodes; `--rings Ge-O` sets the pair explicitly.
 - `--connectivity` reports corner-, edge- and face-sharing between cation-centred
