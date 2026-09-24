@@ -24,7 +24,7 @@ from .pipeline.random_gen import generate_random, batch_random
 from .utils.convert import convert
 from .utils.common import extract_snapshots
 
-__version__ = "1.0.0rc3"
+__version__ = "1.0.0rc4"
 __author__ = "Chaiyawat Kaewmeechai"
 
 __all__ = [
