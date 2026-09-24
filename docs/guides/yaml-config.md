@@ -304,7 +304,9 @@ overrides the YAML value.
 
 ```yaml
 analysis:
-  cutoff: auto-rdf        # or auto, or a number in A
+  cutoff: auto-rdf        # or auto, a number in A, or a dict of per-pair
+                          # overrides such as {In-O: 2.6}; unlisted pairs
+                          # keep auto-rdf, or the dict's "default" entry
   smearing: 0.05          # RDF Gaussian smearing (A); 0 = raw histogram
   per_structure: true
   check_dimers: true

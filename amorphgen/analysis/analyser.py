@@ -64,6 +64,11 @@ class StructureAnalyser:
             Neighbour cutoff for CN, bond distances, and angles.
 
             - float: single cutoff (A) for all pairs
+            - str with overrides: ``"In-O=2.6,Zn-O=2.3"`` keeps auto-rdf for
+              every other pair; ``"auto,In-O=2.6"`` or ``"2.4,In-O=2.6"``
+              set the base rule explicitly
+            - dict listing only some pairs: the rest come from auto-rdf
+              (or from its ``"default"`` entry: a mode name or a number)
             - dict: pair-specific, e.g. ``{"Si-O": 2.2, "O-O": 2.8}``
             - ``"auto-rdf"`` (default): first minimum of the partial RDF —
               the standard physical definition of the first coordination
@@ -98,16 +103,11 @@ class StructureAnalyser:
                 f"CN statistics may mix incompatible systems."
             )
 
-        self._cutoff_mode = cutoff
-
-        if cutoff == "auto":
-            self.cutoff = auto_cutoff_minsep(self.atoms_list)
-            self._cutoff_mode = "auto (minsep)"
-        elif cutoff == "auto-rdf":
-            self.cutoff = auto_cutoff_rdf(self.atoms_list)
-            self._cutoff_mode = "auto (RDF)"
-        else:
-            self.cutoff = cutoff
+        # Any accepted form: "auto-rdf", "auto", a number, "In-O=2.6,Zn-O=2.3",
+        # "auto,In-O=2.6", or a dict (optionally with a "default" entry).
+        # A dict that lists only some pairs is completed from auto-rdf.
+        from .cutoff import resolve_cutoffs
+        self.cutoff, self._cutoff_mode = resolve_cutoffs(self.atoms_list, cutoff)
 
         self._max_cutoff = (
             max(self.cutoff.values()) if isinstance(self.cutoff, dict)
@@ -158,6 +158,41 @@ class StructureAnalyser:
 
     def _build_neighbour_dict(self, atoms):
         return build_neighbour_dict(atoms, self._max_cutoff, self._get_cutoff)
+
+    def total_coordination(self):
+        """Per-element first-shell coordination counting every *bonded*
+        partner type together (bonded = cation-anion or hetero covalent, the
+        same rule as the "Bonding coordination numbers" table).
+
+        Returns ``{element: {"mean", "std", "min", "max", "distribution"}}``.
+        For IGZO this gives the total O coordination (Ga + In + Zn around O)
+        that the per-pair O-Ga / O-In / O-Zn entries only give in parts.
+        """
+        from collections import Counter
+        try:
+            from ..pipeline.random_gen import _classify_bond
+        except ImportError:
+            from amorphgen.pipeline.random_gen import _classify_bond
+
+        def bonded(a, b):
+            bt = _classify_bond(a, b)
+            return bt == "ionic" or (bt == "covalent" and a != b)
+
+        counts = {}
+        for atoms in self.atoms_list:
+            nbr, syms = self._build_neighbour_dict(atoms)
+            for i, si in enumerate(syms):
+                cn = sum(1 for _, sj, _, _ in nbr[i] if bonded(si, sj))
+                counts.setdefault(si, []).append(cn)
+        out = {}
+        for s, cns in counts.items():
+            cns = np.asarray(cns)
+            dist = Counter(cns.tolist())
+            out[s] = {"mean": float(cns.mean()), "std": float(cns.std()),
+                      "min": int(cns.min()), "max": int(cns.max()),
+                      "distribution": {int(k): round(100.0 * v / len(cns), 1)
+                                       for k, v in sorted(dist.items())}}
+        return out
 
     # ── Core analysis methods ────────────────────────────────────────────
 
@@ -557,6 +592,19 @@ class StructureAnalyser:
                 lines.append(f"\n  Bonding coordination numbers:")
                 for pair, data in bonding_cn.items():
                     lines.extend(_fmt(pair, data))
+                # elements bonded to more than one partner type (O in IGZO:
+                # O-Ga + O-In + O-Zn) also get their total first-shell CN
+                partners = {}
+                for pair in bonding_cn:
+                    s1, s2 = pair.split("-")
+                    partners.setdefault(s1, []).append(s2)
+                multi = {s: ps for s, ps in partners.items() if len(ps) > 1}
+                if multi:
+                    tot = self.total_coordination()
+                    lines.append(f"\n  Total coordination (all bonded partners):")
+                    for s, ps in multi.items():
+                        if s in tot:
+                            lines.extend(_fmt(f"{s}-({'+'.join(ps)})", tot[s]))
 
             if nonbonded_cn:
                 nb = {k: v for k, v in nonbonded_cn.items()

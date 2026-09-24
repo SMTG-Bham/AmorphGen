@@ -543,8 +543,11 @@ Notes on the options:
   corner-sharing network glass from a random packing with the same coordination.
 - `--check-dimers` flags unphysical close contacts (O–O peroxide, N–N) per structure.
 - `--smearing SIGMA` sets the Gaussian smearing of g(r) (default 0.05 Å; 0 for the
-  raw histogram). `--cutoff` is `auto-rdf` (first minimum of g(r)), `auto` (radii
-  table) or a number in Å.
+  raw histogram). `--cutoff` is `auto-rdf` (first minimum of each partial g(r),
+  so every pair gets its own value), `auto` (radii table), a number in Å, or
+  per-pair overrides such as `"In-O=2.6,Zn-O=2.3"` that keep `auto-rdf` for the
+  other pairs. For elements bonded to several partner types (O in IGZO) the
+  report adds the total coordination over all bonded partners.
 
 Files written by `--save-plot DIR`: `analysis_rdf`, `analysis_cn`,
 `analysis_angles`, `analysis_density`, and with the matching flag `analysis_sq`,

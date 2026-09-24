@@ -217,6 +217,31 @@ class TestAnalyseMode:
                   "--save-plot", str(tmp_path / "p2")], monkeypatch)
         assert "partials skipped" in capsys.readouterr().out
 
+    def test_cutoff_overrides(self, tmp_path, monkeypatch, capsys):
+        """Per-pair overrides on top of auto-rdf, with a base prefix, and the
+        total-coordination block for an element with several bonded partners."""
+        from amorphgen.analysis.cutoff import parse_cutoff_spec
+        assert parse_cutoff_spec("auto-rdf") == "auto-rdf"
+        assert parse_cutoff_spec("2.4") == 2.4
+        assert parse_cutoff_spec("In-O=2.6, Zn-O=2.3") == {"In-O": 2.6, "Zn-O": 2.3}
+        assert parse_cutoff_spec("auto,In-O=2.6") == {"default": "auto", "In-O": 2.6}
+        assert parse_cutoff_spec({"default": 2.4, "In-O": 2.6}) == {"default": 2.4, "In-O": 2.6}
+        with pytest.raises(ValueError):
+            parse_cutoff_spec("In-O-Zn=2")
+        rng = np.random.default_rng(1)
+        a = Atoms("Ga16Zn16O48", positions=rng.uniform(0, 11, (80, 3)),
+                  cell=[11, 11, 11], pbc=True)
+        src = tmp_path / "gzo.xyz"; write(str(src), a, format="extxyz")
+        _run_cli(["--analyse", str(src), "--cutoff", "2.2,Ga-O=1.9"], monkeypatch)
+        out = capsys.readouterr().out
+        assert "Cutoff mode: fixed 2.20 A + overrides Ga-O=1.90" in out
+        assert "Ga-O: 1.90 A" in out and "O-Zn: 2.20 A" in out
+        assert "Total coordination (all bonded partners):" in out
+        assert "O-(Ga+Zn):" in out
+        with pytest.raises(SystemExit):
+            _run_cli(["--analyse", str(src), "--cutoff", "Ga-O=abc"], monkeypatch)
+        assert "Error: could not convert" in capsys.readouterr().out
+
 
 # ─── --analyse with --reference ───────────────────────────────────────────
 

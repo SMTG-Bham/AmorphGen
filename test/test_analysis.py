@@ -201,6 +201,19 @@ class TestStructureAnalyser:
         with pytest.raises(FileNotFoundError):
             StructureAnalyser(str(empty))
 
+    def test_partial_cutoff_dict_is_completed_from_auto_rdf(self, sio2_dir):
+        """A dict naming only Si-O keeps auto-rdf for Si-Si and O-O instead of
+        treating them as unbonded; 'default' sets the base rule."""
+        from amorphgen.analysis import StructureAnalyser
+        sa = StructureAnalyser(sio2_dir, cutoff={"Si-O": 1.9})
+        assert sa._get_cutoff("Si", "O") == 1.9 == sa._get_cutoff("O", "Si")
+        assert sa._get_cutoff("O", "O") > 0 and sa._get_cutoff("Si", "Si") > 0
+        assert "overrides Si-O=1.90" in sa._cutoff_mode
+        sa2 = StructureAnalyser(sio2_dir, cutoff={"default": 3.0, "Si-O": 1.9})
+        assert sa2._get_cutoff("O", "O") == 3.0 and sa2._get_cutoff("Si", "O") == 1.9
+        tot = sa.total_coordination()
+        assert set(tot) == {"O", "Si"} and tot["Si"]["mean"] > 0
+
 
 class TestRDFNormalisation:
 

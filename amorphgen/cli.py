@@ -364,10 +364,13 @@ def _add_arguments(p):
     # ── Analysis ──────────────────────────────────────────────────────────────
     g_an = p.add_argument_group("analyse", "Used with --analyse.")
     g_an.add_argument("--cutoff", default="auto-rdf",
-                      help="Cutoff: number (A), 'auto-rdf' (default — first "
-                           "RDF minimum), or 'auto' (minsep from radii table; "
-                           "may truncate first peak for a-Si, a-HfO2, "
-                           "chalcogenides).")
+                      help="Bond cutoff. 'auto-rdf' (default): first minimum "
+                           "of each partial g(r), so every pair gets its own "
+                           "value. 'auto': minsep from the radii table. A "
+                           "number: one value for all pairs. Per-pair "
+                           "overrides keep auto-rdf for the rest: "
+                           "'In-O=2.6,Zn-O=2.3'; prefix a base to change it: "
+                           "'auto,In-O=2.6' or '2.4,In-O=2.6'.")
     g_an.add_argument("--sq", action="store_true",
                       help="Compute the total structure factor S(q) via the "
                            "direct (Debye) method: correct FSDP intensities "
@@ -1247,13 +1250,13 @@ def main():
         parser = _get_parser()
         if not _typed("--cutoff") and "cutoff" in an_cfg:
             cutoff = an_cfg["cutoff"]
-        if cutoff not in ("auto", "auto-rdf"):
-            try:
-                cutoff = float(cutoff)
-            except ValueError:
-                print(f"Error: invalid cutoff '{cutoff}'. "
-                      f"Use a number, 'auto', or 'auto-rdf'.")
-                sys.exit(1)
+        from .analysis.cutoff import parse_cutoff_spec
+        try:
+            cutoff = parse_cutoff_spec(cutoff)
+        except ValueError as exc:
+            print(f"Error: {exc}. Use a number, 'auto', 'auto-rdf', or "
+                  f"per-pair overrides such as 'In-O=2.6,Zn-O=2.3'.")
+            sys.exit(1)
 
         sa = StructureAnalyser(source, cutoff=cutoff)
 

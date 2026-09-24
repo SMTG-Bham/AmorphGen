@@ -319,3 +319,12 @@ orphan: true
 - **`--pair-panels`** (YAML `pair_panels: true`): one small panel per element pair for the
   partial g(r) (`analysis_rdf_panels.png`) and, with `--sq-partials`, for the S_ab(q)
   (`analysis_sq_partials_panels.png`). `plotting.plot_pair_panels()` is the helper.
+- **Per-pair cutoff overrides on the CLI**: `--cutoff "In-O=2.6,Zn-O=2.3"` fixes the
+  named pairs and keeps `auto-rdf` for the rest; `"auto,In-O=2.6"` or `"2.4,In-O=2.6"`
+  change the base rule. A YAML/API cutoff dict that lists only some pairs is now
+  completed from `auto-rdf` (previously the unlisted pairs were silently "not bonded");
+  an optional `default` entry sets the base. The report header names the overrides.
+  `cutoff.parse_cutoff_spec()` / `resolve_cutoffs()`.
+- **Total coordination** in the report for elements bonded to several partner types
+  (O in IGZO: one line for O surrounded by Ga + In + Zn, next to the per-pair O-Ga,
+  O-In, O-Zn entries). `StructureAnalyser.total_coordination()`.

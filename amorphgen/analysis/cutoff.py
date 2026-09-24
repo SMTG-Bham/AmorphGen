@@ -146,3 +146,102 @@ def check_rmax(atoms_list: list, rmax: float) -> None:
                 stacklevel=4,
             )
             return
+
+
+_BASE_MODES = ("auto-rdf", "auto")
+
+
+def parse_cutoff_spec(spec):
+    """Parse a cutoff specification from the CLI or YAML.
+
+    Accepted forms::
+
+        "auto-rdf" | "auto" | 2.4                 -> one rule for every pair
+        "In-O=2.6,Zn-O=2.3"                       -> per-pair overrides on top of auto-rdf
+        "auto,In-O=2.6"  /  "2.4,In-O=2.6"        -> overrides on top of that base
+        {"In-O": 2.6}  /  {"default": 2.4, "In-O": 2.6}   (YAML dict)
+
+    Returns a str, a float, or a dict whose optional ``"default"`` entry is
+    the base rule for pairs not listed (``"auto-rdf"`` when absent).
+    """
+    if isinstance(spec, (int, float)):
+        return float(spec)
+    if isinstance(spec, dict):
+        out = {}
+        for k, v in spec.items():
+            if k == "default":
+                out["default"] = parse_cutoff_spec(v) if isinstance(v, str) else float(v)
+            else:
+                out[str(k)] = float(v)
+        return out
+    s = str(spec).strip()
+    if s in _BASE_MODES:
+        return s
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    out = {}
+    for tok in s.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        if "=" in tok:
+            pair, val = tok.split("=", 1)
+            pair = pair.strip()
+            if pair.count("-") != 1:
+                raise ValueError(f"cutoff override '{tok}': expected A-B=value")
+            out[pair] = float(val)
+        elif tok in _BASE_MODES:
+            out["default"] = tok
+        else:
+            out["default"] = float(tok)      # raises ValueError with a clear message
+    if not out:
+        raise ValueError(f"invalid cutoff '{spec}'")
+    return out
+
+
+def resolve_cutoffs(atoms_list, spec):
+    """Turn a parsed cutoff spec into ``(cutoffs, mode_label)``.
+
+    ``cutoffs`` is a float (one value for every pair) or a dict with an entry
+    for every element pair present in ``atoms_list``: the base rule filled in
+    first (``auto-rdf`` first minima, ``auto`` radii minseps, or a number),
+    then the per-pair overrides applied on top.
+    """
+    spec = parse_cutoff_spec(spec)
+    if not isinstance(spec, dict):
+        if spec == "auto":
+            return auto_cutoff_minsep(atoms_list), "auto (minsep)"
+        if spec == "auto-rdf":
+            return auto_cutoff_rdf(atoms_list), "auto (RDF)"
+        return float(spec), "fixed"
+    overrides = {k: v for k, v in spec.items() if k != "default"}
+    base = spec.get("default", "auto-rdf")
+    unique = sorted(set(atoms_list[0].get_chemical_symbols()))
+    pairs = [f"{a}-{b}" for i, a in enumerate(unique) for b in unique[i:]]
+    if base == "auto":
+        table, label = auto_cutoff_minsep(atoms_list), "auto (minsep)"
+    elif base == "auto-rdf":
+        table, label = auto_cutoff_rdf(atoms_list), "auto (RDF)"
+    else:
+        table, label = {p: float(base) for p in pairs}, f"fixed {float(base):.2f} A"
+    cutoffs = {}
+    for p in pairs:
+        a, b = p.split("-")
+        rev = f"{b}-{a}"
+        if p in overrides:
+            cutoffs[p] = overrides[p]
+        elif rev in overrides:
+            cutoffs[p] = overrides[rev]
+        else:
+            cutoffs[p] = table.get(p, table.get(rev, 3.5))
+    unknown = [k for k in overrides if k not in pairs and
+               "-".join(reversed(k.split("-"))) not in pairs]
+    if unknown:
+        import warnings
+        warnings.warn(f"cutoff override(s) for pair(s) not in the structure: "
+                      f"{', '.join(unknown)}", stacklevel=2)
+    if overrides:
+        label += " + overrides " + ", ".join(f"{k}={v:.2f}" for k, v in overrides.items())
+    return cutoffs, label

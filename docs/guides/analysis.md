@@ -166,10 +166,22 @@ glasses.
 | **`auto-rdf`** (default) | All structural analysis. Robust across systems with broad bond-length distributions (a-Si, a-HfO₂, chalcogenides). |
 | `auto` | Legacy. Uses minsep from Shannon/Cordero/Goldschmidt radii. Fast but can under-count coordination for systems with long first-shell bonds. |
 | Numeric, e.g. `--cutoff 2.5` | Single cutoff (in Å) for all pairs. Useful for tight-bonded covalent networks. |
-| Per-pair dict via YAML | Custom per-pair cutoffs for unusual chemistries. |
+| Per-pair overrides, e.g. `--cutoff "In-O=2.6,Zn-O=2.3"` | Fix the pairs you name and keep `auto-rdf` for the rest. Prefix a base rule to change the rest: `"auto,In-O=2.6"` or `"2.4,In-O=2.6"`. |
+| Dict via YAML or API | `cutoff: {In-O: 2.6}` completes the unlisted pairs from `auto-rdf`; add `default: 2.4` (or a mode name) to change that. |
 
 Setting an explicit cutoff is rarely needed; `auto-rdf` handles
-practically every amorphous system AmorphGen targets.
+practically every amorphous system AmorphGen targets. One number for every
+pair is the option to avoid in a multi-cation oxide: for a-IGZO the In–O
+first minimum sits at 2.47 Å and Ga–O at 2.03 Å, and a single 2.47 Å
+cutoff raises the Ga–O coordination from 3.9 to 4.2 by admitting
+second-shell oxygens. The report header lists the cutoff in force for
+every pair, so a per-pair override is easy to check.
+
+For elements bonded to more than one partner type (O in IGZO, bonded to
+Ga, In and Zn) the report adds a `Total coordination` block with the
+first-shell count over all bonded partners, next to the per-pair O–Ga,
+O–In and O–Zn entries. The same numbers come from
+`StructureAnalyser.total_coordination()`.
 
 ## Structure factor S(q) and simulated XRD
 
