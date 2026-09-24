@@ -46,6 +46,97 @@ histograms, per-structure densities) so you can re-plot in any tool.
 
 :::::
 
+:::::{tab-item} Multi-cation oxide (a-IGZO)
+
+Four elements, ten element pairs, three cation sizes and a shared oxygen.
+One command reports and plots all of it:
+
+```bash
+amorphgen --analyse \
+    --input-dir igzo_final/ \
+    --sq --sq-partials --pair-panels \
+    --total-cn O --total-cn "O:In+Ga" \
+    --save-report report.txt \
+    --save-plot plots/
+```
+
+The report header shows the cutoff in force for every pair. With the
+default ``auto-rdf`` each pair gets its own value from the first minimum
+of its g(r):
+
+```
+  Cutoff mode: auto (RDF)
+    Ga-O: 2.03 A
+    In-O: 2.47 A
+    O-Zn: 2.25 A
+    ...
+```
+
+One cutoff for all pairs is the thing to avoid here: 2.47 Å (the In–O
+value) would count second-shell oxygens around Ga and lift the Ga–O
+coordination from 3.9 to 4.2. To override one pair and keep ``auto-rdf``
+for the rest, use ``--cutoff "In-O=2.6"``.
+
+The coordination part of the report separates bonds from contacts:
+
+```
+  Bonding coordination numbers:
+  Ga-O: mean=3.9 +/- 0.3 [3,4]
+  In-O: mean=5.1 +/- 0.6 [4,6]
+  Zn-O: mean=3.9 +/- 0.5 [3,5]
+  O-Ga: ...  O-In: ...  O-Zn: ...
+
+  Total coordination (all bonded partners):
+  O-(Ga+In+Zn): mean=3.2 +/- 0.5 [2,4]
+
+  Total coordination (requested):
+  O-(all bonded): mean=3.2 +/- 0.5 [2,4]
+  O-(In+Ga): mean=2.3 +/- 0.8 [0,4]
+
+  Non-bonded contacts:
+  Ga-In: ...  In-In: ...  O-O: ...
+```
+
+Cation–O pairs are bonds; cation–cation and O–O pairs are second-shell
+contacts listed apart and excluded from the coordination and the angles.
+The ``O-(Ga+In+Zn)`` line appears on its own whenever an element has more
+than one bonded partner type; ``--total-cn`` adds any centre and partner
+set you name (``O`` for all bonded partners, ``O:In+Ga`` for a subset).
+
+``--sq-partials`` prints the first peak of each Faber-Ziman partial
+S_ab(q) and writes the partials next to the total; ``--pair-panels`` puts
+every pair in its own panel for g(r) and for S_ab(q).
+
+Output:
+
+```
+plots/
+├── analysis_rdf.{png,pdf,csv}              # partials; CSV also has g(r)_Total
+├── analysis_rdf_panels.{png,pdf}           # one panel per pair
+├── analysis_cn.{png,pdf,csv}               # Ga-O, In-O, Zn-O and O-(Ga+In+Zn)
+├── analysis_cn_total.{png,pdf,csv}         # the --total-cn requests
+├── analysis_sq.{png,pdf,csv}               # total S(q); CSV has s_<pair> columns
+├── analysis_sq_partials.{png,pdf}          # partials on one axis
+├── analysis_sq_partials_panels.{png,pdf}   # one panel per pair
+├── analysis_angles.{png,pdf,csv}
+└── analysis_density.{png,pdf,csv}
+```
+
+Python equivalent:
+
+```python
+from amorphgen.analysis import StructureAnalyser
+
+sa = StructureAnalyser("igzo_final/", cutoff="In-O=2.6")       # rest auto-rdf
+sa.summary()
+sa.total_coordination(centre="O", partners=["In", "Ga"])
+sq = sa.structure_factor_direct(weighting="xray", partials=True)
+sq["partials"]["In-O"]
+sa.plot(output_dir="plots/", pair_panels=True, total_cn=["O", "O:In+Ga"])
+```
+
+:::::
+
 :::::{tab-item} Single ensemble + text report
 
 Add a full text report alongside the plots:
@@ -655,7 +746,8 @@ amorphgen --analyse \
     [--smearing SIGMA] \
     [--total-rdf] \
     [--sq] [--sq-weighting {xray,neutron,unweighted}] \
-    [--sq-method {direct,ft}] [--sq-smooth SIGMA_Q] \
+    [--sq-method {direct,ft}] [--sq-smooth SIGMA_Q] [--sq-partials] \
+    [--pair-panels] [--total-cn SPEC ...] \
     [--check-dimers] \
     [--dpi N] \
     [--show-title]
@@ -664,7 +756,7 @@ amorphgen --analyse \
 | Flag | What it does |
 |---|---|
 | `--input-dir DIR` | Directory of structure files (``.xyz``, ``.extxyz``, ``.cif``, ``.vasp``). Globs everything matching these extensions. |
-| `--cutoff MODE` | `auto-rdf` (default), `auto`, or a number in Å. |
+| `--cutoff MODE` | `auto-rdf` (default: first minimum of each partial g(r)), `auto` (radii table), a number in Å, or per-pair overrides such as `"In-O=2.6,Zn-O=2.3"` that keep `auto-rdf` for the other pairs (`"auto,In-O=2.6"` or `"2.4,In-O=2.6"` change the base). |
 | `--per-structure` | Print a per-structure table (one row per file: density, E/atom, CN). |
 | `--save-report FILE` | Write the full text report (densities, bond distances, coordination, angles) to a file. |
 | `--save-plot DIR` | Save the four standard figures (RDF, CN, angles, density) plus CSV data into ``DIR``. |
@@ -676,6 +768,9 @@ amorphgen --analyse \
 | `--sq-weighting` | `xray` (default, Waasmaier–Kirfel form factors), `neutron` (Sears scattering lengths) or `unweighted`. |
 | `--sq-method` | `direct` (default): Debye sum at the reciprocal-lattice q-vectors, resolves the FSDP. `ft`: Fourier transform of g(r), smoother but damps the FSDP. |
 | `--sq-smooth SIGMA_Q` | Gaussian re-binning width in Å⁻¹ for the direct S(q) (default 0.05; 0 = raw). Raw values are kept in the CSV. |
+| `--sq-partials` | With `--sq` (direct method): the Faber-Ziman partial structure factors S_ab(q) of every element pair. First peaks printed, `s_<pair>` columns in `analysis_sq.csv`, `analysis_sq_partials.png`. |
+| `--pair-panels` | One small panel per element pair for the partial g(r) (`analysis_rdf_panels.png`) and, with `--sq-partials`, for S_ab(q) (`analysis_sq_partials_panels.png`). |
+| `--total-cn SPEC` | Total first-shell coordination of one element over several partner types, repeatable: `O` counts every bonded partner, `O:In+Ga` only the named ones. Printed, and plotted as `analysis_cn_total.png` + CSV. |
 | `--check-dimers` | Report unphysical close contacts (O–O peroxide, N–N) per structure. |
 | `--rings [PAIR]` | Ring statistics (shortest ring per network edge). Nodes default to the least electronegative element; `--rings Ge-O` sets nodes–bridge explicitly. Added to the report; `analysis_rings.{csv,png}` under ``--save-plot``. |
 | `--voronoi [ELEMENT]` | Voronoi indices <n3 n4 n5 n6> for all atoms or one element. Added to the report; `analysis_voronoi.csv` under ``--save-plot``. |

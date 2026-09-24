@@ -307,9 +307,7 @@ orphan: true
 
 - **`--random-gen` resume is now seed-stable.** Per-structure seeds are derived from the structure *index* (via `SeedSequence`) rather than a running counter that advanced on every attempt and was not advanced for skipped indices, so a `--resume` run now reproduces exactly the structures a fresh run would generate, while retries of a failed placement still draw fresh randomness. **Behaviour change:** the seed→structure mapping changed, so a given `seed` (YAML `random_gen: seed:` / API `seed=`) now produces *different* (but reproducible and resume-stable) structures than it did before this release. Regenerate rather than expecting old seeds to reproduce old structures.
 
-## Unreleased
-
-### Added
+### Added after the rc4 upload (on GitHub main, 2026-09-24; not in the rc4 wheel on PyPI)
 
 - **`--sq-partials`** (YAML `sq_partials: true`) for `--analyse --sq`: the Faber-Ziman
   partial structure factors S_ab(q) of every element pair, previously reachable only
@@ -334,7 +332,7 @@ orphan: true
 - **Total g(r) always in `analysis_rdf.csv`** (`g(r)_Total` column) for every system;
   the plot still draws it only with `--total-rdf`.
 
-### Fixed
+### Fixed after the rc4 upload (on GitHub main; not in the rc4 wheel on PyPI)
 
 - **CN plot of multi-cation compounds showed a cation-cation pair.** For IGZO the
   mirrored-bars layout picked Ga-In / In-Ga (second-shell contacts) because the

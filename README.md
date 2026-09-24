@@ -551,8 +551,46 @@ Notes on the options:
 
 Files written by `--save-plot DIR`: `analysis_rdf`, `analysis_cn`,
 `analysis_angles`, `analysis_density`, and with the matching flag `analysis_sq`,
+`analysis_sq_partials`, `analysis_rdf_panels`, `analysis_cn_total`,
 `analysis_rings`, `analysis_connectivity`, `analysis_voronoi`, each as PNG (and
 PDF with `--save-pdf`) plus CSV.
+
+### Worked example: a multi-cation oxide (a-IGZO)
+
+Four elements give ten element pairs, three different cation sizes and an
+oxygen that is shared between them. One command covers it:
+
+```bash
+amorphgen --analyse --input-dir igzo_final/ \
+    --sq --sq-partials --pair-panels \
+    --total-cn O --total-cn "O:In+Ga" \
+    --save-report report.txt --save-plot plots/
+```
+
+What to read in the output:
+
+- The header lists the cutoff in force for every pair. `auto-rdf` gives each
+  pair its own value from the first minimum of its g(r) (Ga–O 2.03, Zn–O 2.25,
+  In–O 2.47 Å here). One number for all pairs would count second-shell oxygens
+  around the small Ga cation, so if you override, do it per pair:
+  `--cutoff "In-O=2.6"` keeps `auto-rdf` for the rest.
+- `Bonding coordination numbers` covers the cation–O pairs (Ga–O 3.9, In–O 5.1,
+  Zn–O 3.9) and, because O has three partner types, a `Total coordination`
+  block with `O-(Ga+In+Zn)`. Cation–cation and O–O contacts are listed apart as
+  `Non-bonded contacts` and never enter the coordination or the angles.
+- `--total-cn` adds any total you name: `O` counts all bonded partners,
+  `O:In+Ga` only the two larger cations.
+- `--sq-partials` prints the first peak of each Faber-Ziman partial S_ab(q)
+  and writes them next to the total S(q). The partials do not depend on
+  `--sq-weighting`; the weighting only combines them into the total.
+- `--pair-panels` puts each pair in its own panel for g(r) and for S_ab(q),
+  which is easier to read than ten curves on one axis.
+
+Files this writes in `plots/`: `analysis_rdf` (all partials plus `g(r)_Total`
+in the CSV), `analysis_rdf_panels.png`, `analysis_cn` (Ga–O, In–O, Zn–O and
+the O total), `analysis_cn_total` (the requested totals), `analysis_sq` (total
+S(q) with `s_<pair>` columns), `analysis_sq_partials.png`,
+`analysis_sq_partials_panels.png`, `analysis_angles` and `analysis_density`.
 
 The same analysis from Python:
 

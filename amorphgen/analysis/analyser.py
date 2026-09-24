@@ -168,17 +168,22 @@ class StructureAnalyser:
         centre : str, optional
             Element at the centre (``"O"``). Default: every element.
         partners : iterable of str, optional
-            Partner elements to count (``["Ga", "In"]``). Default: every
+            Partner elements to count, such as In and Ga. Default: every
             *bonded* partner type (bonded = cation-anion or hetero covalent,
             the rule of the "Bonding coordination numbers" table). When given,
             the named partners are counted within their pair cutoffs whether
             or not the pair is classed as a bond.
 
-        Returns ``{element: {"mean", "std", "min", "max", "distribution"}}``.
-        For IGZO the default gives the total O coordination (Ga + In + Zn
-        around O) that the per-pair O-Ga / O-In / O-Zn entries only give in
-        parts; ``centre="O", partners=["In", "Ga"]`` gives the count over the
-        two larger cations only.
+
+        Returns
+        -------
+        dict
+            Keyed by element, with ``mean``, ``std``, ``min``, ``max`` and
+            ``distribution`` (CN to percent). For IGZO the default gives the
+            total O coordination (Ga + In + Zn around O) that the per-pair
+            O-Ga / O-In / O-Zn entries only give in parts; ``centre='O'`` with
+            ``partners`` set to In and Ga gives the count over the two larger
+            cations only.
         """
         from collections import Counter
         try:
