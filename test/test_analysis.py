@@ -628,3 +628,19 @@ def test_analyser_counts_each_stem_once(tmp_path):
     sa = StructureAnalyser(str(tmp_path))
     assert len(sa.atoms_list) == 2
     assert [os.path.basename(f) for f in sa.file_paths] == ["s_opt.xyz", "t_opt.cif"] if hasattr(sa, "file_paths") else True
+
+
+def test_is_bonding_pair_rules():
+    """Cation-anion pairs bond; cation-cation (Ga-In, Al-Si, Na-Si) and
+    anion-anion pairs do not, whatever the radii table calls them; systems
+    without an anion fall back to the radii classification."""
+    from amorphgen.analysis.structure import is_bonding_pair as b
+    igzo = {"In", "Ga", "Zn", "O"}
+    assert b("Ga", "O", igzo) and b("O", "In", igzo)
+    assert not b("Ga", "In", igzo) and not b("O", "O", igzo) and not b("Zn", "Zn", igzo)
+    nas = {"Na", "Al", "Si", "O"}
+    assert b("Si", "O", nas) and b("Al", "O", nas) and b("Na", "O", nas)
+    assert not b("Al", "Si", nas) and not b("Na", "Si", nas)
+    assert b("P", "O", {"Li", "P", "O"}) and b("Si", "N", {"Si", "N"})
+    assert b("Si", "Si", {"Si"}) and b("Si", "C", {"Si", "C"}) and b("Ga", "As", {"Ga", "As"})
+    assert b("Cu", "Zr", {"Cu", "Zr"}) and b("Cu", "Cu", {"Cu", "Zr"})

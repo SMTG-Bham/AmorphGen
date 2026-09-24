@@ -191,9 +191,11 @@ class StructureAnalyser:
         except ImportError:
             from amorphgen.pipeline.random_gen import _classify_bond
 
+        from .structure import is_bonding_pair
+        elements = set(self.atoms_list[0].get_chemical_symbols())
+
         def bonded(a, b):
-            bt = _classify_bond(a, b)
-            return bt == "ionic" or (bt == "covalent" and a != b)
+            return is_bonding_pair(a, b, elements)
 
         wanted = set(partners) if partners is not None else None
 
@@ -592,13 +594,13 @@ class StructureAnalyser:
                 from ..pipeline.random_gen import _classify_bond
             except ImportError:
                 from amorphgen.pipeline.random_gen import _classify_bond
+            from .structure import is_bonding_pair
 
             bonding_cn = {}
             nonbonded_cn = {}
             for pair, data in cn.items():
                 s1, s2 = pair.split("-")
-                bt = _classify_bond(s1, s2)
-                if bt == "ionic" or (bt == "covalent" and s1 != s2):
+                if is_bonding_pair(s1, s2, self.atoms_list[0].get_chemical_symbols()):
                     bonding_cn[pair] = data
                 else:
                     nonbonded_cn[pair] = data
@@ -725,13 +727,10 @@ class StructureAnalyser:
         except ImportError:
             from amorphgen.pipeline.random_gen import _classify_bond
 
+        from .structure import is_bonding_pair
         unique = sorted(set(self.atoms_list[0].get_chemical_symbols()))
-        bonding_pairs = []
-        for s1 in unique:
-            for s2 in unique:
-                bt = _classify_bond(s1, s2)
-                if bt == "ionic" or (bt == "covalent" and s1 != s2):
-                    bonding_pairs.append(f"{s1}-{s2}")
+        bonding_pairs = [f"{s1}-{s2}" for s1 in unique for s2 in unique
+                         if is_bonding_pair(s1, s2, unique)]
 
         # If single element, use same-species
         if not bonding_pairs:

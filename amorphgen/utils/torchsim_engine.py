@@ -85,10 +85,15 @@ def build_model(model: str, device: str = "auto", model_path: str | None = None,
 
     if name.startswith("7net") or name.startswith("sevennet") or _ci_get(SEVENNET_MODELS, model) != model:
         from torch_sim.models.sevennet import SevenNetModel
-        from sevenn.calculator import SevenNetCalculator
         ckpt = _ci_get(SEVENNET_MODELS, model)
-        calc = SevenNetCalculator(model=ckpt, device=str(dev))
-        return SevenNetModel(model=calc.model, device=dev, dtype=tdtype)
+        # SevenNet's torch-sim wrapper (sevenn.torchsim) runs in float32 only,
+        # and multi-fidelity checkpoints (7net-mf-*) need a modal, as on the
+        # ASE path (calculators.py: modal="mpa" = MPtrj + Alexandria, PBE).
+        if tdtype == torch.float64:
+            print("  [torch-sim] SevenNet runs in float32 (its wrapper accepts no other dtype)")
+        modal = "mpa" if "mf" in str(ckpt) else None
+        kw = {"modal": modal} if modal else {}
+        return SevenNetModel(ckpt, device=dev, dtype=torch.float32, **kw)
 
     raise ValueError(f"Unknown model '{model}' for the torch-sim engine.")
 

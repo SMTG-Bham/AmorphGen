@@ -334,6 +334,30 @@ orphan: true
 
 ### Fixed after the rc4 upload (on GitHub main; not in the rc4 wheel on PyPI)
 
+- **`--seed` did nothing on the torch-sim engine.** torch-sim draws initial momenta and
+  Langevin noise from its state generator, which started from torch-sim's own fixed
+  default seed, so every batch and every resume got identical velocities and noise
+  whatever seed was set, and ensemble members were not independent. The state
+  generator is now seeded from (seed, stage, chunk, resume offset); with no seed each
+  batch gets fresh entropy. Test: seeds 1 and 2 now give different trajectories.
+- **SevenNet could not be built on the torch-sim engine**: its wrapper is float32-only
+  and multi-fidelity checkpoints need a modal; both are now set as on the ASE path.
+- **`--hybrid-ensemble --engine torchsim` failed with default settings** (stage 4 defaults
+  to NPT, which torch-sim does not run): unset MD stages now switch to NVT with a note;
+  an explicit NPT is refused before anything starts.
+- **Resume could turn a `traj_format: traj` trajectory into extxyz.** The torn-frame
+  repair rewrote the file in the format guessed from the `*_traj.xyz` name; it now keeps
+  the file's real format (binary trajectory or extxyz), so the resumed stage can append.
+- **Hetero cation-cation pairs were counted as bonds** by the coordination report, the
+  total coordination, the bond angles and the CN plot when the radii table classed them
+  covalent (Al-Si, Na-Si in aluminosilicate and soda-lime glasses), inflating totals and
+  adding spurious angles. One rule now applies everywhere (`structure.is_bonding_pair`):
+  in a compound with an anion, a pair is a bond only when exactly one member is an anion.
+- **Same MD seed stream for every job in single-snapshot and SLURM-array runs.** The
+  run index came from the `run_NNNN/` directory name only, and a single-snapshot run
+  writes straight into the work directory. `batch_quench` now passes each run's index
+  explicitly, `SLURM_ARRAY_TASK_ID` is used outside a run directory, and `--run-index`
+  (YAML `run_index`) sets it by hand.
 - **CN plot of multi-cation compounds showed a cation-cation pair.** For IGZO the
   mirrored-bars layout picked Ga-In / In-Ga (second-shell contacts) because the
   reciprocal-pair search ran over every pair. The plot now uses bonded pairs only:

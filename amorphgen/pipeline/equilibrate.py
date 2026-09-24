@@ -93,8 +93,8 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high", **kwargs):
 
     default_T = {"premelt": 300, "high": 3000, "low": 300}
     T = cfg.get("T", default_T.get(stage, 300))
-    from ..utils.common import stage_rng, run_index_from_cwd
-    rng = stage_rng(global_cfg.get("seed"), int(stage_label), run_index_from_cwd())
+    from ..utils.common import stage_rng, run_index_for
+    rng = stage_rng(global_cfg.get("seed"), int(stage_label), run_index_for(global_cfg))
     if needs_velocity_init(atoms, elapsed):
         MaxwellBoltzmannDistribution(atoms, temperature_K=T, rng=rng)
 

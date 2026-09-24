@@ -364,10 +364,26 @@ def stage_rng(seed, stage: int, run_index: int = 0):
 
 
 def run_index_from_cwd() -> int:
-    """Index of a ``run_NNNN`` working directory (batch / ensemble modes), else 0."""
+    """Index of a ``run_NNNN`` working directory (batch / ensemble modes).
+
+    Outside such a directory (a single-snapshot run writes straight into the
+    work dir) the SLURM array task id is used when present, so array jobs
+    sharing one ``--seed`` still draw different velocities and noise; else 0.
+    """
     import re
     m = re.search(r"run_(\d+)", os.path.basename(os.getcwd()))
-    return int(m.group(1)) if m else 0
+    if m:
+        return int(m.group(1))
+    task = os.environ.get("SLURM_ARRAY_TASK_ID")
+    return int(task) if task and task.isdigit() else 0
+
+
+def run_index_for(cfg: dict) -> int:
+    """Run index for the MD seed stream: an explicit ``run_index`` in the
+    config (set by batch_quench per run, or ``--run-index``) beats the
+    working-directory / SLURM inference."""
+    ri = cfg.get("run_index") if cfg else None
+    return int(ri) if ri is not None else run_index_from_cwd()
 
 
 def resolve_ramp(T_start: float, T_end: float, T_step: float) -> list[float]:
@@ -606,8 +622,14 @@ def read_md_checkpoint(trajfile: str, interval: int = TRAJ_LOG_INTERVAL):
         import warnings
         warnings.warn(f"{trajfile}: last frame is incomplete (interrupted "
                       f"write); keeping the {len(frames)} complete frame(s).")
+        # Rewrite in the format the file actually has. A ``traj_format: traj``
+        # run keeps the default ``*_traj.xyz`` name, and ASE would otherwise
+        # pick the format from the extension and turn the binary trajectory
+        # into extxyz, which the resumed stage cannot append to.
         try:
-            write(trajfile, frames)
+            with open(trajfile, "rb") as fh:
+                fmt = "traj" if fh.read(8) == b"- of Ulm" else "extxyz"
+            write(trajfile, frames, format=fmt)
         except Exception:
             pass
     if len(frames) < 2:      # frame 0 is the starting structure: nothing done

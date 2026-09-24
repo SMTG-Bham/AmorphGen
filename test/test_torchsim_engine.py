@@ -167,6 +167,13 @@ class TestBatchNVT:
         assert sum(1 for _ in open(tmp_path / "run_0000" / "stage4_eq.log")) == 6   # header(2) + 4 frames
         again = batch_nvt(self._cells(), m, 300.0, n_steps=400, timestep_fs=1.0, seed=1, log=lambda *a: None)
         assert np.allclose(out[0].positions, again[0].positions)              # seeded noise
+        other = batch_nvt(self._cells(), m, 300.0, n_steps=400, timestep_fs=1.0, seed=2, log=lambda *a: None)
+        assert not np.allclose(out[0].positions, other[0].positions)          # the seed matters
+        tagged = batch_nvt(self._cells(), m, 300.0, n_steps=400, timestep_fs=1.0, seed=1, tag=1, log=lambda *a: None)
+        assert not np.allclose(out[0].positions, tagged[0].positions)         # so does the chunk / resume tag
+        free1 = batch_nvt(self._cells(), m, 300.0, n_steps=400, timestep_fs=1.0, log=lambda *a: None)
+        free2 = batch_nvt(self._cells(), m, 300.0, n_steps=400, timestep_fs=1.0, log=lambda *a: None)
+        assert not np.allclose(free1[0].positions, free2[0].positions)        # unseeded runs are independent
 
     def test_ramp_and_momenta_carry_over(self):
         from amorphgen.utils.torchsim_md import batch_nvt
@@ -210,6 +217,23 @@ class TestHybridTorchsim:
             ["hybrid_0000.xyz", "hybrid_0001.xyz", "hybrid_0002.xyz"]
         monkeypatch.setattr(sys, "argv", base + ["--resume"]); main()
         assert "3 run(s) already complete, 0 to do" in capsys.readouterr().out
+
+    def test_hybrid_defaults_to_nvt_and_refuses_explicit_npt(self, tmp_path, monkeypatch, capsys):
+        """DEFAULT_CONFIG stage 4 is NPT; the torch-sim hybrid path switches
+        unset stages to NVT and refuses an explicit NPT before starting."""
+        from amorphgen.cli import main
+        src, y = self._setup(tmp_path, n=1)
+        base = ["amorphgen", "--hybrid-ensemble", "--input-dir", str(src), "--config", str(y),
+                "--engine", "torchsim", "-o", str(tmp_path / "o1"), "--eq-high-steps", "20",
+                "--quench-T-start", "500", "--quench-T-end", "300", "--quench-T-step", "-100",
+                "--quench-steps-per-T", "10", "--eq-low-steps", "10", "-C", "cubic"]
+        monkeypatch.setattr(sys, "argv", base); main()
+        out = capsys.readouterr().out
+        assert "MD stages run NVT" in out and "Hybrid ensemble complete (torch-sim)" in out
+        monkeypatch.setattr(sys, "argv", base + ["--eq-high-ensemble", "NPT"])
+        with pytest.raises(SystemExit):
+            main()
+        assert "runs NVT only" in capsys.readouterr().out
 
     def test_npt_stage_is_rejected(self, tmp_path):
         from amorphgen.pipeline.batch_quench import run_torchsim

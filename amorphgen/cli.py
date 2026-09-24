@@ -218,6 +218,11 @@ def _add_arguments(p):
                              "the largest chunk that fits (16 on CPU). Outputs are "
                              "written after each chunk and MD trajectories every 100 steps, "
                              "so --resume loses at most 100 steps.")
+    g_pipe.add_argument("--run-index", type=int, default=None, metavar="INT",
+                        help="Run index for the per-run seed stream of the MD "
+                             "stages (with --seed). Normally inferred from the "
+                             "run_NNNN/ directory or SLURM_ARRAY_TASK_ID; set it "
+                             "when several single-structure jobs share one --seed.")
     g_pipe.add_argument("--seed", type=int, default=None, metavar="INT",
                         help="Global random seed: seeds random placement AND "
                              "the velocity initialisation / Langevin noise of "
@@ -721,6 +726,7 @@ def _build_override(args, parser, explicit_only: bool = False,
     mapping = {
         "model": get("model"),
         "seed": get("seed"),
+        "run_index": get("run_index"),
         "engine": get("engine"),
         "model_path": get("model_path"),
         "device": get("device"),
@@ -995,6 +1001,19 @@ def _run_hybrid_ensemble(args, override: dict) -> None:
     if override.get('engine', 'ase') == 'torchsim':
 
         from .pipeline.batch_quench import run_torchsim
+        # torch-sim runs NVT only. DEFAULT_CONFIG has stage 4 as NPT, so unless
+        # the user chose an ensemble (flag or YAML) switch the MD stages to NVT
+        # here; an explicit NPT is refused before anything starts.
+        for key, flag in (("eq_high", "--eq-high-ensemble"), ("quench", "--quench-ensemble"),
+                          ("eq_low", "--eq-low-ensemble")):
+            chosen = (override.get(key) or {}).get("ensemble")
+            if chosen is None:
+                override.setdefault(key, {})["ensemble"] = "NVT"
+            elif str(chosen).upper() != "NVT":
+                print(f"Error: --engine torchsim runs NVT only; {flag} {chosen} is not "
+                      f"supported. Drop the flag (NVT is used) or use --engine ase.")
+                sys.exit(1)
+        print("  torch-sim engine: MD stages run NVT (fixed cell)")
 
         run_torchsim(snap_files, cfg_override=override, work_dir=quench_dir,
 

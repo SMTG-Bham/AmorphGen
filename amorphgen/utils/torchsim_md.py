@@ -27,14 +27,18 @@ _LOG_HEADER = (f"{'Step':>8}  {'Time_ps':>10}  {'T_K':>8}  {'Epot_eV':>12}  "
                f"{'Ekin_eV':>12}  {'Etot_eV':>12}  {'Vol_A3':>10}\n" + "-" * 84 + "\n")
 
 
-def _seed_torch(seed, stage: int, tag: int = 0):
+def _derive_seed(seed, stage: int, tag: int = 0) -> int:
+    """Integer seed for torch-sim's state generator, distinct per (seed,
+    stage, tag). torch-sim draws initial momenta and Langevin noise from
+    ``state.rng`` (NOT torch's global generator), which otherwise starts
+    from torch-sim's own fixed default seed, so every batch and every
+    resume would get identical velocities and noise. With ``seed=None`` a
+    fresh entropy seed is used so chunks and runs are still independent."""
     if seed is None:
-        return
-    import torch
-    s = int(np.random.SeedSequence([int(seed), int(stage), int(tag)]).generate_state(1)[0])
-    torch.manual_seed(s)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(s)
+        ss = np.random.SeedSequence()
+    else:
+        ss = np.random.SeedSequence([int(seed), int(stage), int(tag)])
+    return int(ss.generate_state(1, dtype=np.uint32)[0])
 
 
 def _state_to_atoms_with_momenta(state, model):
@@ -87,7 +91,7 @@ class _RunWriter:
 
 
 def batch_nvt(atoms_list, model, temperatures, n_steps: int, timestep_fs: float = 0.5,
-              friction: float = 0.01, seed=None, stage: int = 4,
+              friction: float = 0.01, seed=None, stage: int = 4, tag: int = 0,
               interval: int = TRAJ_LOG_INTERVAL, writers=None, log=print):
     """Batched NVT-Langevin MD of *atoms_list* for *n_steps*.
 
@@ -97,6 +101,9 @@ def batch_nvt(atoms_list, model, temperatures, n_steps: int, timestep_fs: float 
         Constant temperature, or a per-step schedule (K) for a ramp.
     friction : float
         Langevin friction in 1/fs (AmorphGen convention; 0.01 = ASE default).
+    tag : int
+        Extra seed component (chunk index, resume offset) so every batch of a
+        run and every resumed block gets its own noise stream.
     writers : list[_RunWriter], optional
         One per structure; each receives a frame every *interval* steps.
 
@@ -112,12 +119,14 @@ def batch_nvt(atoms_list, model, temperatures, n_steps: int, timestep_fs: float 
     if T_sched.ndim == 0:
         T_sched = np.full(int(n_steps), float(T_sched))
     assert len(T_sched) == n_steps, "temperature schedule must have n_steps entries"
-    _seed_torch(seed, stage)
     dt_ps = float(timestep_fs) / 1000.0
     gamma_ps = float(friction) * 1000.0
 
-    # initial state; momenta carried in from the Atoms if present, else sampled
+    # initial state; momenta carried in from the Atoms if present, else sampled.
+    # Seed the state's generator: it is what nvt_langevin_init (momenta) and
+    # the Langevin step (noise) use.
     state = ts.initialize_state(list(atoms_list), model.device, model.dtype)
+    state.rng = _derive_seed(seed, stage, tag)
     kT0 = float(T_sched[0]) * 8.617330337217213e-05
     md = nvt_langevin_init(state, model, kT=kT0)
     have_p = all(np.abs(a.get_momenta()).sum() > 0 for a in atoms_list)

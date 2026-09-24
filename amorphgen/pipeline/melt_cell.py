@@ -32,8 +32,8 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
     ase.Atoms — melted structure at T_end
     """
     global_cfg = merge_config(DEFAULT_CONFIG, cfg_override)
-    from ..utils.common import stage_rng, run_index_from_cwd
-    rng = stage_rng(global_cfg.get("seed"), 3, run_index_from_cwd())
+    from ..utils.common import stage_rng, run_index_for
+    rng = stage_rng(global_cfg.get("seed"), 3, run_index_for(global_cfg))
     cfg = global_cfg["melt"]
     ensemble = cfg.get("ensemble", "NPT").upper()
 

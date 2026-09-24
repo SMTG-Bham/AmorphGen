@@ -143,6 +143,12 @@ def run(snapshot_files: list[str],
         atoms.calc = calc
         orig_dir = os.getcwd()
         os.chdir(run_dir)
+        # the run's index feeds the per-run seed stream explicitly, so a
+        # single-snapshot run (which writes into work_dir, no run_NNNN/) and
+        # every SLURM array task still get their own velocities and noise
+        run_cfg = dict(cfg_override or {})
+        if run_cfg.get("run_index") is None:
+            run_cfg["run_index"] = int(run_name[4:])
 
         try:
             # MD stages get the resume flag for FRAME-level resume within
@@ -152,18 +158,18 @@ def run(snapshot_files: list[str],
             # remaining steps (cheap skip); optimisation (7) restarts whole.
             for s in stages:
                 if s == 4:
-                    atoms = equilibrate.run(atoms, cfg_override=cfg_override,
+                    atoms = equilibrate.run(atoms, cfg_override=run_cfg,
                                             calc=calc, stage="high",
                                             resume=resume)
                 elif s == 5:
-                    atoms = quench.run(atoms, cfg_override=cfg_override,
+                    atoms = quench.run(atoms, cfg_override=run_cfg,
                                        calc=calc, resume=resume)
                 elif s == 6:
-                    atoms = equilibrate.run(atoms, cfg_override=cfg_override,
+                    atoms = equilibrate.run(atoms, cfg_override=run_cfg,
                                             calc=calc, stage="low",
                                             resume=resume)
                 elif s == 7:
-                    atoms = final_opt.run(atoms, cfg_override=cfg_override, calc=calc)
+                    atoms = final_opt.run(atoms, cfg_override=run_cfg, calc=calc)
                 else:
                     raise ValueError(
                         f"batch_quench: unknown stage {s}. "
@@ -299,6 +305,7 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
 
     for c0 in range(0, len(runs), batch_size):
         chunk = runs[c0:c0 + batch_size]
+        ci = c0 // batch_size                   # chunk index: part of the noise seed
         dirs = [d for d, _ in chunk]
         atoms = [read(f) for _, f in chunk]
         if len(runs) > batch_size:
@@ -316,7 +323,7 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
                 ws = [_RunWriter(d, "stage4_eq.log", "stage4_eq_traj.xyz", append=done > 0, step_offset=done) for d in dirs]
                 print(f"  [Stage 4] NVT {c['T']} K, {n - done} steps")
                 atoms = batch_nvt(atoms, model, float(c["T"]), n - done, timestep_fs=float(c.get("timestep", 0.5)),
-                                  friction=float(c.get("friction", 0.01)), seed=seed, stage=4, writers=ws)
+                                  friction=float(c.get("friction", 0.01)), seed=seed, stage=4, tag=ci * 1_000_000 + done, writers=ws)
                 for d, a in zip(dirs, atoms):
                     write(os.path.join(d, "stage4_eq.xyz"), a, format="extxyz")
         if 5 in stages:
@@ -339,7 +346,7 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
                 print(f"  [Stage 5] quench {c['T_start']} -> {c['T_end']} K, {len(temps)} segments x {spt} steps"
                       + (f" (from step {done})" if done else ""))
                 atoms = batch_nvt(atoms, model, sched[done:], len(sched) - done, timestep_fs=dt,
-                                  friction=float(c.get("friction", 0.01)), seed=seed, stage=5, writers=ws)
+                                  friction=float(c.get("friction", 0.01)), seed=seed, stage=5, tag=ci * 1_000_000 + done, writers=ws)
                 for d, a in zip(dirs, atoms):
                     write(os.path.join(d, "stage5_quenched.xyz"), a, format="extxyz")
         if 6 in stages:
@@ -354,7 +361,7 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
                 ws = [_RunWriter(d, "stage6_eq.log", "stage6_eq_traj.xyz", append=done > 0, step_offset=done) for d in dirs]
                 print(f"  [Stage 6] NVT {c['T']} K, {n - done} steps")
                 atoms = batch_nvt(atoms, model, float(c["T"]), n - done, timestep_fs=float(c.get("timestep", 0.5)),
-                                  friction=float(c.get("friction", 0.01)), seed=seed, stage=6, writers=ws)
+                                  friction=float(c.get("friction", 0.01)), seed=seed, stage=6, tag=ci * 1_000_000 + done, writers=ws)
                 for d, a in zip(dirs, atoms):
                     write(os.path.join(d, "stage6_eq.xyz"), a, format="extxyz")
         if 7 in stages:

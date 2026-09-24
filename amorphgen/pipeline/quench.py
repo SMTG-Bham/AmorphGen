@@ -32,8 +32,8 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
     ase.Atoms — quenched structure at T_end
     """
     global_cfg = merge_config(DEFAULT_CONFIG, cfg_override)
-    from ..utils.common import stage_rng, run_index_from_cwd
-    rng = stage_rng(global_cfg.get("seed"), 5, run_index_from_cwd())
+    from ..utils.common import stage_rng, run_index_for
+    rng = stage_rng(global_cfg.get("seed"), 5, run_index_for(global_cfg))
     cfg = global_cfg["quench"]
     ensemble = cfg.get("ensemble", "NVT").upper()
 

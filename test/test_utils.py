@@ -385,3 +385,43 @@ class TestReviewFixesPhysics:
         assert _ci_get(MACE_FOUNDATION_MODELS, "MACE-MPA-0") == _ci_get(MACE_FOUNDATION_MODELS, "mace-mpa-0")
         assert _ci_get(SEVENNET_MODELS, "7NET-MF-OMPA") == _ci_get(SEVENNET_MODELS, "7net-mf-ompa")
         assert _ci_get(MACE_FOUNDATION_MODELS, "/some/path.model") == "/some/path.model"
+
+
+def test_torn_traj_format_repair_keeps_binary_format(tmp_path):
+    """A traj_format: traj trajectory keeps the default *_traj.xyz name; the
+    torn-frame repair must rewrite it as ASE traj, not as extxyz."""
+    from ase.build import bulk
+    from ase.io.trajectory import Trajectory
+    from amorphgen.utils.common import read_md_checkpoint
+    from ase.io import read
+    p = tmp_path / "stage4_eq_traj.xyz"
+    t = Trajectory(str(p), "w")
+    for _ in range(3):
+        t.write(bulk("Cu", cubic=True))
+    t.close()
+    import os
+    n = os.path.getsize(p)
+    with open(p, "r+b") as fh:
+        fh.truncate(int(n * 0.85))                   # torn last frame from a walltime kill
+    with pytest.warns(UserWarning, match="incomplete"):
+        res = read_md_checkpoint(str(p), interval=100)
+    assert res is not None and res[1] == 100          # 2 complete frames -> 100 steps done
+    assert open(p, "rb").read(8) == b"- of Ulm"       # rewritten as a binary trajectory, not extxyz
+    assert len(read(str(p), index=":")) == 2
+
+
+def test_run_index_sources(tmp_path, monkeypatch):
+    """run_NNNN/ cwd, then SLURM_ARRAY_TASK_ID, then 0; an explicit config
+    run_index beats them all, so array tasks sharing a --seed differ."""
+    import os
+    from amorphgen.utils.common import run_index_from_cwd, run_index_for, stage_rng
+    d = tmp_path / "run_0007"; d.mkdir(); monkeypatch.chdir(d)
+    assert run_index_from_cwd() == 7
+    e = tmp_path / "quench_runs"; e.mkdir(); monkeypatch.chdir(e)
+    monkeypatch.delenv("SLURM_ARRAY_TASK_ID", raising=False)
+    assert run_index_from_cwd() == 0
+    monkeypatch.setenv("SLURM_ARRAY_TASK_ID", "12")
+    assert run_index_from_cwd() == 12
+    assert run_index_for({"run_index": 3}) == 3 and run_index_for({}) == 12
+    a = stage_rng(5, 4, 12).random(3); b = stage_rng(5, 4, 3).random(3)
+    assert not np.allclose(a, b)

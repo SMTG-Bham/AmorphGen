@@ -214,9 +214,16 @@ What differs from the ASE path:
   card, so the chunk follows the cell size and the model. Give an integer to
   fix it (for 600-atom cells in float64 on a 40 GB card, 4 to 5 is the
   practical limit); on CPU `auto` means 16.
-- The `seed` seeds torch's generator per stage, so a batch is reproducible for
-  the same set of inputs and chunking; the thermostat noise stream is shared
-  across the runs of a chunk.
+- The `seed` seeds torch-sim's state generator per stage, chunk and resume
+  block, so a batch is reproducible for the same inputs and chunking and every
+  chunk draws its own velocities and thermostat noise. Without a seed each
+  batch gets fresh entropy, so ensemble members are independent either way.
+- SevenNet runs in float32 on this engine (its torch-sim wrapper accepts no
+  other precision); multi-fidelity checkpoints get `modal="mpa"` as on the ASE
+  path.
+- The hybrid mode switches the MD stages to NVT when no ensemble was chosen
+  (the pipeline default for stage 4 is NPT) and refuses an explicit NPT before
+  starting.
 - The thermostat is torch-sim's Langevin (same friction, `0.01/fs` by default,
   as ASE's) but not the same integrator step, so trajectories are statistically
   equivalent to the ASE path, not identical.

@@ -33,6 +33,7 @@ DEFAULT_CONFIG = {
     # initialisation and the Langevin thermostat of every MD stage (per-stage,
     # per-run streams via SeedSequence) and, in --random-gen, the placement.
     "seed": None,
+    "run_index": None,   # explicit run index for the per-run seed stream (--run-index)
     # Relaxation engine for the ensemble modes: "ase" (default) or "torchsim"
     # (batched, optional extra amorphgen[torchsim]).
     "engine": "ase",

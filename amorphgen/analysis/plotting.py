@@ -239,15 +239,12 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
     # gets one panel per cation-centred pair plus the anion's total over all
     # its cations (O-(Ga+In+Zn)). Single-element and alloy systems, which
     # have no cation-anion pair, fall back to every pair with CN > 0.5.
-    try:
-        from ..pipeline.random_gen import _classify_bond
-    except ImportError:
-        from amorphgen.pipeline.random_gen import _classify_bond
+    from .structure import is_bonding_pair
+    _elements = set(analyser.atoms_list[0].get_chemical_symbols())
 
     def _is_bond(pair):
         a, b = pair.split("-")
-        bt = _classify_bond(a, b)
-        return bt == "ionic" or (bt == "covalent" and a != b)
+        return is_bonding_pair(a, b, _elements)
 
     cn_data = analyser.coordination()
     bonded = {k: v for k, v in cn_data.items() if _is_bond(k)}
