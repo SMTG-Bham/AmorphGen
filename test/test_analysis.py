@@ -213,6 +213,8 @@ class TestStructureAnalyser:
         assert sa2._get_cutoff("O", "O") == 3.0 and sa2._get_cutoff("Si", "O") == 1.9
         tot = sa.total_coordination()
         assert set(tot) == {"O", "Si"} and tot["Si"]["mean"] > 0
+        only_o = sa.total_coordination(centre="O", partners=["Si"])
+        assert set(only_o) == {"O"} and only_o["O"]["mean"] == tot["O"]["mean"]
 
 
 class TestRDFNormalisation:

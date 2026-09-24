@@ -159,14 +159,26 @@ class StructureAnalyser:
     def _build_neighbour_dict(self, atoms):
         return build_neighbour_dict(atoms, self._max_cutoff, self._get_cutoff)
 
-    def total_coordination(self):
-        """Per-element first-shell coordination counting every *bonded*
-        partner type together (bonded = cation-anion or hetero covalent, the
-        same rule as the "Bonding coordination numbers" table).
+    def total_coordination(self, centre=None, partners=None):
+        """First-shell coordination of an element counting several partner
+        types together.
+
+        Parameters
+        ----------
+        centre : str, optional
+            Element at the centre (``"O"``). Default: every element.
+        partners : iterable of str, optional
+            Partner elements to count (``["Ga", "In"]``). Default: every
+            *bonded* partner type (bonded = cation-anion or hetero covalent,
+            the rule of the "Bonding coordination numbers" table). When given,
+            the named partners are counted within their pair cutoffs whether
+            or not the pair is classed as a bond.
 
         Returns ``{element: {"mean", "std", "min", "max", "distribution"}}``.
-        For IGZO this gives the total O coordination (Ga + In + Zn around O)
-        that the per-pair O-Ga / O-In / O-Zn entries only give in parts.
+        For IGZO the default gives the total O coordination (Ga + In + Zn
+        around O) that the per-pair O-Ga / O-In / O-Zn entries only give in
+        parts; ``centre="O", partners=["In", "Ga"]`` gives the count over the
+        two larger cations only.
         """
         from collections import Counter
         try:
@@ -178,11 +190,18 @@ class StructureAnalyser:
             bt = _classify_bond(a, b)
             return bt == "ionic" or (bt == "covalent" and a != b)
 
+        wanted = set(partners) if partners is not None else None
+
+        def count(a, b):
+            return (b in wanted) if wanted is not None else bonded(a, b)
+
         counts = {}
         for atoms in self.atoms_list:
             nbr, syms = self._build_neighbour_dict(atoms)
             for i, si in enumerate(syms):
-                cn = sum(1 for _, sj, _, _ in nbr[i] if bonded(si, sj))
+                if centre is not None and si != centre:
+                    continue
+                cn = sum(1 for _, sj, _, _ in nbr[i] if count(si, sj))
                 counts.setdefault(si, []).append(cn)
         out = {}
         for s, cns in counts.items():
@@ -834,3 +853,32 @@ class StructureAnalyser:
             Also save raw data as CSV files (default True).
         """
         return plot_analysis(self, **kwargs)
+
+
+def parse_total_cn_spec(spec):
+    """``"O"`` -> ("O", None); ``"O:Ga+In"`` -> ("O", ["Ga", "In"])."""
+    spec = str(spec).strip()
+    if ":" in spec:
+        centre, rest = spec.split(":", 1)
+        partners = [p.strip() for p in rest.replace(",", "+").split("+") if p.strip()]
+        return centre.strip(), partners
+    return spec, None
+
+
+def format_total_cn(sa, specs):
+    """Report block for requested total coordinations (``--total-cn``)."""
+    lines = ["\n  Total coordination (requested):"]
+    for spec in specs:
+        centre, partners = parse_total_cn_spec(spec)
+        tot = sa.total_coordination(centre=centre, partners=partners)
+        if centre not in tot:
+            lines.append(f"  {centre}: not present in the structure")
+            continue
+        d = tot[centre]
+        label = f"{centre}-({'+'.join(partners)})" if partners else f"{centre}-(all bonded)"
+        lines.append(f"  {label}: mean={d['mean']:.1f} +/- {d['std']:.1f} "
+                     f"[{d['min']},{d['max']}]")
+        parts = [f"CN={cn}: {pct:.1f}%" for cn, pct in sorted(d["distribution"].items())
+                 if pct >= 0.5]
+        lines.append("    Distribution: " + ", ".join(parts))
+    return "\n".join(lines)

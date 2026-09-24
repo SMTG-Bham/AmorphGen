@@ -313,6 +313,7 @@ analysis:
   save_report: report.txt
   save_plot: plots/
   pair_panels: true       # one panel per pair for g(r) and S_ab(q)
+  total_cn: [O, "O:In+Ga"]  # total coordination of a centre over chosen partners
   sq: true                # structure factor
   sq_weighting: neutron   # xray | neutron | unweighted
   sq_method: direct       # direct | ft

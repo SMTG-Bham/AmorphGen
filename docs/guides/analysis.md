@@ -180,8 +180,18 @@ every pair, so a per-pair override is easy to check.
 For elements bonded to more than one partner type (O in IGZO, bonded to
 Ga, In and Zn) the report adds a `Total coordination` block with the
 first-shell count over all bonded partners, next to the per-pair O–Ga,
-O–In and O–Zn entries. The same numbers come from
-`StructureAnalyser.total_coordination()`.
+O–In and O–Zn entries. The label reads centre first, then the partners in
+brackets, the same order as the per-pair entries (`O-Ga` is O with Ga
+around it). To choose the centre and the partners yourself, use
+`--total-cn` (repeatable) or the YAML list `total_cn:`:
+
+```bash
+amorphgen --analyse --input-dir DIR --total-cn O --total-cn "O:In+Ga"
+```
+
+`O` counts every bonded partner; `O:In+Ga` counts only the named ones.
+From Python, `sa.total_coordination(centre="O", partners=["In", "Ga"])`
+returns the same statistics.
 
 ## Structure factor S(q) and simulated XRD
 

@@ -327,4 +327,6 @@ orphan: true
   `cutoff.parse_cutoff_spec()` / `resolve_cutoffs()`.
 - **Total coordination** in the report for elements bonded to several partner types
   (O in IGZO: one line for O surrounded by Ga + In + Zn, next to the per-pair O-Ga,
-  O-In, O-Zn entries). `StructureAnalyser.total_coordination()`.
+  O-In, O-Zn entries). `StructureAnalyser.total_coordination(centre, partners)`;
+  `--total-cn O` / `--total-cn "O:In+Ga"` (repeatable; YAML `total_cn:`) request a
+  chosen centre and partner set.

@@ -429,6 +429,14 @@ def _add_arguments(p):
                            "of cations in edge-sharing pairs. Printed, appended "
                            "to --save-report, analysis_connectivity.csv under "
                            "--save-plot.")
+    g_an.add_argument("--total-cn", action="append", default=None, metavar="SPEC",
+                      help="Total first-shell coordination of one element over "
+                           "several partner types, repeatable. 'O' counts every "
+                           "bonded partner (O surrounded by Ga+In+Zn in IGZO); "
+                           "'O:In+Ga' counts only the named partners. YAML: "
+                           "total_cn: [O, 'O:In+Ga']. The report already "
+                           "prints the all-bonded total automatically for "
+                           "elements with more than one partner type.")
     g_an.add_argument("--check-dimers", action="store_true",
                       help="Report unphysical close contacts (O-O peroxide, "
                            "Cl-Cl, metal-metal dimers) below 0.85 x the "
@@ -1274,6 +1282,17 @@ def main():
             dimer_text = format_dimer_report(sa.dimer_report())
             print(dimer_text)
             text += "\n" + dimer_text
+
+        # Requested total coordinations: CLI (repeatable) > YAML list
+        total_cn = args.total_cn
+        if total_cn is None and "total_cn" in an_cfg:
+            y = an_cfg["total_cn"]
+            total_cn = [y] if isinstance(y, str) else list(y)
+        if total_cn:
+            from .analysis.analyser import format_total_cn
+            tcn_text = format_total_cn(sa, total_cn)
+            print(tcn_text)
+            text += "\n" + tcn_text
 
         # Save report: CLI > YAML
         report_path = args.save_report

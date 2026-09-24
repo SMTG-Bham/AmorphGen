@@ -241,6 +241,12 @@ class TestAnalyseMode:
         with pytest.raises(SystemExit):
             _run_cli(["--analyse", str(src), "--cutoff", "Ga-O=abc"], monkeypatch)
         assert "Error: could not convert" in capsys.readouterr().out
+        _run_cli(["--analyse", str(src), "--total-cn", "O", "--total-cn", "O:Ga",
+                  "--total-cn", "Xe"], monkeypatch)
+        out = capsys.readouterr().out
+        assert "Total coordination (requested):" in out
+        assert "O-(all bonded): mean=" in out and "O-(Ga): mean=" in out
+        assert "Xe: not present" in out
 
 
 # ─── --analyse with --reference ───────────────────────────────────────────
