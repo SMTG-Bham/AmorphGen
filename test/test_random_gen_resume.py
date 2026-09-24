@@ -159,3 +159,38 @@ def test_batch_path_keeps_auto_cn_tolerance_and_cn_aware_minsep(tmp_path, monkey
     target_cn, auto_tol = rg._auto_target_cn(comp)
     assert captured.get("target_cn") == target_cn
     assert captured.get("cn_tolerance") == auto_tol and auto_tol > 0
+
+
+class TestIndexSelection:
+    def test_parse_index_spec(self):
+        from amorphgen.utils.common import parse_index_spec
+        assert parse_index_spec("80-90") == set(range(80, 91))
+        assert parse_index_spec("0,5,7-9") == {0, 5, 7, 8, 9}
+        assert parse_index_spec([1, 2]) == {1, 2}
+        assert parse_index_spec("2-3", n_total=3) == {2}
+        with pytest.raises(ValueError):
+            parse_index_spec("9-2")
+
+    def test_random_gen_indices_match_full_run(self, tmp_path):
+        from amorphgen.pipeline.random_gen import batch_random
+        comp = {"Si": 8, "O": 16}
+        batch_random(comp, n_structures=6, output_dir=str(tmp_path / "full"), seed=7)
+        batch_random(comp, n_structures=6, output_dir=str(tmp_path / "part"), seed=7, indices="2-3")
+        made = sorted(p.name for p in (tmp_path / "part" / "random_initial").glob("*.xyz"))
+        assert made == ["random_0002.xyz", "random_0003.xyz"]
+        for k in (2, 3):
+            a = read(str(tmp_path / "part" / "random_initial" / f"random_{k:04d}.xyz"))
+            b = read(str(tmp_path / "full" / "random_initial" / f"random_{k:04d}.xyz"))
+            assert np.allclose(a.positions, b.positions)
+
+    def test_batch_optimize_indices_filter(self, tmp_path, monkeypatch, capsys):
+        from amorphgen.pipeline import opt_cell
+        src = tmp_path / "in"; src.mkdir()
+        from ase.build import bulk
+        for k in range(6):
+            write(str(src / f"random_{k:04d}.xyz"), bulk("Cu", "fcc", a=3.6, cubic=True), format="extxyz")
+        seen = []
+        monkeypatch.setattr(opt_cell, "run", lambda path, **kw: seen.append(os.path.basename(path)) or read(path))
+        opt_cell.batch_optimize(str(src), str(tmp_path / "o"), cfg_override={}, indices="1,4-5")
+        assert seen == ["random_0001.xyz", "random_0004.xyz", "random_0005.xyz"]
+        assert "index selection 1,4-5: 3 of 6 files" in capsys.readouterr().out

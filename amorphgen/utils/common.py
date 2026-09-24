@@ -319,6 +319,37 @@ def build_md_dynamics(atoms, ensemble: str = "NVT", T: float = 300.0,
 # Temperature ramp
 # ═════════════════════════════════════════════════════════════════════════════
 
+def parse_index_spec(spec, n_total: int | None = None) -> set[int]:
+    """``"80-90"``, ``"0,5,7-9"`` or a sequence of ints -> set of indices.
+
+    Ranges are inclusive. ``n_total`` (if given) bounds the result.
+    """
+    if spec is None:
+        return set()
+    if not isinstance(spec, str):
+        idx = {int(i) for i in spec}
+    else:
+        idx = set()
+        for part in spec.replace(" ", "").split(","):
+            if not part:
+                continue
+            if "-" in part:
+                a, b = part.split("-", 1)
+                if not (a.isdigit() and b.isdigit()):
+                    raise ValueError(f"bad index range '{part}' in '{spec}'")
+                a, b = int(a), int(b)
+                if b < a:
+                    raise ValueError(f"index range '{part}' runs backwards")
+                idx.update(range(a, b + 1))
+            elif part.isdigit():
+                idx.add(int(part))
+            else:
+                raise ValueError(f"bad index '{part}' in '{spec}'")
+    if n_total is not None:
+        idx = {i for i in idx if 0 <= i < n_total}
+    return idx
+
+
 def stage_rng(seed, stage: int, run_index: int = 0):
     """Per-stage, per-run NumPy Generator derived from the global ``seed``.
 

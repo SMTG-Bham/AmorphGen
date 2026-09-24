@@ -1,0 +1,47 @@
+# Literature reference values for germania glass (a-GeO2).
+# Pass to amorphgen via:
+#   amorphgen --analyse --input-dir DIR --reference examples/reference_a_GeO2.yaml
+#
+# Each "expected" range is a [low, high] interval. A computed value inside
+# the range is reported "match"; within ~5% of either bound is "concern";
+# otherwise "fail".
+#
+# a-GeO2 is the silica analogue with a smaller Ge-O-Ge angle (~130 deg vs
+# ~145 deg). It is the one oxide glass whose PARTIAL structure factors
+# (Ge-Ge, Ge-O, O-O) were measured individually by neutron isotope
+# substitution (Salmon et al. 2005) -- use --sq --sq-weighting neutron to
+# compare partial by partial, not just the total. Total neutron S(q) FSDP:
+# q1 = 1.5-1.6 A^-1, S ~ 1.35 (Sampath et al., PRL 90, 115502 (2003); Salmon 1.53).
+# NB: Peralta et al. (2008) normalise x-ray S(q) Ashcroft-Langreth style
+# (/ sum c_a f_a^2, so S_X -> 0 at q -> 0); AmorphGen's x-ray S(q) is Faber-Ziman
+# (/ <f>^2). Neutron totals are identical in both; convert before overlaying x-ray.
+
+system: a-GeO2
+
+references:
+  - "Salmon, Martin, Mason & Cuello, Nature 435, 75 (2005)  -- neutron isotope substitution; partial S_ab(q)"
+  - "Salmon, Barnes, Fischer & Cuello, J. Phys.: Condens. Matter 19, 415110 (2007)  -- structure of glassy GeO2"
+  - "Micoulaut, Cormier & Henderson, J. Phys.: Condens. Matter 18, R753 (2006)  -- review"
+
+density:
+  expected: [3.50, 3.80]      # 3.65 g/cm^3 (glass) +/- ~4%
+  units: "g/cm^3"
+
+bond_distances:
+  Ge-O:
+    expected: [1.70, 1.77]    # 1.73 A (neutron)
+    units: "A"
+
+coordination:
+  Ge-O:
+    mean_expected: [3.9, 4.1] # GeO4 tetrahedra
+  O-Ge:
+    mean_expected: [1.95, 2.05]
+
+bond_angles:
+  Ge-O-Ge:
+    expected: [125.0, 138.0]  # ~130-133 deg; narrower than Si-O-Si
+    units: "deg"
+  O-Ge-O:
+    expected: [105.0, 113.0]  # tetrahedral
+    units: "deg"

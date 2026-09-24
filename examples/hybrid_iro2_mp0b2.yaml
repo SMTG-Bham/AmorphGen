@@ -1,0 +1,47 @@
+# ── AmorphGen hybrid melt-quench config — a-IrO2, MACE-mp-0b2-medium ──
+#   Variant: stage-7 final opt uses a FREE CUBIC cell (cell_filter: cubic).
+#
+# Identical to hybrid_iro2_r2scan_cubic7.yaml EXCEPT the model — so the only
+# difference is the uMLIP. Used to isolate whether the short non-physical
+# Ir-Ir contacts (~2.4 A) are a matpes-r2scan artifact: mp-0b2 is PBE-based
+# (matches Li et al.'s AIMD functional) and was the best PBE model for density.
+#
+# Stages 4-6 are NVT / fixed cell (anneal at the random-gen estimator density
+# ~10.2 g/cm3); stage 7 then relaxes the cubic cell. Run via
+#   --hybrid-ensemble --input-dir DIR --format vasp
+
+model: mace-mp-0b2-medium
+device: cuda
+default_dtype: float64        # float32 ~2x faster for MD; float64 safer for energy conservation
+
+# ── Stage 7: final optimisation — FREE CUBIC CELL ──
+opt:
+  fmax: 0.05
+  max_steps: 500
+  cell_filter: cubic          # relax volume (shape stays cubic) at stage 7
+
+# ── Stage 4: High-T equilibration (melt) ──
+eq_high:
+  ensemble: NVT
+  T: 3000                     # K (matches Li et al. AIMD melt T for IrO2)
+  steps: 60000                # 30 ps at 0.5 fs
+  timestep: 0.5               # fs
+  friction: 0.01
+
+# ── Stage 5: Quench ──
+quench:
+  ensemble: NVT
+  T_start: 3000
+  T_end: 300
+  T_step: -100
+  rate: 50                    # K/ps  (3000->300 K over ~54 ps)
+  timestep: 0.5               # fs
+  friction: 0.01
+
+# ── Stage 6: Low-T equilibration ──
+eq_low:
+  ensemble: NVT
+  T: 300
+  steps: 40000                # 20 ps at 0.5 fs
+  timestep: 0.5               # fs
+  friction: 0.01

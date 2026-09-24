@@ -70,6 +70,9 @@ chgnet = [
 # SevenNet pulls in e3nn>=0.5, which conflicts with the MACE pin above.
 # Install SevenNet in its own environment, or with `[full]` if you accept
 # that MACE foundation-model loading may then break.
+torchsim = [
+    "torch-sim-atomistic>=0.6; python_version >= '3.12'",
+]
 sevennet = [
     "sevenn>=0.10",
 ]

@@ -1,0 +1,35 @@
+# Literature reference values for amorphous hafnia (a-HfO2).
+# Pass to amorphgen via:
+#   amorphgen --analyse --input-dir DIR --reference examples/reference_a_HfO2.yaml
+#
+# Each "expected" range is a [low, high] interval. A computed value inside
+# the range is reported "match"; within ~5% of either bound is "concern";
+# otherwise "fail".
+#
+# CAUTION: a-HfO2 is less tightly pinned than SiO2/GeO2. Its density and
+# coordination depend on deposition (ALD / sputtered / melt-quench models),
+# so the ranges below are deliberately broad. Hf is 6-7-fold coordinated
+# (no simple tetrahedral network), and bond angles have no standard
+# literature value, so none are listed. Tighten these against the specific
+# experimental film or model set you are comparing to.
+
+system: a-HfO2
+
+references:
+  - "Strand, Kaviani, Gao, El-Sayed, Afanas'ev & Shluger, J. Phys.: Condens. Matter 30, 233001 (2018)  -- review; DFT melt-quench a-HfO2 models"
+  - "monoclinic HfO2 (crystal): rho = 9.68 g/cm^3, <Hf-O> ~ 2.13 A, Hf CN = 7  -- upper reference point"
+
+density:
+  expected: [8.60, 9.80]      # amorphous films/models 8.6-9.7; m-HfO2 9.68
+  units: "g/cm^3"
+
+bond_distances:
+  Hf-O:
+    expected: [2.05, 2.20]    # ~2.10-2.15 A (EXAFS on films; DFT models)
+    units: "A"
+
+coordination:
+  Hf-O:
+    mean_expected: [6.0, 7.2] # mixed 6-/7-fold; models typically ~6.5
+  O-Hf:
+    mean_expected: [3.0, 3.6] # = (Hf CN)/2 by stoichiometry: 3.0-3.6

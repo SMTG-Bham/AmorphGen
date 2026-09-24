@@ -1,0 +1,41 @@
+# Literature reference values for vitreous silica (a-SiO2).
+# Pass to amorphgen via:
+#   amorphgen --analyse --input-dir DIR --reference examples/reference_a_SiO2.yaml
+#
+# Each "expected" range is a [low, high] interval. A computed value inside
+# the range is reported "match"; within ~5% of either bound is "concern";
+# otherwise "fail".
+#
+# a-SiO2 is the best-characterised glass: a near-perfect corner-sharing
+# SiO4 tetrahedral network. Ranges bracket the diffraction consensus with
+# room for ensemble variation in MLIP/DFT models.
+
+system: a-SiO2
+
+references:
+  - "Mozzi & Warren, J. Appl. Cryst. 2, 164 (1969)  -- X-ray; Si-O 1.62 A, Si-O-Si ~144 deg"
+  - "Grimley, Wright & Sinclair, J. Non-Cryst. Solids 119, 49 (1990)  -- neutron; Si-O 1.608 A"
+  - "Wright, J. Non-Cryst. Solids 179, 84 (1994)  -- review of neutron diffraction on v-SiO2"
+
+density:
+  expected: [2.10, 2.30]      # 2.20 g/cm^3 (fused silica); models 2.1-2.3
+  units: "g/cm^3"
+
+bond_distances:
+  Si-O:
+    expected: [1.58, 1.65]    # 1.608 (neutron) - 1.62 (X-ray) A
+    units: "A"
+
+coordination:
+  Si-O:
+    mean_expected: [3.9, 4.1] # SiO4 tetrahedra; deviations = defects
+  O-Si:
+    mean_expected: [1.95, 2.05] # bridging oxygen
+
+bond_angles:
+  Si-O-Si:
+    expected: [140.0, 155.0]  # 144 (X-ray, 1969) to ~148-152 (neutron/NMR); broad
+    units: "deg"
+  O-Si-O:
+    expected: [105.0, 113.0]  # tetrahedral 109.5 +/- ~4
+    units: "deg"

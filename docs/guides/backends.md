@@ -142,3 +142,85 @@ Or from the CLI:
 ```bash
 amorphgen --list-models
 ```
+
+
+## Batched relaxation with torch-sim (optional)
+
+[torch-sim](https://github.com/torchsim/torch-sim) relaxes many structures in one
+batched MLIP call with automatic GPU memory management. AmorphGen can hand the
+ensemble modes to it:
+
+```bash
+pip install "amorphgen[torchsim]"          # Python >= 3.12; CUDA GPU or CPU (no Apple MPS)
+
+amorphgen --batch-opt --input-dir random_structures/random_initial/ \
+    -m mace-mpa-0 --engine torchsim -o relaxed/
+amorphgen --random-gen --composition "GeO2*192" -n 20 --relax \
+    -m mace-mpa-0 --engine torchsim -o geo2_ensemble/
+```
+
+or `engine: torchsim` in the YAML. Only `--batch-opt` and `--random-gen --relax`
+use it: all structures are relaxed together with torch-sim's FIRE optimiser
+instead of one after another through ASE. Output files, names and logs are the
+same as with the ASE engine, so `--analyse` and everything downstream is
+unchanged.
+
+What carries over: `-f/--fmax`, `--opt-steps`, `-O` (LBFGS by default, or FIRE, BFGS,
+gradient descent) and the cell filter (`cubic` maps
+to torch-sim's unit-cell filter with hydrostatic strain, `FrechetCellFilter` to
+its Frechet filter, `none` to fixed cell). Supported models: MACE foundation
+models and `.model` files, SevenNet checkpoints, Lennard-Jones (single
+sigma/epsilon; used by the tests). CHGNet and Buckingham+Coulomb have no
+torch-sim implementation and raise a clear error; use the ASE engine for those.
+
+With a cell filter the convergence test also requires the pressure to be below
+`pressure_tol_gpa` (0.02 GPa by default, settable under `opt:`), so the returned
+cells are at zero pressure like the ASE path. torch-sim's own cell-force criterion
+is loose for cells of hundreds of atoms and left residuals of 0.1 to 0.3 GPa. The
+`.cif` convenience copy is written next to the `.xyz`, as in the ASE path. Results
+are not bit-identical to the ASE path (different optimiser implementations) and
+may land in different local minima, as any two optimisers do on a random start. The single-structure melt-quench
+pipeline always uses ASE. The MD stages of the hybrid mode are not batched yet.
+
+
+### Batched MD for the hybrid workflow
+
+`--hybrid-ensemble --engine torchsim` runs stages 4 to 7 for all input
+structures together: one batched NVT-Langevin integration for the
+high-temperature stage, the quench ramp (segment temperatures as a per-step
+schedule) and the low-temperature stage, then the batched relaxation. Every run
+still gets its own `run_NNNN/` directory with `stage4_eq.log`,
+`stage4_eq_traj.xyz` (a frame every 100 steps, with momenta), and so on, and
+the results are collected into `final/` as usual, so `--analyse` and the
+downstream tools see no difference.
+
+What differs from the ASE path:
+
+- NVT only. torch-sim's NPT is Langevin-based and is not mapped; a YAML with an
+  NPT stage raises a clear error.
+- Resume works at run level and at frame level. Runs whose
+  `final_amorphous.xyz` exists are skipped. For a chunk that was killed inside
+  an MD stage, `--resume` finds the last frame that every run of the chunk has
+  reached, cuts any run that got further back to that frame, and continues the
+  stage from there with the momenta stored in the trajectory, so a walltime
+  kill costs at most 100 steps per stage. Stages already finished for the whole
+  chunk are skipped. The chunking must be the same on resume (same inputs and
+  chunk size). An `auto` chunk size is therefore written to `batch_size.json`
+  in the work directory and read back on `--resume` instead of probing again,
+  so a resubmitted job script re-chunks identically.
+- Runs are processed in chunks of `--batch-size` structures. The default,
+  `auto`, integrates a short probe of the first structure on the GPU, reads
+  the peak memory it needed, and sizes the chunk to use about half of the
+  card, so the chunk follows the cell size and the model. Give an integer to
+  fix it (for 600-atom cells in float64 on a 40 GB card, 4 to 5 is the
+  practical limit); on CPU `auto` means 16.
+- The `seed` seeds torch's generator per stage, so a batch is reproducible for
+  the same set of inputs and chunking; the thermostat noise stream is shared
+  across the runs of a chunk.
+- The thermostat is torch-sim's Langevin (same friction, `0.01/fs` by default,
+  as ASE's) but not the same integrator step, so trajectories are statistically
+  equivalent to the ASE path, not identical.
+
+GPU tests for both engines live in `test/test_torchsim_gpu.py` (skipped without
+CUDA); `examples/run_gpu_tests_bluebear.slurm` runs them, plus the Tier 3 MACE
+integration tests, on one BlueBEAR GPU in about ten minutes.

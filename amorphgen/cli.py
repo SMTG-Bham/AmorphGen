@@ -206,6 +206,18 @@ def _add_arguments(p):
     g_pipe.add_argument("--stages", nargs="+", type=int,
                         default=[1, 2, 3, 4, 5, 6, 7], metavar="N",
                         help="Stages to run.")
+    g_pipe.add_argument("--engine", choices=["ase", "torchsim"], default=None,
+                        help="Relaxation engine for --batch-opt and --random-gen "
+                             "--relax: 'ase' (default, one structure at a time) or "
+                             "'torchsim' (all structures in one batched GPU/CPU "
+                             "call; pip install \"amorphgen[torchsim]\"; MACE, "
+                             "SevenNet or LJ models; no MPS).")
+    g_pipe.add_argument("--batch-size", default=None, metavar="N|auto",
+                        help="torch-sim engine: structures per batched chunk. "
+                             "Default auto: a one-structure GPU memory probe picks "
+                             "the largest chunk that fits (16 on CPU). Outputs are "
+                             "written after each chunk and MD trajectories every 100 steps, "
+                             "so --resume loses at most 100 steps.")
     g_pipe.add_argument("--seed", type=int, default=None, metavar="INT",
                         help="Global random seed: seeds random placement AND "
                              "the velocity initialisation / Langevin noise of "
@@ -337,6 +349,14 @@ def _add_arguments(p):
 
     # ── Batch optimisation ────────────────────────────────────────────────────
     g_bo = p.add_argument_group("batch-opt", "Used with --batch-opt.")
+    g_bo.add_argument("--indices", default=None, metavar="SPEC",
+                      help="Only these structure indices, e.g. 80-90 or 0,5,7-9 "
+                           "(inclusive). --random-gen: generate/relax only those "
+                           "indices (same seeds as a full run); --batch-opt: only "
+                           "files whose name ends in one of them.")
+    g_bo.add_argument("--pattern", default="*.xyz", metavar="GLOB",
+                      help="--batch-opt: input file glob (default *.xyz, then "
+                           "*.extxyz/*.vasp/*.cif).")
     g_bo.add_argument("--input-dir", default=None, metavar="DIR",
                      help="Directory of structures to optimise "
                           "(also used by --analyse).")
@@ -675,6 +695,7 @@ def _build_override(args, parser, explicit_only: bool = False,
     mapping = {
         "model": get("model"),
         "seed": get("seed"),
+        "engine": get("engine"),
         "model_path": get("model_path"),
         "device": get("device"),
         "default_dtype": get("default_dtype"),
@@ -944,6 +965,25 @@ def _run_hybrid_ensemble(args, override: dict) -> None:
           f"{args.input_dir}/")
     print(f"  Output: {work_dir}/")
     print(bar)
+
+    if override.get('engine', 'ase') == 'torchsim':
+
+        from .pipeline.batch_quench import run_torchsim
+
+        run_torchsim(snap_files, cfg_override=override, work_dir=quench_dir,
+
+                     stages=[4, 5, 6, 7], resume=args.resume,
+
+                     batch_size=(int(args.batch_size) if getattr(args, 'batch_size', None) and str(args.batch_size).isdigit() else getattr(args, 'batch_size', None)))
+
+        _collect_ensemble_final(quench_dir, final_dir, args.format,
+
+                                prefix='hybrid', fmt_map=_FORMAT_MAP)
+
+        print(f'\n{bar}\n  Hybrid ensemble complete (torch-sim) -> {final_dir}/\n{bar}')
+
+        return
+
 
     calc = get_calculator(
         **_classical_kwargs(override),
@@ -1517,8 +1557,9 @@ def main():
         if not do_relax and "relax" in rg_cfg:
             do_relax = rg_cfg["relax"]
 
+        use_torchsim = do_relax and override.get("engine", "ase") == "torchsim"
         calc = None
-        if do_relax:
+        if do_relax and not use_torchsim:
             calc = get_calculator(
                 **_classical_kwargs(override),
                 model=override.get("model", args.model),
@@ -1533,7 +1574,7 @@ def main():
             n_structures=n_structures,
             output_dir=args.work_dir,
             output_format=output_format,
-            relax=do_relax,
+            relax=do_relax and not use_torchsim,
             calc=calc,
             fmax=(args.fmax if _typed("-f", "--fmax")
                   else (override.get("opt", {}) or {}).get("fmax", 0.05)),
@@ -1550,10 +1591,21 @@ def main():
             dmax_factor=args.dmax_factor,
             repair_iters=args.repair_iters,
             retry_mode=args.retry_mode,
+            indices=args.indices,
             seed=(args.seed if args.seed is not None
                   else rg_cfg.get("seed", override.get("seed"))),
             resume=args.resume,
         )
+        if use_torchsim:
+            from .pipeline.opt_cell import batch_optimize
+            batch_optimize(input_dir=os.path.join(args.work_dir, "random_initial"),
+                           output_dir=os.path.join(args.work_dir, "random_opt"),
+                           cfg_override=override, calc=None, engine="torchsim",
+                           fmax=(args.fmax if _typed("-f", "--fmax")
+                                 else (override.get("opt", {}) or {}).get("fmax", 0.05)),
+                           max_steps=args.opt_steps, cell_filter=cell_filter,
+                           optimizer=args.optimizer, resume=args.resume,
+                           batch_size=(int(args.batch_size) if args.batch_size and str(args.batch_size).isdigit() else args.batch_size), indices=args.indices)
         return
 
     # ── Batch optimisation mode ──────────────────────────────────────────────
@@ -1565,6 +1617,13 @@ def main():
 
         from .pipeline.opt_cell import batch_optimize
         from .utils import get_calculator
+
+        if override.get("engine", "ase") == "torchsim":
+            batch_optimize(input_dir=args.input_dir, output_dir=args.work_dir,
+                           cfg_override=override, calc=None, engine="torchsim",
+                           resume=args.resume, batch_size=(int(args.batch_size) if args.batch_size and str(args.batch_size).isdigit() else args.batch_size),
+                           pattern=args.pattern, indices=args.indices)
+            return
 
         calc = get_calculator(
             **_classical_kwargs(override),
@@ -1580,6 +1639,8 @@ def main():
             output_dir=args.work_dir,
             cfg_override=override,
             calc=calc,
+            pattern=args.pattern,
+            indices=args.indices,
         )
         return
 

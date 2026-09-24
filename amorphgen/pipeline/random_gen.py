@@ -379,6 +379,11 @@ def _repair_undercoordination(
     return final_under
 
 
+# Consecutive empty 128-draw candidate batches after which a below-floor atom is
+# treated as saturated for the current repair pass (see _repair_min_cn).
+_REPAIR_EMPTY_BATCHES = 10
+
+
 def _repair_min_cn(
     positions: np.ndarray,
     n_placed: int,
@@ -463,47 +468,68 @@ def _repair_min_cn(
                 d_vec_o -= L * np.round(d_vec_o / L)
             old_bonded = (dm_sq > 0) & (np.sum(d_vec_o * d_vec_o, axis=1) <= dm_sq)
 
-            for _att in range(attempts_per_atom):
-                partner = int(rng.choice(seed_pool))
-                p_type = placed_type_idx[partner]
-                ms = float(np.sqrt(minsep_sq_table[placed_type_idx[idx], p_type]))
-                dm = float(dmax_table[placed_type_idx[idx], p_type])
-                d = rng.standard_normal(3)
-                d /= np.linalg.norm(d)
-                new_pos = positions[partner] + d * rng.uniform(ms, dm)
-                new_pos = new_pos - L * np.floor(new_pos / L) if pbc else new_pos
-
-                d_vec = new_pos - positions[others]
+            # Vectorised candidate search: draw BATCH trial positions at once
+            # (random acceptor, random direction, random bond length), screen
+            # them with one (BATCH x N) distance evaluation, and run the exact
+            # CN bookkeeping only on the survivors. Same acceptance rules as
+            # the old one-candidate-at-a-time loop, ~100x fewer NumPy calls.
+            BATCH = 128
+            t_idx = placed_type_idx[idx]
+            pos_others = positions[others]
+            fixed = False
+            n_drawn = 0
+            empty_batches = 0        # consecutive batches with no screened candidate
+            while n_drawn < attempts_per_atom and not fixed:
+                nb_draw = min(BATCH, attempts_per_atom - n_drawn)
+                n_drawn += nb_draw
+                partners = rng.choice(seed_pool, size=nb_draw)
+                p_types = placed_type_idx[partners]
+                dirs = rng.standard_normal((nb_draw, 3))
+                dirs /= np.linalg.norm(dirs, axis=1)[:, None]
+                ms_p = np.sqrt(minsep_sq_table[t_idx, p_types])
+                dm_p = dmax_table[t_idx, p_types]
+                radii = rng.uniform(ms_p, dm_p)
+                new_pos = positions[partners] + dirs * radii[:, None]
+                if pbc:
+                    new_pos = new_pos - L * np.floor(new_pos / L)
+                d_vec = new_pos[:, None, :] - pos_others[None, :, :]
                 if pbc:
                     d_vec -= L * np.round(d_vec / L)
-                d_sq = np.sum(d_vec * d_vec, axis=1)
-                if np.any(d_sq < ms_sq):
+                d_sq = np.einsum("bnk,bnk->bn", d_vec, d_vec)
+                ok = ~np.any(d_sq < ms_sq[None, :], axis=1)
+                new_bonded_all = (dm_sq[None, :] > 0) & (d_sq <= dm_sq[None, :])
+                ok &= new_bonded_all.sum(axis=1) >= floor_i
+                if not ok.any():
+                    empty_batches += 1
+                    # A saturated environment yields nothing batch after batch;
+                    # 3 empty batches (384 draws) is enough to call it, instead
+                    # of burning the whole 2500-draw budget on it every pass.
+                    if empty_batches >= _REPAIR_EMPTY_BATCHES:
+                        break
                     continue
-                new_bonded = (dm_sq > 0) & (d_sq <= dm_sq)
-                if int(np.sum(new_bonded)) < floor_i:
-                    continue  # still below floor — keep searching
-
-                cn_trial = cn_array.copy()
-                cn_trial[others[old_bonded]] -= 1
-                cn_trial[others[new_bonded]] += 1
-                cn_trial[idx] = int(np.sum(new_bonded))
-
-                nbr_t = target_cn_arr[placed_type_idx[others[new_bonded]]]
-                if np.any(cn_trial[others[new_bonded]] > nbr_t + cn_tolerance):
-                    continue
-                if cn_trial[idx] > target_cn_arr[placed_type_idx[idx]] + cn_tolerance:
-                    continue
-                if _below(cn_trial) >= _below(cn_array):
-                    continue  # don't create a new floor violation elsewhere
-                if _attained(cn_trial) < _attained(cn_array):
-                    continue  # don't drop a neighbour below its target CN
-
-                positions[idx] = new_pos
-                cn_array[:] = cn_trial
-                accepted += 1
-                improved = True
-                break
-            else:
+                empty_batches = 0
+                for c in np.where(ok)[0]:
+                    new_bonded = new_bonded_all[c]
+                    cn_trial = cn_array.copy()
+                    cn_trial[others[old_bonded]] -= 1
+                    cn_trial[others[new_bonded]] += 1
+                    cn_trial[idx] = int(np.sum(new_bonded))
+                    nbr_t = target_cn_arr[placed_type_idx[others[new_bonded]]]
+                    if np.any(cn_trial[others[new_bonded]] > nbr_t + cn_tolerance):
+                        continue
+                    if cn_trial[idx] > target_cn_arr[t_idx] + cn_tolerance:
+                        continue
+                    if _below(cn_trial) >= _below(cn_array):
+                        continue  # don't create a new floor violation elsewhere
+                    if _attained(cn_trial) < _attained(cn_array):
+                        continue  # don't drop a neighbour below its target CN
+                    positions[idx] = new_pos[c]
+                    cn_array[:] = cn_trial
+                    accepted += 1
+                    improved = True
+                    fixed = True
+                    break
+            if not fixed:
                 # Budget exhausted without a fix this pass — count it; after a
                 # few failed passes the atom is treated as saturated and skipped.
                 fail_count[int(idx)] = fail_count.get(int(idx), 0) + 1
@@ -1120,6 +1146,13 @@ def batch_random(
         os.makedirs(opt_dir, exist_ok=True)
     paths = []
 
+    # ── Index selection: `indices="80-90"` (or a list) generates only those
+    # structure indices; seeds are index-derived, so the files are identical
+    # to what a full run produces for the same indices. ──
+    from ..utils.common import parse_index_spec
+    selected = parse_index_spec(kwargs.pop("indices", None), n_structures)
+    not_selected = (set(range(n_structures)) - selected) if selected else set()
+
     # ── Resume support: scan for existing completed structures ──
     existing_indices = set()
     if resume:
@@ -1337,6 +1370,10 @@ def batch_random(
 
         while generated < n_structures:
             # Skip if resume and this index already completed
+            if generated in not_selected:
+                generated += 1
+                attempt = 0
+                continue
             if generated in existing_indices:
                 _log(f"  [{generated+1}/{n_structures}] Already exists "
                      f"-- skipping.", lf)

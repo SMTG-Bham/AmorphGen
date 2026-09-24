@@ -241,10 +241,17 @@ def batch_optimize(
     cfg_override: dict | None = None,
     calc=None,
     pattern: str = "*.xyz",
+    engine: str = "ase",
+    indices=None,
     **kwargs,
 ) -> list[str]:
     """
     Optimise all structures in a directory using opt_cell.run().
+
+    ``engine="torchsim"`` relaxes every structure in ONE batched call through
+    torch-sim (optional extra ``amorphgen[torchsim]``; MACE / SevenNet / LJ,
+    CUDA or CPU) instead of one after another through ASE. Output files and
+    names are identical to the ASE path.
 
     Parameters
     ----------
@@ -281,9 +288,25 @@ def batch_optimize(
         print(f"  Searched: {pattern}, *.extxyz, *.vasp, *.cif")
         return []
 
+    if indices:
+        # keep files whose stem ends in a number inside the selection
+        import re as _re
+        from ..utils.common import parse_index_spec
+        sel = parse_index_spec(indices)
+        keep = []
+        for f in files:
+            m = _re.search(r"(\d+)(?:_opt)?$", os.path.splitext(os.path.basename(f))[0])
+            if m and int(m.group(1)) in sel:
+                keep.append(f)
+        print(f"[BatchOpt] index selection {indices}: {len(keep)} of {len(files)} files")
+        files = keep
+        if not files:
+            return []
     if output_dir is None:
         output_dir = input_dir.rstrip("/") + "_opt"
     os.makedirs(output_dir, exist_ok=True)
+    if str(engine).lower() == "torchsim":
+        return _batch_optimize_torchsim(files, output_dir, cfg_override or {}, **kwargs)
 
     print(f"\n{'=' * 65}")
     print(f"  AmorphGen - Batch Optimisation")
@@ -313,3 +336,130 @@ def batch_optimize(
     print(f"{'=' * 65}\n")
 
     return output_paths
+
+
+def _batch_optimize_torchsim(files, output_dir, cfg, **kwargs):
+    """Batched torch-sim relaxation of *files*; same outputs as the ASE path.
+
+    Runs in chunks of ``batch_size`` structures (``opt: batch_size``, default
+    16) and writes each chunk's outputs before starting the next, so a
+    walltime kill loses at most one chunk. With ``resume=True`` inputs whose
+    ``<stem>_opt.<ext>`` already exists are skipped.
+    """
+    from ase.io import read, write
+    from ..utils.torchsim_engine import build_model, batch_relax
+    from ..utils.common import compute_density_gcm3, merge_config
+    from ..configs.default_config import DEFAULT_CONFIG
+    full = merge_config(DEFAULT_CONFIG, cfg)
+    stage_key = kwargs.get("stage_key", "opt")
+    ocfg = full.get(stage_key, full["opt"])
+    fmax = kwargs.get("fmax", ocfg.get("fmax", 0.01))
+    max_steps = kwargs.get("max_steps", ocfg.get("max_steps", 1000))
+    cell_filter = kwargs.get("cell_filter", ocfg.get("cell_filter", "cubic"))
+    optimizer = kwargs.get("optimizer", ocfg.get("optimizer", "LBFGS"))
+    pressure_tol = kwargs.get("pressure_tol_gpa", ocfg.get("pressure_tol_gpa", 0.02))
+    batch_size = kwargs.get("batch_size") or ocfg.get("batch_size") or "auto"
+    resume = bool(kwargs.get("resume", False))
+    out_fmt = ocfg.get("output_format", "xyz")
+    ext = {"xyz": ".xyz", "extxyz": ".xyz", "vasp": ".vasp", "cif": ".cif"}.get(out_fmt, ".xyz")
+    ase_fmt = {"xyz": "extxyz", "extxyz": "extxyz", "vasp": "vasp", "cif": "cif"}.get(out_fmt, "extxyz")
+    dtype = full.get("default_dtype")
+    dtype = "float64" if dtype in (None, "auto") else dtype
+    print(f"\n{'=' * 65}\n  AmorphGen - Batch Optimisation (torch-sim engine)\n"
+          f"  Input: {len(files)} structures  Output: {output_dir}/\n{'=' * 65}")
+    def _dest(f):
+        return os.path.join(output_dir, f"{os.path.splitext(os.path.basename(f))[0]}_opt{ext}")
+
+    todo = list(files)
+    done_paths = []
+    if resume:
+        todo = [f for f in files if not os.path.exists(_dest(f))]
+        done_paths = [_dest(f) for f in files if os.path.exists(_dest(f))]
+        if done_paths:
+            print(f"  [Resume] {len(done_paths)} already relaxed, {len(todo)} to do")
+    if not todo:
+        return done_paths
+
+    model = build_model(full.get("model", "mace-mpa-0"), device=full.get("device", "auto"),
+                        model_path=full.get("model_path"),
+                        classical_params=full.get("classical_params"), dtype=dtype)
+    paths = list(done_paths)
+    if str(batch_size).lower() == "auto":
+        from ..utils.torchsim_engine import estimate_batch_size
+        batch_size = estimate_batch_size(model, [read(f) for f in todo[:8]], fraction=0.4, fallback=16)
+    batch_size = int(batch_size)
+    n_chunks = (len(todo) + batch_size - 1) // batch_size
+    print(f"  [torch-sim] batch size {batch_size} -> {n_chunks} chunk(s) for {len(todo)} structures")
+
+    def _free_gpu():
+        import gc
+        gc.collect()                      # drop tensors held by dead frames first
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+
+    def _is_oom(exc):
+        return "out of memory" in str(exc).lower() or "OutOfMemoryError" in str(exc)
+
+    def _relax_chunk(chunk):
+        """Relax *chunk*; on a GPU out-of-memory error split it in half and retry.
+
+        The retry happens OUTSIDE the except block: inside it the traceback
+        keeps the failed attempt's tensors alive and the retry inherits a full
+        GPU. torch-sim's autobatcher is off because the chunking is done here
+        (its memory-estimation probe is itself the largest allocation).
+        """
+        _free_gpu()
+        oom = False
+        try:
+            return batch_relax([read(f) for f in chunk], model, fmax=fmax, max_steps=max_steps,
+                               cell_filter=cell_filter, optimizer=optimizer,
+                               pressure_tol_gpa=pressure_tol, autobatch=False)
+        except RuntimeError as exc:
+            if not _is_oom(exc) or len(chunk) == 1:
+                raise
+            oom = True
+        if oom:
+            _free_gpu()
+            half = len(chunk) // 2
+            print(f"  [torch-sim] GPU out of memory with {len(chunk)} structures; "
+                  f"retrying as {half} + {len(chunk) - half}")
+            first = _relax_chunk(chunk[:half])
+            _free_gpu()
+            return first + _relax_chunk(chunk[half:])
+
+    for ci in range(n_chunks):
+        chunk = todo[ci * batch_size:(ci + 1) * batch_size]
+        if n_chunks > 1:
+            print(f"  [torch-sim] chunk {ci + 1}/{n_chunks}: {len(chunk)} structures")
+        relaxed = _relax_chunk(chunk)
+        paths.extend(_write_torchsim_outputs(chunk, relaxed, output_dir, ext, ase_fmt))
+    _free_gpu()
+    return paths
+
+
+def _write_torchsim_outputs(files, relaxed, output_dir, ext, ase_fmt):
+    from ase.io import write
+    from ..utils.common import compute_density_gcm3
+    paths = []
+    for f, a in zip(files, relaxed):
+        stem = os.path.splitext(os.path.basename(f))[0]
+        dest = os.path.join(output_dir, f"{stem}_opt{ext}")
+        if ase_fmt == "vasp":
+            write(dest, a, format="vasp", sort=True, direct=True)
+        else:
+            write(dest, a, format=ase_fmt)
+        if ase_fmt != "cif":               # same convenience copy the ASE path writes
+            write(os.path.join(output_dir, f"{stem}_opt.cif"), a, format="cif")
+        with open(os.path.join(output_dir, f"{stem}_opt.log"), "w") as lf:
+            lf.write(f"torch-sim FIRE batch relaxation\nE = {a.get_potential_energy():.6f} eV  "
+                     f"max|F| = {a.info.get('max_force', float('nan')):.4f} eV/A  "
+                     f"density = {compute_density_gcm3(a):.3f} g/cm3  cell = {a.cell.lengths().round(4).tolist()}\n")
+        print(f"  {os.path.basename(dest):32s} E/atom = {a.get_potential_energy()/len(a):10.4f} eV  "
+              f"max|F| = {a.info.get('max_force', float('nan')):.3f}  rho = {compute_density_gcm3(a):.3f}")
+        paths.append(dest)
+    return paths

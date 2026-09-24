@@ -146,6 +146,7 @@ Only install the backend(s) you need. Classical potentials (Lennard-Jones, Bucki
 | generate random structures, analyse trajectories (RDF, CN, S(q), plots), run classical LJ/Buckingham pipelines | `pip install -e .` | ~80 MB, **no PyTorch** |
 | + MLIP relaxation & melt-quench MD | `pip install -e ".[mace]"` or `".[chgnet]"` | + PyTorch |
 | + everything (MACE + CHGNet) | `pip install -e ".[all]"` | + PyTorch |
+| + batched GPU relaxation of ensembles (`--engine torchsim`) | `pip install -e ".[torchsim]"` (Python 3.12+) | + torch-sim |
 
 With pip, from source (once AmorphGen is on PyPI, `pip install "amorphgen[mace,chgnet]"` replaces the clone):
 

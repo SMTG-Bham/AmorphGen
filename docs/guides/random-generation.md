@@ -211,3 +211,23 @@ ms = default_minsep(["In", "O"], target_cn={"In": 4})
 ```
 
 See {doc}`/api/random-gen` for the full API reference.
+
+
+## Selecting structure indices
+
+`--indices SPEC` restricts a run to given structure indices, inclusive ranges
+and lists both work (`80-90`, `0,5,7-9`). Because every index has its own seed
+derived from `--seed`, the structures produced are identical to the ones a full
+run would have produced for those indices, so an ensemble can be split across
+jobs or machines and merged afterwards:
+
+```bash
+amorphgen --random-gen --composition "InGaZnO4*50" -n 100 --seed 2026 --indices 0-49  -o igzo   # job A
+amorphgen --random-gen --composition "InGaZnO4*50" -n 100 --seed 2026 --indices 50-99 -o igzo   # job B
+
+# relax only some of them later (files whose name ends in the index)
+amorphgen --batch-opt --input-dir igzo/random_initial --indices 80-90 -m mace-mpa-0 -o igzo/random_opt
+```
+
+`--batch-opt` also takes `--pattern GLOB` to choose the input files. Both
+combine with `--resume` and `--engine torchsim`.

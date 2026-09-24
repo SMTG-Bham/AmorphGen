@@ -1,0 +1,46 @@
+# ── AmorphGen hybrid melt-quench config — a-IrO2, MACE-matpes-r2scan ──
+#
+# For pre-generated (random-gen) disordered structures. Runs stages 4-7:
+#   4 equilibrate (high-T) → 5 quench → 6 equilibrate (low-T) → 7 final opt.
+# Skips heating (stages 2-3) — inputs are already disordered.
+#
+# All MD is NVT with a FIXED cell, so the estimator density of the random-gen
+# input (~10.2 g/cm3 for IrO2) is preserved throughout — this is the reliable
+# route for uMLIPs (no barostat acting on out-of-distribution high-T stress;
+# cf. Li et al. 2025). Run via --hybrid-ensemble --input-dir DIR.
+
+model: mace-matpes-r2scan
+device: cuda
+default_dtype: float64        # float32 ~2x faster for MD; float64 safer for energy conservation
+
+# ── Stage 1 & 7: Optimisation (fixed volume) ──
+opt:
+  fmax: 0.05
+  max_steps: 500
+  cell_filter: none           # fixed cell — preserve the random-gen volume
+
+# ── Stage 4: High-T equilibration (melt) ──
+eq_high:
+  ensemble: NVT
+  T: 3000                     # K (matches Li et al. AIMD melt T for IrO2)
+  steps: 60000                # 30 ps at 0.5 fs
+  timestep: 0.5               # fs
+  friction: 0.01
+
+# ── Stage 5: Quench ──
+quench:
+  ensemble: NVT
+  T_start: 3000
+  T_end: 300
+  T_step: -100
+  rate: 50                    # K/ps  (3000->300 K over ~54 ps)
+  timestep: 0.5               # fs
+  friction: 0.01
+
+# ── Stage 6: Low-T equilibration ──
+eq_low:
+  ensemble: NVT
+  T: 300
+  steps: 40000                # 20 ps at 0.5 fs
+  timestep: 0.5               # fs
+  friction: 0.01

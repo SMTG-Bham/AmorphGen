@@ -125,12 +125,14 @@ class StructureAnalyser:
             file_list = list(source)
             return [read(f) for f in file_list], file_list
         if os.path.isdir(source):
-            files = sorted(
-                glob.glob(os.path.join(source, "*.xyz"))
-                + glob.glob(os.path.join(source, "*.extxyz"))
-                + glob.glob(os.path.join(source, "*.cif"))
-                + glob.glob(os.path.join(source, "*.vasp"))
-            )
+            # One structure per stem: the optimiser writes s_opt.xyz AND
+            # s_opt.cif (and .traj), which must not count twice. Priority
+            # xyz > extxyz > vasp > cif (the formats that carry energy first).
+            by_stem = {}
+            for ext in ("*.xyz", "*.extxyz", "*.vasp", "*.cif"):
+                for f in glob.glob(os.path.join(source, ext)):
+                    by_stem.setdefault(os.path.splitext(os.path.basename(f))[0], f)
+            files = [by_stem[k] for k in sorted(by_stem)]
             if not files:
                 raise FileNotFoundError(f"No structure files in {source}/")
             return [read(f) for f in files], files

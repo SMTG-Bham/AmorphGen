@@ -13,6 +13,8 @@ Provides functions to assess whether an MD equilibration run has converged:
 
 Usage
 -----
+::
+
     from amorphgen.utils.equilibration import convergence_report
 
     # Quick all-in-one convergence report

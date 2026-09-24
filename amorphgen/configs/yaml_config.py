@@ -29,6 +29,7 @@ _VALID_TOP_KEYS = {
     "model": str,
     "mace_model": (str, type(None)),
     "seed": (int, type(None)),
+    "engine": str,
     "model_path": (str, type(None)),
     "device": str,
     "default_dtype": str,

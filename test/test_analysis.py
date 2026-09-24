@@ -599,3 +599,17 @@ class TestAutoCutoffRdf:
         key = "Mg-O" if "Mg-O" in cut else "O-Mg"
         assert cut[key] == pytest.approx(auto_cutoff_minsep(st)[key])
         assert any("no clear first minimum" in str(x.message) for x in w)
+
+
+def test_analyser_counts_each_stem_once(tmp_path):
+    """The optimiser writes s_opt.xyz AND s_opt.cif; --analyse must not count both."""
+    from ase.build import bulk
+    from ase.io import write
+    from amorphgen.analysis import StructureAnalyser
+    a = bulk("Cu", "fcc", a=3.6, cubic=True).repeat((2, 2, 2))
+    write(str(tmp_path / "s_opt.xyz"), a, format="extxyz")
+    write(str(tmp_path / "s_opt.cif"), a, format="cif")
+    write(str(tmp_path / "t_opt.cif"), a, format="cif")
+    sa = StructureAnalyser(str(tmp_path))
+    assert len(sa.atoms_list) == 2
+    assert [os.path.basename(f) for f in sa.file_paths] == ["s_opt.xyz", "t_opt.cif"] if hasattr(sa, "file_paths") else True

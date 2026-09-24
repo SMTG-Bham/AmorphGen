@@ -71,6 +71,46 @@ orphan: true
 
 ### Added
 
+- **Random-gen placement 4–10x faster.** Profiling a 600-atom SiO2 placement showed 96 %
+  of the 39 s in the min-CN repair pass, a Python loop making 1.4 million small NumPy
+  calls. Its candidate search is now batched (128 trial positions per distance
+  evaluation) and an atom whose environment yields no candidate for 10 consecutive
+  batches is treated as saturated for that pass instead of exhausting the 2500-draw
+  budget. 600-atom SiO2: 33 s -> 9 s; 350-atom IGZO: unchanged 3.3 s; repair outcome
+  within the seed-to-seed scatter of the old pass. **Behaviour change:** the random
+  draws of the repair pass differ, so a given `seed` gives different (still
+  reproducible) structures than rc3-era builds for compositions that need repair.
+
+- **Batched MD through torch-sim** (`--hybrid-ensemble --engine torchsim`): stages 4–7 run
+  for all structures at once (NVT-Langevin with per-step temperature schedules for the
+  quench, then batched relaxation). Same per-run files and `final/` collection as the ASE
+  path; NVT only; seeded. `amorphgen/utils/torchsim_md.py`, `batch_quench.run_torchsim`.
+  Resume is run-level and frame-level: a chunk killed inside an MD stage continues
+  from the last frame common to all its runs (momenta included), so a walltime kill
+  costs at most 100 steps.
+
+- **`--batch-size auto`** (the new default for the torch-sim engine): the chunk size is
+  taken from a GPU memory probe of the first structure (a short relaxation or MD
+  block), using about 40% (relaxation) or 50% (MD) of the card. An integer still fixes
+  it; on CPU `auto` is 16. `torchsim_engine.estimate_batch_size()`.
+
+- **`--indices SPEC`** (`80-90`, `0,5,7-9`) for `--random-gen` and `--batch-opt`, and
+  `--pattern GLOB` for `--batch-opt`: generate or relax only selected structure
+  indices. Seeds are index-derived, so a split ensemble is identical to a full run.
+
+- **Optional torch-sim engine** (`pip install "amorphgen[torchsim]"`, `--engine torchsim`
+  or `engine: torchsim`): `--batch-opt` and `--random-gen --relax` relax all structures in
+  one batched torch-sim FIRE call (MACE, SevenNet, LJ; CUDA or CPU) instead of one after
+  another through ASE; outputs are identical in name and format. CHGNet/Buckingham stay on
+  the ASE engine. Python 3.12+ only; no Apple MPS. The optimiser (`-O`) carries over
+  (LBFGS default) and, with a cell filter, convergence requires |P| < `pressure_tol_gpa`
+  (default 0.02 GPa) as well as the force tolerance. Relaxation runs in chunks
+  (`--batch-size`, default `auto`, see below) with outputs written per chunk, and `--resume` skips
+  already-relaxed structures. The GPU cache is cleared between chunks and a CUDA
+  out-of-memory error splits the chunk in half and retries instead of aborting the job.
+- **`--analyse` counts each structure once** when a directory holds the same stem in
+  several formats (the optimiser writes `.xyz` and `.cif`); priority xyz > extxyz > vasp > cif.
+
 - **Global `seed` / `--seed`** for end-to-end reproducibility. Previously only the
   random placement was seeded; the velocity initialisation and the Langevin thermostat
   of stages 2–6 used ASE's unseeded generator, so two runs from the same seed gave

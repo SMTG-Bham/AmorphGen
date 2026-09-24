@@ -1,0 +1,43 @@
+# ── AmorphGen hybrid melt-quench — LARGE a-SiO2 for S(q)/FSDP, MACE-mpa-0 ──
+#   Big box (Si160O320, ~480 atoms, ~19.5 A) so the first sharp diffraction
+#   peak (FSDP, Q~1.5 1/A) is resolved -> use with structure_factor_direct().
+#
+# Stages 4-6 NVT / fixed cell (anneal at the estimator density ~2.15 g/cm3);
+# stage 7 relaxes the cubic cell so MACE picks the final volume (~2.2 expected).
+# Run via --hybrid-ensemble --input-dir DIR --format vasp.
+
+model: mace-mpa-0
+device: cuda
+default_dtype: float64
+
+# ── Stage 7: final optimisation — FREE CUBIC CELL ──
+opt:
+  fmax: 0.05
+  max_steps: 800
+  cell_filter: cubic
+
+# ── Stage 4: high-T melt ──
+eq_high:
+  ensemble: NVT
+  T: 3000                # K (SiO2 melts ~2000 K; 3000 K ensures a mixed liquid)
+  steps: 40000           # 20 ps at 0.5 fs
+  timestep: 0.5
+  friction: 0.01
+
+# ── Stage 5: quench ──
+quench:
+  ensemble: NVT
+  T_start: 3000
+  T_end: 300
+  T_step: -100
+  rate: 50               # K/ps  (3000->300 over ~54 ps)
+  timestep: 0.5
+  friction: 0.01
+
+# ── Stage 6: low-T equilibration ──
+eq_low:
+  ensemble: NVT
+  T: 300
+  steps: 20000           # 10 ps at 0.5 fs
+  timestep: 0.5
+  friction: 0.01
