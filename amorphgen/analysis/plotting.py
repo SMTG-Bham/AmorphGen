@@ -128,7 +128,7 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
                   save_csv=True, show_total_rdf=False,
                   smearing=DEFAULT_SMEARING,
                   dpi=300, save_pdf=False, show_title=False,
-                  pair_panels=False):
+                  pair_panels=False, total_cn=None):
     """
     Generate and save analysis plots and raw data.
 
@@ -149,6 +149,9 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
     pair_panels : bool
         Also write ``{prefix}_rdf_panels.png``, one small panel per pair
         (default False).
+    total_cn : list of str, optional
+        Total-coordination requests (``"O"``, ``"O:In+Ga"``) plotted as
+        ``{prefix}_cn_total.png`` with a CSV.
     """
     import matplotlib
     matplotlib.use("Agg")
@@ -178,14 +181,15 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
         ax.axhline(y=1, color='0.5', linestyle='--', linewidth=0.8, alpha=0.6,
                    zorder=0)
 
-    # Show total RDF for single-element systems, or if explicitly requested
+    # The total g(r) always goes into the CSV; it is drawn for single-element
+    # systems or when requested (--total-rdf), so a multi-pair plot stays legible.
+    rdf_total = analyser.rdf(pair=None, rmax=rmax, sigma=smearing)
+    r = np.array(rdf_total["r"])
+    g_r_total = np.array(rdf_total["g_r"])
+    rdf_csv_data["Total"] = (r, g_r_total)
     if len(unique) == 1 or show_total_rdf:
-        rdf_total = analyser.rdf(pair=None, rmax=rmax, sigma=smearing)
-        r = np.array(rdf_total["r"])
-        g_r_total = np.array(rdf_total["g_r"])
         ax.plot(r, g_r_total, label="Total", linewidth=2.0,
                 color='black', linestyle='--' if len(unique) > 1 else '-')
-        rdf_csv_data["Total"] = (r, g_r_total)
 
     for i, pair in enumerate(pairs):
         rdf_data = analyser.rdf(pair=pair, rmax=rmax, sigma=smearing)
@@ -229,18 +233,81 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
         print(f"  Saved: {rdf_csv_path}")
 
     # ── 2. CN distribution ───────────────────────────────────────────
-    # When an A-B / B-A reciprocal pair exists (e.g. Si-O and O-Si),
-    # use the mirrored-bars layout: bonding CN on top, mirrored counterpart
-    # below the zero line. Otherwise fall back to side-by-side panels.
+    # Only BONDED pairs are plotted (cation-anion, hetero covalent), the same
+    # rule as the report's "Bonding coordination numbers". A binary oxide
+    # (Si-O / O-Si) gets the mirrored-bars layout; a multi-cation compound
+    # gets one panel per cation-centred pair plus the anion's total over all
+    # its cations (O-(Ga+In+Zn)). Single-element and alloy systems, which
+    # have no cation-anion pair, fall back to every pair with CN > 0.5.
+    try:
+        from ..pipeline.random_gen import _classify_bond
+    except ImportError:
+        from amorphgen.pipeline.random_gen import _classify_bond
+
+    def _is_bond(pair):
+        a, b = pair.split("-")
+        bt = _classify_bond(a, b)
+        return bt == "ionic" or (bt == "covalent" and a != b)
+
     cn_data = analyser.coordination()
-    cn_pairs = {k: v for k, v in cn_data.items() if v["mean"] > 0.5}
+    bonded = {k: v for k, v in cn_data.items() if _is_bond(k)}
+    if bonded:
+        cn_pairs = dict(bonded)          # a bonded pair is shown whatever its CN
+    else:
+        cn_pairs = {k: v for k, v in cn_data.items() if v["mean"] > 0.5}
+
+    # anion totals: centre elements bonded to more than one partner type
+    partners = {}
+    for k in bonded:
+        a, b = k.split("-")
+        partners.setdefault(a, []).append(b)
+    totals = {}
+    for centre, ps in partners.items():
+        if len(ps) > 1:
+            t = analyser.total_coordination(centre=centre)
+            if centre in t:
+                totals[f"{centre}-({'+'.join(sorted(ps))})"] = t[centre]
+
+    def _bar_panel(ax, label, data, color):
+        cn_vals = sorted(data["distribution"].keys())
+        pcts = [data["distribution"][cn] for cn in cn_vals]
+        bars = ax.bar(cn_vals, pcts, color=color, edgecolor='black', linewidth=0.4)
+        ax.set_xlabel(f"{label} CN")
+        ax.set_ylabel("Fraction (%)")
+        ax.set_xticks(cn_vals)
+        ax.set_ylim(0, max(pcts, default=1) * 1.22)     # room for the mean box
+        ax.text(0.97, 0.95, f"mean = {data['mean']:.1f}",
+                transform=ax.transAxes, ha='right', va='top', fontsize=9,
+                bbox=dict(boxstyle='round,pad=0.3', fc='white', ec='0.7', alpha=0.85))
+        for bar, pct in zip(bars, pcts):
+            if pct > 2:
+                ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
+                        f"{pct:.0f}%", ha='center', va='bottom', fontsize=8)
+        _apply_pub_style(ax)
+
+    def _panels_figure(items, base):
+        fig, axes = plt.subplots(1, len(items), figsize=(3.8 * len(items), 3.8),
+                                 squeeze=False)
+        for idx, (label, data) in enumerate(items.items()):
+            _bar_panel(axes[0, idx], label, data, _PALETTE[idx % len(_PALETTE)])
+        if show_title:
+            fig.suptitle(f"CN Distribution — {formula}", fontsize=12, y=1.02)
+        fig.tight_layout()
+        _save_fig(fig, base, dpi, save_pdf)
+        plt.close(fig)
 
     if cn_pairs:
         from matplotlib.ticker import FuncFormatter
-        top_key, bot_key = _find_reciprocal_pair(cn_pairs)
+        # cation-centred bonded pairs (Ga-O, In-O, Zn-O): the reciprocal
+        # anion-centred ones (O-Ga, ...) are the mirrored half or the total
+        centred = [k for k in cn_pairs if k.split("-")[0] in partners
+                   and len(partners[k.split("-")[0]]) == 1] if bonded else []
+        top_key, bot_key = (None, None)
+        if bonded and not totals:
+            top_key, bot_key = _find_reciprocal_pair(cn_pairs)
 
         if top_key and bot_key:
-            # ── Mirrored layout ──
+            # ── Mirrored layout (binary compound) ──
             top = cn_pairs[top_key]["distribution"]
             bot = cn_pairs[bot_key]["distribution"]
             all_cn = sorted(set(top) | set(bot))
@@ -275,53 +342,45 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
             _save_fig(fig, os.path.join(output_dir, f"{prefix}_cn"),
                       dpi, save_pdf)
             plt.close(fig)
-
         else:
-            # ── Side-by-side panels (mono-element or multi-cation) ──
-            n_panels = len(cn_pairs)
-            fig, axes = plt.subplots(1, n_panels,
-                                     figsize=(3.8 * n_panels, 3.8),
-                                     squeeze=False)
-            for idx, (pair, data) in enumerate(cn_pairs.items()):
-                ax = axes[0, idx]
-                cn_vals = sorted(data["distribution"].keys())
-                pcts = [data["distribution"][cn] for cn in cn_vals]
-                bars = ax.bar(cn_vals, pcts,
-                              color=_PALETTE[idx % len(_PALETTE)],
-                              edgecolor='black', linewidth=0.4)
-                ax.set_xlabel(f"{pair} CN")
-                ax.set_ylabel("Fraction (%)")
-                ax.set_xticks(cn_vals)
-                ax.text(0.97, 0.95, f"mean = {data['mean']:.1f}",
-                        transform=ax.transAxes, ha='right', va='top',
-                        fontsize=9,
-                        bbox=dict(boxstyle='round,pad=0.3', fc='white',
-                                  ec='0.7', alpha=0.85))
-                for bar, pct in zip(bars, pcts):
-                    if pct > 2:
-                        ax.text(bar.get_x() + bar.get_width() / 2,
-                                bar.get_height() + 1,
-                                f"{pct:.0f}%", ha='center', va='bottom',
-                                fontsize=8)
-                _apply_pub_style(ax)
-            if show_title:
-                fig.suptitle(f"CN Distribution — {formula}", fontsize=12,
-                             y=1.02)
-            fig.tight_layout()
-            _save_fig(fig, os.path.join(output_dir, f"{prefix}_cn"),
-                      dpi, save_pdf)
-            plt.close(fig)
+            # ── Side-by-side panels: multi-cation (Ga-O, In-O, Zn-O, then
+            #    O-(Ga+In+Zn)), or mono-element / alloy (every pair) ──
+            items = {k: cn_pairs[k] for k in centred} if totals else dict(cn_pairs)
+            if totals:
+                items.update(totals)
+            _panels_figure(items, os.path.join(output_dir, f"{prefix}_cn"))
 
         if save_csv:
             cn_csv_path = os.path.join(output_dir, f"{prefix}_cn.csv")
             with open(cn_csv_path, "w") as f:
                 f.write("pair,CN,fraction(%),count\n")
-                for pair, data in cn_pairs.items():
-                    total_atoms = data["total_atoms"]
+                rows = dict(cn_pairs); rows.update(totals)
+                for pair, data in rows.items():
+                    total_atoms = data.get("total_atoms", 0)
                     for cn_val, pct in sorted(data["distribution"].items()):
-                        count = int(round(pct * total_atoms / 100))
+                        count = int(round(pct * total_atoms / 100)) if total_atoms else ""
                         f.write(f"{pair},{cn_val},{pct:.1f},{count}\n")
             print(f"  Saved: {cn_csv_path}")
+
+    # ── 2b. Requested totals (--total-cn / total_cn:) ────────────────
+    if total_cn:
+        from .analyser import parse_total_cn_spec
+        items = {}
+        for spec in total_cn:
+            centre, ps = parse_total_cn_spec(spec)
+            t = analyser.total_coordination(centre=centre, partners=ps)
+            if centre in t:
+                items[f"{centre}-({'+'.join(ps)})" if ps else f"{centre}-(all bonded)"] = t[centre]
+        if items:
+            _panels_figure(items, os.path.join(output_dir, f"{prefix}_cn_total"))
+            if save_csv:
+                path = os.path.join(output_dir, f"{prefix}_cn_total.csv")
+                with open(path, "w") as f:
+                    f.write("centre,CN,fraction(%)\n")
+                    for label, data in items.items():
+                        for cn_val, pct in sorted(data["distribution"].items()):
+                            f.write(f"{label},{cn_val},{pct:.1f}\n")
+                print(f"  Saved: {path}")
 
     # ── 3. Bond angle distribution ───────────────────────────────────
     all_angle_data = analyser._compute_all_angles()

@@ -1339,6 +1339,8 @@ def main():
             plot_kwargs["show_title"] = True
         if args.pair_panels or an_cfg.get("pair_panels", False):
             plot_kwargs["pair_panels"] = True
+        if total_cn:
+            plot_kwargs["total_cn"] = list(total_cn)
         if plot_dir:
             sa.plot(output_dir=plot_dir, **plot_kwargs)
 

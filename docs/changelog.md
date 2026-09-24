@@ -330,3 +330,15 @@ orphan: true
   O-In, O-Zn entries). `StructureAnalyser.total_coordination(centre, partners)`;
   `--total-cn O` / `--total-cn "O:In+Ga"` (repeatable; YAML `total_cn:`) request a
   chosen centre and partner set.
+  Requested totals are also plotted (`analysis_cn_total.png` + CSV).
+- **Total g(r) always in `analysis_rdf.csv`** (`g(r)_Total` column) for every system;
+  the plot still draws it only with `--total-rdf`.
+
+### Fixed
+
+- **CN plot of multi-cation compounds showed a cation-cation pair.** For IGZO the
+  mirrored-bars layout picked Ga-In / In-Ga (second-shell contacts) because the
+  reciprocal-pair search ran over every pair. The plot now uses bonded pairs only:
+  binary oxides keep the mirrored layout, multi-cation compounds get one panel per
+  cation-centred pair (Ga-O, In-O, Zn-O) plus the anion total (O-(Ga+In+Zn)), which
+  also goes into `analysis_cn.csv`.

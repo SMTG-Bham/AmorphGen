@@ -690,11 +690,12 @@ For each ensemble, ``--analyse --save-plot DIR`` writes:
 | File | What's in it |
 |---|---|
 | `analysis_rdf.png` / `.pdf` | Partial RDFs for all unique pairs in the system. One line per pair using the Okabe-Ito palette. |
-| `analysis_rdf.csv` | Columns: ``r(A), g(r)_<pair1>, g(r)_<pair2>, …``. Re-plot in any tool. |
+| `analysis_rdf.csv` | Columns: ``r(A), g(r)_Total, g(r)_<pair1>, g(r)_<pair2>, …``. The total g(r) is always in the CSV; it is drawn only with ``--total-rdf``. Re-plot in any tool. |
 | `analysis_rdf_panels.png` / `.pdf` | With ``--pair-panels``: the same partials, one small panel per pair (shared axes). |
 | `analysis_sq_partials.png`, `analysis_sq_partials_panels.png` | With ``--sq --sq-partials``: the Faber-Ziman partials S_ab(q) on one axis and, with ``--pair-panels``, one panel per pair. |
-| `analysis_cn.png` / `.pdf` | Coordination distribution. For binary AB systems (e.g. SiO₂), shown as **mirrored bars**: A-B on top, B-A reflected below the zero line. For mono-element systems (a-Si), shown side-by-side. |
-| `analysis_cn.csv` | Per-pair CN counts as percentages of the centred atom population. |
+| `analysis_cn.png` / `.pdf` | Coordination distribution of the bonded pairs. Binary AB systems (SiO₂) as **mirrored bars**: A-B on top, B-A reflected below the zero line. Multi-cation compounds (IGZO) as one panel per cation-centred pair (Ga-O, In-O, Zn-O) plus the anion total over all its cations (O-(Ga+In+Zn)). Mono-element systems (a-Si) and alloys side-by-side. |
+| `analysis_cn.csv` | Per-pair CN counts as percentages of the centred atom population, plus the anion-total rows. |
+| `analysis_cn_total.png` / `.csv` | With ``--total-cn``: one panel per requested total (``O``, ``O:In+Ga``). |
 | `analysis_angles.png` / `.pdf` | Bond-angle histograms (normalised). One line per triplet. |
 | `analysis_angles.csv` | Raw angle values, one row per triplet observation. |
 | `analysis_density.png` / `.pdf` | Per-structure density violin with jittered scatter and mean ± std label. |

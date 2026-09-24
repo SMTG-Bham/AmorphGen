@@ -241,12 +241,19 @@ class TestAnalyseMode:
         with pytest.raises(SystemExit):
             _run_cli(["--analyse", str(src), "--cutoff", "Ga-O=abc"], monkeypatch)
         assert "Error: could not convert" in capsys.readouterr().out
+        plots = tmp_path / "cnplots"
         _run_cli(["--analyse", str(src), "--total-cn", "O", "--total-cn", "O:Ga",
-                  "--total-cn", "Xe"], monkeypatch)
+                  "--total-cn", "Xe", "--save-plot", str(plots)], monkeypatch)
         out = capsys.readouterr().out
         assert "Total coordination (requested):" in out
         assert "O-(all bonded): mean=" in out and "O-(Ga): mean=" in out
         assert "Xe: not present" in out
+        assert (plots / "analysis_cn_total.png").exists()
+        assert "g(r)_Total" in (plots / "analysis_rdf.csv").read_text().splitlines()[0]
+        cn_csv = (plots / "analysis_cn.csv").read_text()
+        # multi-cation: bonded pairs + the anion total, no cation-cation pair
+        assert "O-(Ga+Zn)," in cn_csv and "Ga-O," in cn_csv and "Ga-Zn," not in cn_csv
+        assert (plots / "analysis_cn_total.csv").read_text().count("O-(Ga)") > 0
 
 
 # ─── --analyse with --reference ───────────────────────────────────────────
