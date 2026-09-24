@@ -47,6 +47,28 @@ amorphgen --batch-quench \
 
 This skips already-completed structures and continues from where the previous job left off.
 
+### Ensembles on the torch-sim engine
+
+```bash
+amorphgen --hybrid-ensemble \
+    --input-dir random_structures/random_opt/ \
+    --config hybrid.yaml \
+    --model mace-mpa-0 --device cuda \
+    --engine torchsim --batch-size auto \
+    --work-dir hybrid_run/ --resume
+```
+
+With `--engine torchsim` (see {doc}`backends`) the structures are processed
+in batched chunks. Relaxed structures are written after every chunk and MD
+trajectories every 100 steps, so a walltime kill loses at most one chunk of
+relaxation or 100 MD steps: `--resume` skips finished runs, continues a
+partly done MD stage from the last frame common to the chunk, and reuses the
+chunk size recorded in `batch_size.json` so the chunking is identical.
+Resubmitting the same job script until the log reports the ensemble complete
+is the intended way to run a large ensemble through a short queue. Put
+`export PYTHONUNBUFFERED=1` in the script, otherwise the progress messages
+only appear in the log when the job ends.
+
 ### Python API
 
 ```python

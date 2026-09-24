@@ -110,6 +110,28 @@ amorphgen --batch-quench \
     --resume
 ```
 
+## 4. Ensembles on a GPU with the torch-sim engine
+
+With `pip install "amorphgen[mace,torchsim]"` (Python 3.12+) the ensemble
+modes can batch all structures into one GPU call instead of running them one
+after another. Add `--engine torchsim` to the command; the output files are
+the same as with the ASE engine.
+
+```bash
+# Generate 50 seeds and relax them all in one batched call
+amorphgen --random-gen --composition "GeO2*192" -n 50 --relax \
+    --model mace-mpa-0 --device cuda --engine torchsim -o geo2_seeds/
+
+# Anneal, quench and relax the whole ensemble together (stages 4-7, NVT only)
+amorphgen --hybrid-ensemble --input-dir geo2_seeds/random_opt/ \
+    --config hybrid.yaml --model mace-mpa-0 --device cuda --engine torchsim \
+    -o geo2_hybrid/ --resume
+```
+
+The chunk size is chosen automatically from a GPU memory probe
+(`--batch-size auto`, the default); `--resume` continues a killed job from
+the last written chunk or MD frame. See {doc}`../guides/backends`.
+
 ## Choosing a backend
 
 ```python

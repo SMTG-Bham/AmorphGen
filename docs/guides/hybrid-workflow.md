@@ -47,6 +47,25 @@ job-array tip" for the full SLURM template.
 
 `--resume` is honoured at every step; re-running the command picks up incomplete runs.
 
+### Batched on a GPU with torch-sim
+
+For MACE, SevenNet or Lennard-Jones on a CUDA GPU, add `--engine torchsim`
+(needs Python 3.12 and `pip install "amorphgen[mace,torchsim]"`) to run
+stages 4 to 7 for all inputs together in batched calls:
+
+```bash
+amorphgen --hybrid-ensemble --input-dir random_TiO2/ \
+    --config hybrid.yaml --device cuda --model mace-mpa-0 \
+    --engine torchsim -o tio2_hybrid/ --resume
+```
+
+Per-run files and the `final/` collection are the same as above. The MD
+stages must be NVT (torch-sim's NPT is not mapped), the chunk size follows a
+GPU memory probe (`--batch-size auto`) and `--resume` continues a killed job
+from the last frame every run of a chunk has reached. For ten 350-atom IGZO
+structures with MACE-MPA-0 the batched run took 52 minutes against about
+100 minutes for the ASE engine on the same GPU. Details in {doc}`backends`.
+
 ## Recommended `hybrid.yaml` for an oxide
 
 ```yaml

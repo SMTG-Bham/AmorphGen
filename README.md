@@ -135,6 +135,8 @@ AmorphGen supports multiple calculator backends:
 
 Only install the backend(s) you need. Classical potentials (Lennard-Jones, Buckingham+Coulomb) are built-in and require no GPU. Use `amorphgen --list-models` to see all available models.
 
+For ensembles on a GPU there is a second execution engine, [torch-sim](https://github.com/torchsim/torch-sim), selected with `--engine torchsim`. It relaxes, and in the hybrid workflow anneals and quenches, all structures of an ensemble in one batched call instead of one after another. It works with MACE, SevenNet and Lennard-Jones (CHGNet and Buckingham stay on the ASE engine), needs Python 3.12 and the `[torchsim]` extra, and writes the same files as the ASE engine. See the [backends guide](https://smtg-bham.github.io/AmorphGen/guides/backends.html) for details.
+
 > **ASE pass-through.** AmorphGen wraps each backend's upstream ASE calculator without modifying unit conventions, stress signs, or PBC handling; this energies (eV), forces (eV/Å), stress (eV/Å³), and `atoms.pbc` are inherited directly from the upstream MLIP package. See [docs/guides/backends](https://smtg-bham.github.io/AmorphGen/guides/backends.html) for details.
 
 ---
@@ -146,7 +148,7 @@ Only install the backend(s) you need. Classical potentials (Lennard-Jones, Bucki
 | generate random structures, analyse trajectories (RDF, CN, S(q), plots), run classical LJ/Buckingham pipelines | `pip install -e .` | ~80 MB, **no PyTorch** |
 | + MLIP relaxation & melt-quench MD | `pip install -e ".[mace]"` or `".[chgnet]"` | + PyTorch |
 | + everything (MACE + CHGNet) | `pip install -e ".[all]"` | + PyTorch |
-| + batched GPU relaxation of ensembles (`--engine torchsim`) | `pip install -e ".[torchsim]"` (Python 3.12+) | + torch-sim |
+| + batched GPU relaxation and MD of ensembles (`--engine torchsim`) | `pip install -e ".[mace,torchsim]"` (Python 3.12+, CUDA or CPU, no Apple MPS) | + torch-sim |
 
 With pip, from source (once AmorphGen is on PyPI, `pip install "amorphgen[mace,chgnet]"` replaces the clone):
 
@@ -218,6 +220,16 @@ amorphgen POSCAR --model chgnet --device cpu
 
 # List all available models
 amorphgen --list-models
+
+# -- Ensembles on a GPU with the torch-sim engine (pip install -e ".[mace,torchsim]") --
+# Generate 50 structures and relax them all in one batched call
+amorphgen --random-gen --composition "GeO2*192" -n 50 --relax \
+    --model mace-mpa-0 --device cuda --engine torchsim -o geo2_seeds/
+
+# Anneal, quench and relax the whole ensemble together (stages 4-7, NVT)
+amorphgen --hybrid-ensemble --input-dir geo2_seeds/random_opt/ \
+    --config hybrid.yaml --model mace-mpa-0 --device cuda --engine torchsim \
+    -o geo2_hybrid/ --resume
 ```
 
 > **`--composition` accepts two formats:**
@@ -870,6 +882,33 @@ amorphgen /abs/path/to/In2O3_POSCAR \
     --quench-T-start 2500
 ```
 
+An ensemble of many structures on one GPU is quicker with the torch-sim
+engine, which batches the structures and, together with `--resume`, can be
+resubmitted into a short queue until it finishes. Outputs are written after
+every chunk and MD trajectories every 100 steps, so a walltime kill costs at
+most one relaxation chunk or 100 MD steps:
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=amorphgen_ens
+#SBATCH --gres=gpu:1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=48G
+#SBATCH --time=1:00:00
+export PYTHONUNBUFFERED=1            # progress in the log while the job runs
+
+source /path/to/venv/bin/activate    # Python 3.12 with amorphgen[mace,torchsim]
+
+amorphgen --hybrid-ensemble --input-dir /scratch/geo2_seeds/random_opt/ \
+    --config hybrid.yaml --model mace-mpa-0 --device cuda \
+    --engine torchsim --batch-size auto \
+    --work-dir /scratch/geo2_hybrid --resume
+```
+
+Ready-made BlueBEAR scripts for generation arrays, batched relaxation, batched
+MD and the GPU test suite are in `examples/`.
+
 ---
 
 ## Dependencies
@@ -883,6 +922,7 @@ amorphgen /abs/path/to/In2O3_POSCAR \
 | `mace-torch` | MACE calculator (optional) |
 | `chgnet` | CHGNet calculator (optional) |
 | `sevenn` | SevenNet calculator (optional) |
+| `torch-sim-atomistic` | Batched GPU engine for ensembles, `--engine torchsim` (optional, Python 3.12+) |
 
 ---
 

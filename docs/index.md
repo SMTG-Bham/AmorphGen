@@ -233,6 +233,7 @@ See {doc}`guides/hybrid-workflow`.
 | **CHGNet** | `pip install "amorphgen[chgnet]"` | `chgnet` |
 | **SevenNet** | `pip install "amorphgen[sevennet]"` | `sevennet`, `7net-mf-ompa` |
 | **Classical** | built-in | `buckingham`, `lennard-jones` |
+| **torch-sim engine** (batched ensembles on a GPU) | `pip install "amorphgen[mace,torchsim]"` | `--engine torchsim` with MACE, SevenNet or LJ |
 
 ```bash
 amorphgen --list-models   # see all 20+ model variants

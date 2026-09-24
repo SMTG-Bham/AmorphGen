@@ -14,6 +14,7 @@
 | generate random structures, analyse trajectories (RDF, CN, S(q), plots), classical LJ/Buckingham pipelines | `pip install amorphgen` (~80 MB, no PyTorch) |
 | MLIP relaxation & melt-quench MD | `pip install "amorphgen[mace]"` or `"amorphgen[chgnet]"` |
 | everything (MACE + CHGNet) | `pip install "amorphgen[all]"` |
+| batched GPU relaxation and MD of ensembles (`--engine torchsim`) | `pip install "amorphgen[mace,torchsim]"` (Python 3.12+) |
 
 On a torch-free install, `--device auto` resolves to CPU and any
 calculator-requiring command fails fast with the exact install line to copy.
@@ -47,7 +48,16 @@ pip install "amorphgen[all]"
 
 # Development install
 pip install "amorphgen[all,dev]"
+
+# torch-sim engine for batched ensembles on a GPU (Python 3.12+, add to any MLIP extra)
+pip install "amorphgen[mace,torchsim]"
 ```
+
+The `[torchsim]` extra adds a second execution engine (`--engine torchsim`)
+that relaxes, anneals and quenches all structures of an ensemble in one
+batched call. It needs Python 3.12 and a CUDA GPU or CPU (Apple MPS is not
+supported) and works with MACE, SevenNet and Lennard-Jones. Everything else
+runs unchanged on the default ASE engine. See {doc}`../guides/backends`.
 
 :::{warning}
 Do not install MACE and SevenNet in the same environment: SevenNet
@@ -115,6 +125,7 @@ page for the full explanation).
 | CHGNet  | `chgnet`    | CUDA yes | CPU + MPS yes |
 | SevenNet | `sevenn`   | CUDA yes | CPU + MPS yes |
 | Classical (LJ, Buckingham) | built-in | N/A | CPU yes |
+| torch-sim engine (`--engine torchsim`) | `torch-sim-atomistic` | CUDA yes | CPU only, no MPS |
 
 ## HPC setup (SLURM)
 
@@ -126,6 +137,11 @@ module load CUDA/11.8.0
 conda create -n amorphgen python=3.11
 conda activate amorphgen
 pip install "amorphgen[mace,chgnet]"
+
+# For batched ensembles on the GPU, use Python 3.12 and add the torch-sim extra
+conda create -n amorphgen-ts python=3.12
+conda activate amorphgen-ts
+pip install "amorphgen[mace,torchsim]"
 ```
 
 If you also want SevenNet, create a second environment as described
