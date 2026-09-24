@@ -533,6 +533,9 @@ Notes on the options:
   gives the g(r) transform for comparison. `--sq-partials` adds the Faber-Ziman
   partials S_ab(q) of every element pair to the CSV and a second plot. A box of
   about 20 Å (roughly 500 atoms) is needed to see the FSDP.
+- `--pair-panels` draws each element pair in its own panel, for g(r) and for
+  the S(q) partials, which is easier to read than one axis for a four-element
+  system like IGZO.
 - `--rings` counts the shortest ring per network edge, with the network former
   (Si, Ge, ...) as nodes; `--rings Ge-O` sets the pair explicitly.
 - `--connectivity` reports corner-, edge- and face-sharing between cation-centred

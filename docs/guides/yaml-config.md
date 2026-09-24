@@ -310,6 +310,7 @@ analysis:
   check_dimers: true
   save_report: report.txt
   save_plot: plots/
+  pair_panels: true       # one panel per pair for g(r) and S_ab(q)
   sq: true                # structure factor
   sq_weighting: neutron   # xray | neutron | unweighted
   sq_method: direct       # direct | ft

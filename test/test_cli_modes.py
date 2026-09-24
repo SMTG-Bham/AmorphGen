@@ -209,6 +209,10 @@ class TestAnalyseMode:
         header = (plots / "analysis_sq.csv").read_text().splitlines()[0].split(",")
         assert {"s_Si-Si", "s_O-Si", "s_O-O"} <= set(header)
         assert (plots / "analysis_sq_partials.png").exists()
+        _run_cli(["--analyse", str(src), "--sq", "--sq-partials", "--pair-panels",
+                  "--save-plot", str(tmp_path / "p3")], monkeypatch)
+        assert (tmp_path / "p3" / "analysis_rdf_panels.png").exists()
+        assert (tmp_path / "p3" / "analysis_sq_partials_panels.png").exists()
         _run_cli(["--analyse", str(src), "--sq", "--sq-partials", "--sq-method", "ft",
                   "--save-plot", str(tmp_path / "p2")], monkeypatch)
         assert "partials skipped" in capsys.readouterr().out

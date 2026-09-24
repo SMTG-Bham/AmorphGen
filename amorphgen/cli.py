@@ -397,6 +397,12 @@ def _add_arguments(p):
                            "analysis_sq_partials.png. Independent of "
                            "--sq-weighting (the weighting only combines "
                            "the partials into the total).")
+    g_an.add_argument("--pair-panels", action="store_true",
+                      help="Also plot each element pair in its own panel: "
+                           "analysis_rdf_panels.png for g(r) and, with "
+                           "--sq-partials, analysis_sq_partials_panels.png "
+                           "for S_ab(q). Easier to read than one axis when "
+                           "there are many pairs (IGZO has ten).")
     g_an.add_argument("--sq-smooth", type=float, default=None, metavar="SIGMA_Q",
                       help="Gaussian re-binning width (1/A) for the direct "
                            "S(q), weighted by q-vectors per shell; reduces "
@@ -1309,6 +1315,8 @@ def main():
             plot_kwargs["dpi"] = an_cfg["dpi"]
         if args.show_title or an_cfg.get("show_title", False):
             plot_kwargs["show_title"] = True
+        if args.pair_panels or an_cfg.get("pair_panels", False):
+            plot_kwargs["pair_panels"] = True
         if plot_dir:
             sa.plot(output_dir=plot_dir, **plot_kwargs)
 
@@ -1367,7 +1375,8 @@ def main():
                         dpi=plot_kwargs.get("dpi", 300),
                         save_pdf=plot_kwargs.get("save_pdf", False),
                         weighting=sq_weighting, method=sq_method,
-                        show_title=plot_kwargs.get("show_title", False))
+                        show_title=plot_kwargs.get("show_title", False),
+                        pair_panels=plot_kwargs.get("pair_panels", False))
             else:
                 print("  (pass --save-plot DIR to write the S(q) PNG + CSV)")
 

@@ -316,3 +316,6 @@ orphan: true
   through `structure_factor_direct(partials=True)`. First-peak positions are printed,
   `s_<A-B>` columns are appended to `analysis_sq.csv` and `analysis_sq_partials.png`
   is written. Direct method only.
+- **`--pair-panels`** (YAML `pair_panels: true`): one small panel per element pair for the
+  partial g(r) (`analysis_rdf_panels.png`) and, with `--sq-partials`, for the S_ab(q)
+  (`analysis_sq_partials_panels.png`). `plotting.plot_pair_panels()` is the helper.

@@ -73,12 +73,62 @@ def _save_fig(fig, base_path, dpi=300, save_pdf=False):
         print(f"  Saved: {base_path}.pdf")
 
 
+def plot_pair_panels(x, curves, xlabel, ylabel, base_path, dpi=300,
+                     save_pdf=False, xlim=None, hline=1.0, title=None):
+    """One small panel per element pair (shared axes), for g(r) or S_ab(q).
+
+    ``curves`` maps a pair label to its y-array on the common grid ``x``.
+    Up to three panels per row; NaNs are skipped.
+    """
+    import math
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    labels = list(curves)
+    n = len(labels)
+    ncols = 1 if n == 1 else (2 if n <= 4 else 3)
+    nrows = math.ceil(n / ncols)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(3.3 * ncols, 2.5 * nrows),
+                             sharex=True, sharey=True, squeeze=False)
+    x = np.asarray(x, dtype=float)
+    for k, ax in enumerate(axes.flat):
+        if k >= n:
+            ax.axis("off"); continue
+        y = np.asarray(curves[labels[k]], dtype=float)
+        m = ~np.isnan(y)
+        if hline is not None:
+            ax.axhline(hline, ls=":", color="grey", alpha=0.6, lw=0.8)
+        ax.plot(x[m], y[m], lw=1.3, color=_PALETTE[k % len(_PALETTE)])
+        ax.text(0.97, 0.92, labels[k], transform=ax.transAxes, ha="right",
+                va="top", fontsize=9)
+        _apply_pub_style(ax, label_fs=10, tick_fs=8)
+        if xlim is not None:
+            ax.set_xlim(*xlim)
+    # the lowest occupied panel of each column carries the x labels (a
+    # column may end above the last row when the grid is not full)
+    for c in range(ncols):
+        rows = [r for r in range(nrows) if r * ncols + c < n]
+        if rows:
+            ax = axes[rows[-1], c]
+            ax.set_xlabel(xlabel)
+            ax.tick_params(labelbottom=True)
+    for ax in axes[:, 0]:
+        ax.set_ylabel(ylabel)
+    if title:
+        fig.suptitle(title, fontsize=11)
+    fig.tight_layout()
+    _save_fig(fig, base_path, dpi, save_pdf)
+    plt.close(fig)
+
+
 def plot_analysis(analyser, output_dir=".", prefix="analysis",
                   rdf_pairs=None, angle_triplets=None,
                   rmax=None, normalise=True, angle_style="line",
                   save_csv=True, show_total_rdf=False,
                   smearing=DEFAULT_SMEARING,
-                  dpi=300, save_pdf=False, show_title=False):
+                  dpi=300, save_pdf=False, show_title=False,
+                  pair_panels=False):
     """
     Generate and save analysis plots and raw data.
 
@@ -96,6 +146,9 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
     show_title : bool
         Show title above each panel (default False — publications prefer
         figure captions).
+    pair_panels : bool
+        Also write ``{prefix}_rdf_panels.png``, one small panel per pair
+        (default False).
     """
     import matplotlib
     matplotlib.use("Agg")
@@ -152,6 +205,15 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
     fig.tight_layout()
     _save_fig(fig, os.path.join(output_dir, f"{prefix}_rdf"), dpi, save_pdf)
     plt.close(fig)
+
+    if pair_panels and pairs:
+        plot_pair_panels(rdf_csv_data[pairs[0]][0],
+                         {p: rdf_csv_data[p][1] for p in pairs},
+                         r"r (Å)", "g(r)" if normalise else "Count",
+                         os.path.join(output_dir, f"{prefix}_rdf_panels"),
+                         dpi, save_pdf, xlim=(0, rmax),
+                         hline=1.0 if normalise else None,
+                         title=f"Partial RDFs — {formula}" if show_title else None)
 
     if save_csv:
         rdf_csv_path = os.path.join(output_dir, f"{prefix}_rdf.csv")
@@ -368,7 +430,7 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
 
 def plot_sq(sq_result, output_dir=".", prefix="analysis", dpi=300,
             save_pdf=False, weighting="xray", show_title=False,
-            method="direct"):
+            method="direct", pair_panels=False):
     """Plot the direct-method total structure factor S(q) + write a CSV.
 
     Direct (Debye) S(q) with Faber-Ziman normalisation (S(q→∞)=1). The FSDP
@@ -378,7 +440,8 @@ def plot_sq(sq_result, output_dir=".", prefix="analysis", dpi=300,
 
     When ``sq_result`` carries ``"partials"`` (``partials=True`` on the
     direct method), the Faber-Ziman partials S_ab(q) are added to the CSV
-    as ``s_<A-B>`` columns and drawn in ``{prefix}_sq_partials.png``.
+    as ``s_<A-B>`` columns and drawn in ``{prefix}_sq_partials.png``; with
+    ``pair_panels`` also one panel per pair in ``{prefix}_sq_partials_panels.png``.
     """
     import csv
     import matplotlib
@@ -426,6 +489,13 @@ def plot_sq(sq_result, output_dir=".", prefix="analysis", dpi=300,
         if show_title:
             ax2.set_title("Faber-Ziman partial structure factors")
         _save_fig(fig2, f"{base}_partials", dpi, save_pdf)
+        if pair_panels:
+            good = (n > 0) if n is not None else np.ones(len(q), bool)
+            plot_pair_panels(q, {p: np.where(good, np.array(v, dtype=float), np.nan)
+                                 for p, v in partials.items()},
+                             r"$q$ ($\mathrm{\AA}^{-1}$)", r"$S_{ab}(q)$",
+                             f"{base}_partials_panels", dpi, save_pdf,
+                             title="Faber-Ziman partials" if show_title else None)
 
     with open(f"{base}.csv", "w", newline="") as fh:
         w = csv.writer(fh)

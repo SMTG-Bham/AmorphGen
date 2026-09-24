@@ -669,6 +669,8 @@ For each ensemble, ``--analyse --save-plot DIR`` writes:
 |---|---|
 | `analysis_rdf.png` / `.pdf` | Partial RDFs for all unique pairs in the system. One line per pair using the Okabe-Ito palette. |
 | `analysis_rdf.csv` | Columns: ``r(A), g(r)_<pair1>, g(r)_<pair2>, …``. Re-plot in any tool. |
+| `analysis_rdf_panels.png` / `.pdf` | With ``--pair-panels``: the same partials, one small panel per pair (shared axes). |
+| `analysis_sq_partials.png`, `analysis_sq_partials_panels.png` | With ``--sq --sq-partials``: the Faber-Ziman partials S_ab(q) on one axis and, with ``--pair-panels``, one panel per pair. |
 | `analysis_cn.png` / `.pdf` | Coordination distribution. For binary AB systems (e.g. SiO₂), shown as **mirrored bars**: A-B on top, B-A reflected below the zero line. For mono-element systems (a-Si), shown side-by-side. |
 | `analysis_cn.csv` | Per-pair CN counts as percentages of the centred atom population. |
 | `analysis_angles.png` / `.pdf` | Bond-angle histograms (normalised). One line per triplet. |
