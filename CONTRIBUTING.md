@@ -22,13 +22,24 @@ guidelines for contributing to this project.
 
 ## Development setup
 
-AmorphGen requires Python ≥ 3.10. Install all dependencies including test tools:
+AmorphGen requires Python ≥ 3.10. The conda development environment installs
+your clone in editable mode with MACE, CHGNet, the torch-sim engine, pytest and
+the Sphinx toolchain:
+
+```bash
+conda env create -f build_tools/environment_dev.yml
+conda activate amorphgen-dev
+```
+
+Or install all dependencies including test tools into an environment of your
+own with pip:
 
 ```bash
 pip install -e ".[all,dev]"
 ```
 
-This installs all MLIP backends (MACE, CHGNet, SevenNet) plus pytest.
+This installs the MACE and CHGNet backends plus pytest. SevenNet conflicts with
+MACE and needs an environment of its own.
 
 ## Running tests
 

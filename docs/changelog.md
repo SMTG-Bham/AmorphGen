@@ -331,6 +331,11 @@ orphan: true
   Requested totals are also plotted (`analysis_cn_total.png` + CSV).
 - **Total g(r) always in `analysis_rdf.csv`** (`g(r)_Total` column) for every system;
   the plot still draws it only with `--total-rdf`.
+- **Conda environment files** in `build_tools/`: `environment.yml` (env `amorphgen`)
+  installs the checkout in editable mode with MACE + CHGNet, and `environment_dev.yml`
+  (env `amorphgen-dev`) adds the torch-sim engine, pytest and the Sphinx toolchain.
+  Both install through the `pyproject.toml` extras, so the dependencies are declared in
+  one place. `conda env create -f build_tools/environment.yml`.
 
 ### Fixed after the rc4 upload (on GitHub main; not in the rc4 wheel on PyPI)
 

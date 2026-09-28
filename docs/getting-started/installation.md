@@ -97,8 +97,25 @@ pip install -e ".[mace,chgnet,dev]"
 ## Install with conda
 
 AmorphGen is not on conda-forge, but a conda environment is the cleanest way to
-isolate it; on HPC, conda manages the CUDA toolchain. Create the
-environment with conda, then install AmorphGen into it with pip:
+isolate it; on HPC, conda manages the CUDA toolchain. From a clone, the
+environment files in
+[`build_tools/`](https://github.com/SMTG-Bham/AmorphGen/tree/main/build_tools)
+create it in one step and install the checkout in editable mode:
+
+```bash
+git clone https://github.com/SMTG-Bham/AmorphGen.git
+cd AmorphGen
+
+# MACE + CHGNet
+conda env create -f build_tools/environment.yml
+conda activate amorphgen
+
+# or, for development, with the torch-sim engine, pytest and the docs toolchain too
+conda env create -f build_tools/environment_dev.yml
+conda activate amorphgen-dev
+```
+
+Or create the environment with conda, then install AmorphGen into it with pip:
 
 ```bash
 conda create -n amorphgen python=3.11

@@ -159,7 +159,16 @@ pip install -e ".[mace,chgnet]"      # example: MACE + CHGNet
 pip install -e ".[all,dev]"          # everything + pytest
 ```
 
-With conda, which keeps the install isolated and on HPC provides the CUDA toolchain. Create the environment with conda, then install into it with pip:
+With conda, which keeps the install isolated and on HPC provides the CUDA toolchain. The environment files in [`build_tools/`](build_tools/README.md) create the environment and install the clone into it in editable mode in one step, with MACE + CHGNet (`environment.yml`) or, for development, with the torch-sim engine, pytest and the docs toolchain as well (`environment_dev.yml`):
+
+```bash
+git clone https://github.com/SMTG-Bham/AmorphGen.git
+cd AmorphGen
+conda env create -f build_tools/environment.yml       # or build_tools/environment_dev.yml
+conda activate amorphgen                               # or amorphgen-dev
+```
+
+Or create the environment with conda, then install into it with pip:
 
 ```bash
 conda create -n amorphgen python=3.11
@@ -895,6 +904,7 @@ AmorphGen/
 │       ├── calculators.py          ← multi-backend calculator factory
 │       ├── radii.py                ← Shannon/metallic radii, minsep, density estimation
 │       └── common.py               ← dynamics builder, logger, trajectory writer
+├── build_tools/                    ← conda environment files (user + dev)
 ├── paper/
 │   ├── paper.md                    ← JOSS draft
 │   └── paper.bib

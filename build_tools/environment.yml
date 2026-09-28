@@ -1,0 +1,19 @@
+# AmorphGen from this checkout with the MACE and CHGNet backends, the
+# recommended default. Run from the repository root:
+#
+#   conda env create -f build_tools/environment.yml
+#   conda activate amorphgen
+name: amorphgen
+
+channels:
+  - conda-forge
+  - nodefaults
+
+dependencies:
+  # From the requires-python floor to the newest Python in the CI matrix. conda
+  # picks 3.12, which the optional torch-sim engine needs.
+  - python>=3.10,<3.13
+  - pip
+  - pip:
+      # conda runs pip from this file's directory, so .. is the repository root.
+      - -e ..[mace,chgnet]

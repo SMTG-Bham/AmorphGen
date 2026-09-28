@@ -1,0 +1,19 @@
+# Development environment: this checkout with the MACE and CHGNet backends, the
+# torch-sim engine, pytest and the Sphinx toolchain. Run from the repository root:
+#
+#   conda env create -f build_tools/environment_dev.yml
+#   conda activate amorphgen-dev
+name: amorphgen-dev
+
+channels:
+  - conda-forge
+  - nodefaults
+
+dependencies:
+  # conda picks 3.12: the newest Python in the CI matrix and the oldest the
+  # torch-sim engine runs on, so its tests run instead of skipping.
+  - python>=3.10,<3.13
+  - pip
+  - pip:
+      # conda runs pip from this file's directory, so .. is the repository root.
+      - -e ..[mace,chgnet,torchsim,dev,docs]

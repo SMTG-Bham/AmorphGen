@@ -70,6 +70,9 @@ build/
 .venv
 env/
 venv/
+# pip requirements file conda writes next to the environment file while
+# `conda env create -f build_tools/...` runs (left behind if it is killed)
+build_tools/condaenv.*.requirements.txt
 
 # ======================
 # macOS
