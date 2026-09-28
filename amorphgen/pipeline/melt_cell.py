@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 from ase.io import read, write
-from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 
 from ..utils import (get_calculator, make_cubic,
                      build_md_dynamics, attach_outputs, merge_config)
+from ..utils.common import thermalize_momenta
 from ..configs import DEFAULT_CONFIG
 
 
@@ -75,7 +75,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
 
     T_start = cfg["T_start"]
     if needs_velocity_init(atoms, elapsed):
-        MaxwellBoltzmannDistribution(atoms, temperature_K=T_start, rng=rng)
+        thermalize_momenta(atoms, temperature_K=T_start, rng=rng)
 
     dyn = build_md_dynamics(
         atoms, ensemble=ensemble, T=T_start,

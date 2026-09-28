@@ -12,10 +12,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 from ase.io import read, write
-from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 
 from ..utils import (get_calculator, make_cubic, build_md_dynamics,
                      attach_outputs, merge_config)
+from ..utils.common import thermalize_momenta
 from ..configs import DEFAULT_CONFIG
 
 
@@ -96,7 +96,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high", **kwargs):
     from ..utils.common import stage_rng, run_index_for
     rng = stage_rng(global_cfg.get("seed"), int(stage_label), run_index_for(global_cfg))
     if needs_velocity_init(atoms, elapsed):
-        MaxwellBoltzmannDistribution(atoms, temperature_K=T, rng=rng)
+        thermalize_momenta(atoms, temperature_K=T, rng=rng)
 
     dyn = build_md_dynamics(
         atoms, ensemble=ensemble, T=T,

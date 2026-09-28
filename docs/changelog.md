@@ -418,3 +418,15 @@ orphan: true
   classifier, which setuptools deprecated and stops accepting on 2027-02-18. Building
   from source now needs setuptools >= 77 (pip's isolated builds fetch it), and the
   distributions carry `Metadata-Version: 2.4`, so uploading them needs twine >= 6.1.
+- **No deprecated ASE MD calls.** Initial momenta come from `thermalize_momenta`, the
+  ASE 3.29 name for `MaxwellBoltzmannDistribution` (the old name is used on ASE
+  3.25-3.28), and the NVT Langevin thermostat runs with `fixcm=False`, since ASE 3.28
+  deprecates `fixcm=True` for not sampling NVT exactly. **Behaviour change:** NVT stages
+  no longer pin the centre of mass. It diffuses (about 0.5 Å in 10 ps for 108 Cu atoms
+  at 300 K), a rigid translation that leaves the structure, temperature and energy
+  unchanged, but seeded NVT trajectories differ from earlier versions (they stay
+  reproducible). ASE's suggested `FixCom` constraint is not used: it would stay on the
+  atoms, and `IsotropicMTKNPT` rejects constrained atoms. The equilibration MSD
+  (`compute_msd`) is now measured relative to the centre of mass, so a drift of the
+  whole system, from this or from the net momentum that the `mtk` and
+  `parrinello-rahman` integrators conserve, no longer reads as diffusion.

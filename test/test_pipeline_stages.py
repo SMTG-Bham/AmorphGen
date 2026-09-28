@@ -173,10 +173,10 @@ class TestMDStages:
 
     def test_short_nvt_run(self, cu_supercell, emt_calc, tmp_work_dir):
         """Run 10 NVT MD steps to verify dynamics setup works."""
-        from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
+        from amorphgen.utils.common import thermalize_momenta
 
         cu_supercell.calc = emt_calc
-        MaxwellBoltzmannDistribution(cu_supercell, temperature_K=300)
+        thermalize_momenta(cu_supercell, temperature_K=300)
         dyn = build_md_dynamics(cu_supercell, ensemble="NVT", T=300.0)
         dyn.run(10)
 

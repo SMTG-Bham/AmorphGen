@@ -330,6 +330,35 @@ class TestRampTemperatureAllIntegrators:
         assert frames[-1].calc is not None      # energy carried into the wrapped copy
 
 
+class TestNoDeprecatedAseMdCalls:
+    """The MD helpers avoid the ASE APIs deprecated in 3.28 (Langevin fixcm) and
+    3.29 (MaxwellBoltzmannDistribution), and still work on the ASE floor (Tier 2)."""
+
+    def test_nvt_langevin_leaves_the_centre_of_mass_free(self):
+        import warnings
+        from ase.calculators.emt import EMT
+        from amorphgen.utils.common import build_md_dynamics
+        atoms = bulk("Cu", "fcc", a=3.6, cubic=True).repeat((2, 2, 2)); atoms.calc = EMT()
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error", message=".*fixcm")
+            dyn = build_md_dynamics(atoms, ensemble="NVT", T=300.0)
+        assert dyn.fix_com is False
+        assert not atoms.constraints    # no FixCom: IsotropicMTKNPT refuses constrained atoms
+        dyn.run(5)
+        assert np.isfinite(atoms.get_potential_energy())
+
+    def test_thermalize_momenta_is_seeded(self):
+        import warnings
+        from amorphgen.utils.common import thermalize_momenta
+        a, b = (bulk("Cu", "fcc", a=3.6, cubic=True).repeat((3, 3, 3)) for _ in range(2))
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error", message="Use thermalize_momenta")
+            thermalize_momenta(a, temperature_K=500, rng=np.random.default_rng(7))
+        thermalize_momenta(b, temperature_K=500, rng=np.random.default_rng(7))
+        assert np.array_equal(a.get_momenta(), b.get_momenta())
+        assert 300 < a.get_temperature() < 700    # 108 atoms: a loose band around 500 K
+
+
 class TestReviewFixesPhysics:
     """Regressions for the 2026-09 review: ramp rate, negative rate, smoothing edges,
     block test, torn checkpoint, model-name case, convert collisions."""

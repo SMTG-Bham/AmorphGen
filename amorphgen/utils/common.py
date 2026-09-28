@@ -16,6 +16,13 @@ import numpy as np
 from ase import units
 from ase.io import read, write
 
+try:  # ASE >= 3.29
+    from ase.md.velocitydistribution import thermalize_momenta
+except ImportError:  # ASE 3.25-3.28: the same function, renamed in 3.29
+    from ase.md.velocitydistribution import (
+        MaxwellBoltzmannDistribution as thermalize_momenta,
+    )
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Density helper
@@ -178,7 +185,9 @@ def build_md_dynamics(atoms, ensemble: str = "NVT", T: float = 300.0,
     timestep : float
         Time step in fs.
     friction : float
-        Langevin friction coefficient (for NVT).
+        Langevin friction coefficient (for NVT).  The Langevin thermostat
+        leaves the centre of mass free (``fixcm=False``); pass ``fixcm``
+        in ``kwargs`` to override.
     ttime : float
         Thermostat time constant in fs.  For ``"berendsen"`` it is
         ``taut``; for ``"mtk"`` and ``"parrinello-rahman"`` it is the
@@ -244,6 +253,14 @@ def build_md_dynamics(atoms, ensemble: str = "NVT", T: float = 300.0,
     if ensemble.upper() == "NVT":
         if rng is not None:
             kwargs["rng"] = rng          # seeded thermostat noise
+        # ASE's default fixcm=True pins the centre of mass by projecting it
+        # out of the thermostat noise, which does not sample NVT exactly
+        # (deprecated in ASE 3.28). Unpinned, the centre of mass diffuses: a
+        # rigid translation that leaves the structure unchanged, and that
+        # compute_msd subtracts. ASE's suggested FixCom constraint would stay
+        # on the atoms, and IsotropicMTKNPT (the stage-4 default) refuses
+        # constrained atoms.
+        kwargs.setdefault("fixcm", False)
         dyn = Langevin(atoms, timestep=dt, temperature_K=T,
                        friction=friction / units.fs, **kwargs)
         return dyn

@@ -176,6 +176,33 @@ class TestMSD:
         # MSD should increase over time
         assert msd["all"][-1] > msd["all"][0]
 
+    def test_rigid_drift_is_not_diffusion(self):
+        """A drift of the whole system (the Langevin thermostat leaves the
+        centre of mass free) must not read as diffusion."""
+        from amorphgen.utils.equilibration import compute_msd
+        from ase import Atoms
+
+        base = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], float)
+        frames = [Atoms("SiO3", positions=base + [0.3 * i, 0.1 * i, 0.0],
+                        cell=[10, 10, 10], pbc=True) for i in range(20)]
+        _, msd = compute_msd(frames, timestep_fs=1.0)
+        for key in ("all", "Si", "O"):
+            assert np.allclose(msd[key], 0.0)
+
+    def test_displacement_is_relative_to_the_mass_weighted_centre(self):
+        """Moving a light H by d beside a heavy Pb moves the centre of mass by
+        d*m_H/M, so relative to it the H moves d*m_Pb/M and the Pb d*m_H/M."""
+        from amorphgen.utils.equilibration import compute_msd
+        from ase import Atoms
+
+        frames = [Atoms("PbH", positions=[[0, 0, 0], [2 + 0.5 * i, 0, 0]],
+                        cell=[20, 20, 20], pbc=True) for i in range(5)]
+        _, msd = compute_msd(frames, timestep_fs=1.0)
+        m_pb, m_h = frames[0].get_masses()
+        d = 0.5 * 4
+        assert msd["H"][-1] == pytest.approx((d * m_pb / (m_pb + m_h)) ** 2)
+        assert msd["Pb"][-1] == pytest.approx((d * m_h / (m_pb + m_h)) ** 2)
+
     def test_frame_stride_scales_time_axis(self):
         """Trajectories are written every TRAJ_LOG_INTERVAL MD steps, so the
         time axis must scale with frame_stride (regression: it assumed one
