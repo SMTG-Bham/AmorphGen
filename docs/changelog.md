@@ -334,6 +334,18 @@ orphan: true
 
 ### Fixed after the rc4 upload (on GitHub main; not in the rc4 wheel on PyPI)
 
+- **Density rules caught by the 100-system class benchmark (2026-09-28).** Ni80P20,
+  Fe80B20 and other metal-rich metalloid glasses were classed as pnictides / borides
+  (Ni4P estimated at 0.48 of the glass density; now alloy, 0.90). P2O5 fell through to
+  the default class and phosphorus took its P3- anion radius (0.36 of the glass
+  density; now covalent_oxide with P5+, 0.85). Be2+ had no Shannon radius, so Be3N2
+  was routed to the large-cation nitride class (0.47 of crystal; now
+  small_cation_nitride, 0.77). Sulfide and selenide network glasses (GeS2, GeSe2, As2S3,
+  As2Se3) were 17-48 % too dense under the II-VI chalcogenide factor; a new
+  `chalcogenide_glass` class (packing 0.23, Ge/Si/As/Sb/B/P cations, S/Se anions) puts
+  them within 13 %. Tellurides, III-V pnictides, MB2 / MB6 borides and BeO are
+  unchanged. Side effect: BeF2 now uses the Be2+ radius and estimates 1.13 of the glass
+  density (was 0.97 through an accidental covalent fallback).
 - **`--seed` did nothing on the torch-sim engine.** torch-sim draws initial momenta and
   Langevin noise from its state generator, which started from torch-sim's own fixed
   default seed, so every batch and every resume got identical velocities and noise

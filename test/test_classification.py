@@ -101,6 +101,23 @@ from amorphgen.utils.radii import (
     ({"Ni": 16, "Ti": 16}, "alloy"),
     ({"Cu": 16, "Zn": 16}, "alloy"),
     ({"Fe": 12, "Si": 4}, "alloy"),
+    # 2026-09-28 class-benchmark fixes
+    ({"Ni": 172, "P": 43}, "alloy"),          # Ni80P20 metallic glass, not a pnictide
+    ({"Fe": 172, "B": 43}, "alloy"),          # Fe80B20 metallic glass, not a boride
+    ({"Pd": 172, "Si": 43}, "alloy"),
+    ({"Pd": 40, "Ni": 40, "P": 20}, "alloy"),
+    ({"Ti": 72, "B": 144}, "boride"),         # MB2 stays a boride
+    ({"La": 32, "B": 192}, "boride"),
+    ({"Ga": 108, "As": 108}, "pnictide"),     # III-V stays a pnictide
+    ({"P": 64, "O": 160}, "covalent_oxide"),  # non-metal oxide, was "default"
+    ({"Be": 132, "N": 88}, "small_cation_nitride"),   # Be2+ radius was missing
+    ({"Ge": 72, "Se": 144}, "chalcogenide_glass"),
+    ({"Ge": 72, "S": 144}, "chalcogenide_glass"),
+    ({"As": 88, "S": 132}, "chalcogenide_glass"),
+    ({"As": 88, "Se": 132}, "chalcogenide_glass"),
+    ({"Ge": 108, "Te": 108}, "chalcogenide"),          # tellurides stay dense
+    ({"Sb": 88, "Te": 132}, "chalcogenide"),
+    ({"Zn": 108, "S": 108}, "chalcogenide"),           # II-VI stays dense
 ])
 def test_classify_compound(composition, expected):
     assert _classify_compound(composition) == expected
@@ -435,3 +452,19 @@ def test_boride_density_calibration(composition, crystal_rho):
     m = sum(atomic_masses[atomic_numbers[s]] * n for s, n in composition.items())
     rho = m * 1.66053906660 / L ** 3
     assert 0.75 <= rho / crystal_rho <= 0.92
+
+
+@pytest.mark.parametrize("composition, ref, lo, hi", [
+    ({"Ni": 172, "P": 43}, 7.90, 0.80, 1.00),     # was 0.48 of the glass density
+    ({"Be": 132, "N": 88}, 2.71, 0.70, 0.95),     # was 0.47 of crystal
+    ({"Ge": 72, "Se": 144}, 4.25, 0.85, 1.10),    # was 1.24
+    ({"Ge": 72, "S": 144}, 2.72, 0.90, 1.20),     # was 1.48
+    ({"As": 88, "S": 132}, 3.20, 0.90, 1.10),     # was 1.34
+])
+def test_benchmark_density_fixes(composition, ref, lo, hi):
+    """Density estimates of the systems the 2026-09-28 class benchmark caught."""
+    from ase.data import atomic_masses, atomic_numbers
+    L = estimate_cell_length(composition)
+    m = sum(atomic_masses[atomic_numbers[e]] * n for e, n in composition.items())
+    rho = m * 1.66054 / L ** 3
+    assert lo <= rho / ref <= hi, rho

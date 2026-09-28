@@ -42,6 +42,7 @@ SHANNON_IONIC_RADII = {
     "K":  {1: {6: 1.38}},
     "Rb": {1: {6: 1.52}},
     "Cs": {1: {6: 1.67}},
+    "Be": {2: {4: 0.27, 6: 0.45}},
     "Mg": {2: {4: 0.57, 6: 0.72}},
     "Ca": {2: {6: 1.00}},
     "Sr": {2: {6: 1.18}},
@@ -452,6 +453,15 @@ _RUTILE_DIOXIDE_EXCEPTIONS = frozenset({"Pb"})
 # cations have usable small Shannon radii and stay on the ionic path.
 _COVALENT_OXIDE_CATIONS = frozenset({"Be"})
 
+# Glass-forming cations of the corner-sharing chalcogenide glasses
+_CHALCOGENIDE_GLASS_FORMERS = frozenset({"Ge", "Si", "As", "Sb", "B", "P"})
+
+# Metalloids that form metal-rich metallic glasses with transition / noble
+# metals (Ni80P20, Fe80B20, Pd80Si20); below this fraction the composition is
+# an alloy, not a pnictide or boride
+_GLASS_METALLOIDS = frozenset({"P", "B", "Si", "Ge", "As", "Sb"})
+_METAL_RICH_ALLOY_MAX_METALLOID_FRAC = 0.35
+
 
 def auto_target_cn(composition: dict) -> tuple[dict | None, int]:
     """
@@ -494,8 +504,8 @@ def auto_target_cn(composition: dict) -> tuple[dict | None, int]:
         target_cn = {s: 4 for s in elems}
         return target_cn, 0
 
-    if cls == "chalcogenide":
-        # Chalcogenides (ZnS, Sb2Te3, CdTe, GeTe)
+    if cls in ("chalcogenide", "chalcogenide_glass"):
+        # Chalcogenides (ZnS, Sb2Te3, CdTe, GeTe) and chalcogenide glasses
         chalcogens = elems & {"S", "Se", "Te"}
         target_cn = {}
         for s in elems:
@@ -1092,6 +1102,10 @@ PACKING_FACTORS = {
     "elemental_semiconductor": 0.28,  # a-Se, a-Te, a-As, a-Sb, a-P (chain/layer, Cordero)
     "pnictide":        0.32,  # GaAs, InP, InAs (III-V compounds)
     "chalcogenide":    0.30,  # ZnS, CdTe, GeTe (II-VI / IV-VI)
+    "chalcogenide_glass": 0.23,  # GeS2, GeSe2, As2S3, As2Se3: corner-sharing
+                                 # network glasses (sulfides/selenides of the
+                                 # network formers); 0.30 over-predicts them by
+                                 # 20-50 % (benchmark 2026-09-28)
     "boride":          0.60,  # TiB2, MgB2, ZrB2 — Goldschmidt cation +
                               # Cordero B (carbide-style; calibrated
                               # 2026-07-31: diborides land 80-84 % of
@@ -1159,6 +1173,20 @@ def _classify_compound(composition: dict) -> str:
                 and only_el not in _DIATOMIC_NONMETALS):
             return "elemental_semiconductor"
 
+    # Metal-rich metal/metalloid glasses (Ni80P20, Fe80B20, Pd80Si20,
+    # Pd40Ni40P20): a transition or noble metal with a minority of the glass-
+    # forming metalloids P, B, Si, Ge, As, Sb and nothing else. These are
+    # metallic glasses, not pnictides or borides: the metal lattice sets the
+    # density (Goldschmidt radii, alloy packing). Gated on the metalloid
+    # fraction so III-V compounds (50 %) and MB2 / MB6 borides (>= 67 %) are
+    # untouched.
+    metals = {s for s in elems if s not in NONMETALS and s not in METALLOIDS}
+    minority = elems - metals
+    if metals and minority and minority <= _GLASS_METALLOIDS:
+        f_metalloid = sum(composition[s] for s in minority) / sum(composition.values())
+        if f_metalloid < _METAL_RICH_ALLOY_MAX_METALLOID_FRAC:
+            return "alloy"
+
     # Pnictides: III-V compounds (GaAs, InP, InAs, GaSb)
     # Must have at least one non-pnictogen element (the group III metal)
     # Pure pnictogens (Sb, As) are not III-V compounds
@@ -1168,8 +1196,16 @@ def _classify_compound(composition: dict) -> str:
     if pnictogens and non_pnictogen and not other_anions and not chalcogens:
         return "pnictide"
 
-    # Chalcogenides (S, Se, Te) — check before oxides
+    # Chalcogenides (S, Se, Te) — check before oxides. Sulfides and selenides
+    # whose cations are all network formers (Ge, Si, As, Sb, B, P) are the
+    # corner-sharing chalcogenide glasses (GeS2, GeSe2, As2S3, As2Se3), far
+    # more open than the II-VI / IV-VI semiconductors; tellurides (GeTe,
+    # Sb2Te3, GST) keep the dense chalcogenide factor.
     if chalcogens and "O" not in anions:
+        cations = elems - chalcogens
+        if (cations and chalcogens <= {"S", "Se"}
+                and cations <= _CHALCOGENIDE_GLASS_FORMERS):
+            return "chalcogenide_glass"
         return "chalcogenide"
 
     # Oxyhalides (O + a halogen, e.g. NaTaOCl4, BiOCl, LaOCl, ZrOCl2). These
@@ -1239,7 +1275,11 @@ def _classify_compound(composition: dict) -> str:
                     return "fluorite_dioxide"
         if has_metal:
             return "metal_oxide"
-        elif has_metalloid:
+        elif has_metalloid or (not cations and len(elems) > 1):
+            # metalloid oxides (SiO2, GeO2, B2O3) and non-metal oxides, where
+            # every element is a NONMETAL so no "cation" is left (P2O5, SO3),
+            # are covalent networks / molecular glasses, not "default".
+            # Pure oxygen (one element) still falls through to "default".
             return "covalent_oxide"
 
     # Halides
@@ -1377,12 +1417,20 @@ def _radius_for_density(sym: str, cls: str,
                      "oxyhalide", "nitride",
                      "small_cation_nitride", "hydride"}
     covalent_classes = {"group_iv", "elemental_semiconductor", "pnictide",
-                        "chalcogenide", "covalent_carbide",
+                        "chalcogenide", "chalcogenide_glass", "covalent_carbide",
                         "covalent_network_oxide"}
     # Infer oxidation state from charge balance when a composition is
     # supplied; falls back to "highest positive" inside get_ionic_radius
     # if inference returns None.
     ox = infer_oxidation_state(sym, composition) if composition else None
+    # A non-metal acting as the CATION of an oxide (P in P2O5, S in SO3,
+    # Te in TeO2) must take its highest positive Shannon state; the anion
+    # default would hand back P3- (2.12 A) and shrink the density threefold.
+    if (ox is None and composition and "O" in composition and sym != "O"
+            and sym in NONMETALS):
+        positive = [k for k in SHANNON_IONIC_RADII.get(sym, {}) if k > 0]
+        if positive:
+            ox = max(positive)
     # Antimony is oxidation-state split: Sb(V) is d0 and octahedral with no lone
     # pair, so it uses its small ionic radius like Nb(V)/Ta(V) (dense oxides such
     # as Sb2O5). Sb(III) has a stereochemically active lone pair giving open
