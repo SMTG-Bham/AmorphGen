@@ -68,6 +68,8 @@ logger = logging.getLogger(__name__)
 #
 # The adjusting policies share the same retry budget below.
 _MAX_EXPAND_RETRIES = 4
+_SOFT_PACK_FACTOR = 0.72         # soft-pack: floors used for the first placement pass at a jammed density
+_SOFT_PACK_TOL = 0.985           # soft-pack: every pair must reach this fraction of its floor
 _EXPAND_FACTOR = 1.05            # "expand": cell-edge growth per retry (~14% density drop / 3x)
 _MINSEP_REDUCE_FACTOR = 0.95     # "reduce-minsep": non-bonded minsep shrink per retry (~19% / 4x)
 _RETRY_MODES = ("expand", "reduce-minsep", "none")
@@ -91,6 +93,46 @@ def _reduce_nonbonded_minsep(minsep: dict, factor: float) -> dict:
 # ==============================================================================
 # Internal helpers
 # ==============================================================================
+
+def _push_apart(atoms: Atoms, minsep: dict, max_iter: int = 600,
+                tol: float = _SOFT_PACK_TOL, step: float = 0.5):
+    """Iteratively push every pair closer than its minimum separation apart
+    until all pairs reach ``tol`` of their floor (soft-sphere overlap removal
+    at fixed cell). Returns ``(atoms, converged, min_ratio)``.
+
+    Random sequential addition jams at a hard-sphere fraction near 0.38,
+    while overlap removal from a soft-packed start reaches 0.6, so a
+    composition that jams at its target density can still be placed there:
+    place with softened floors, then push apart to the real ones.
+    """
+    from ase.neighborlist import neighbor_list
+    pos = atoms.get_positions().copy()
+    syms = atoms.get_chemical_symbols()
+    cut = max(minsep.values()) if minsep else 3.0
+    pair_m = np.array([[_get_minsep(a, b, minsep) for b in syms] for a in syms])
+    work = atoms.copy()
+    min_ratio = 0.0
+    for it in range(max_iter):
+        work.set_positions(pos)
+        i, j, D = neighbor_list("ijD", work, cut)
+        m = pair_m[i, j]
+        d = np.linalg.norm(D, axis=1)
+        bad = (d < tol * m) & (i < j)
+        min_ratio = float((d / m).min()) if len(d) else 1.0
+        if not bad.any():
+            return work, True, min_ratio
+        ii, jj, DD, dd, mm = i[bad], j[bad], D[bad], d[bad], m[bad]
+        dd = np.where(dd < 1e-6, 1e-6, dd)
+        push = ((mm - dd) * step / dd)[:, None] * DD      # move j away from i by half the overlap
+        disp = np.zeros_like(pos)
+        np.add.at(disp, jj, 0.5 * push)
+        np.add.at(disp, ii, -0.5 * push)
+        pos = pos + disp
+        if all(atoms.pbc):
+            pos = pos @ np.linalg.inv(atoms.cell[:]) % 1.0 @ atoms.cell[:]
+    work.set_positions(pos)
+    return work, False, min_ratio
+
 
 def _get_minsep(s1: str, s2: str, minsep: dict) -> float:
     """Look up the minimum separation for a pair of species."""
@@ -566,6 +608,7 @@ def generate_random(
     repair_floor: bool = True,
     retry_mode: str = "expand",
     _expand_attempt: int = 0,
+    _soft_pack: bool = True,
 ) -> Atoms:
     """
     Generate a single random structure.
@@ -899,6 +942,39 @@ def generate_random(
             # see the _MAX_EXPAND_RETRIES note above). The adjusting policies
             # share the same retry budget and recurse with the adjusted
             # parameter; "none" never adjusts and raises immediately.
+            # First response to a stall (expand mode): keep the cell and try a
+            # soft pack: place everything with floors x0.72, then push pairs
+            # apart to the real floors. Succeeds wherever the jam is random
+            # sequential addition (dense oxides, alloys, borides, nitrides)
+            # rather than a genuinely impossible density; otherwise expand.
+            if (retry_mode == "expand" and _soft_pack
+                    and _expand_attempt == 0):
+                soft = {k: v * _SOFT_PACK_FACTOR for k, v in minsep.items()}
+                logger.info(
+                    "  [soft-pack] placement stalled at L=%.2f A (%d/%d placed); "
+                    "re-placing with floors x%.2f and pushing apart to the full "
+                    "floors at fixed cell", L, n_placed, n_atoms, _SOFT_PACK_FACTOR)
+                try:
+                    soft_atoms = generate_random(
+                        composition, cell_length_ang=L, target_density=None,
+                        density_scale=density_scale, minsep=soft,
+                        minsep_scale=minsep_scale, seed=seed,
+                        max_attempts_per_atom=max_attempts_per_atom, pbc=pbc,
+                        target_cn=target_cn if target_cn is not None else {},
+                        dmax=dmax, cn_tolerance=cn_tolerance,
+                        dmax_factor=dmax_factor, repair_iters=repair_iters,
+                        min_cn=min_cn, repair_floor=repair_floor,
+                        retry_mode="none", _soft_pack=False)
+                    packed, ok, ratio = _push_apart(soft_atoms, minsep)
+                except RuntimeError:
+                    packed, ok, ratio = None, False, 0.0
+                if ok:
+                    logger.info("  [soft-pack] done: all pairs >= %.3f of their "
+                                "floors at the requested density", ratio)
+                    packed.info["soft_pack"] = True
+                    return packed
+                logger.info("  [soft-pack] could not reach the floors (min %.2f "
+                            "of floor); expanding the cell instead", ratio)
             if retry_mode != "none" and _expand_attempt < _MAX_EXPAND_RETRIES:
                 if retry_mode == "reduce-minsep":
                     # Fixed cell: soften non-bonded minseps instead. The cell

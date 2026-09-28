@@ -156,8 +156,19 @@ amorphgen --random-gen --composition "SiO2*16" --n-structures 10 \
 ## Placement-stall policy (`--retry-mode`)
 
 Random sequential placement cannot always reach the requested density with
-fully physical hard-sphere minseps. When placement stalls, two policies are
-available:
+fully physical hard-sphere minseps: it jams when the hard-sphere fraction of
+the floors approaches 0.38, which is where dense oxides (MgO, BeO), alloys,
+borides and large-cation nitrides sit at their estimated density.
+
+The first response to a stall, in the default `expand` mode, is a soft pack:
+the structure is placed again in the same cell with every floor scaled by
+0.72, then every pair closer than its floor is pushed apart iteratively until
+all pairs reach 98.5 percent of their floors. Overlap removal from a soft
+start reaches a hard-sphere fraction of about 0.6, so the requested density
+is kept; MgO goes from 1.99 g/cm3 (after expansion) to its estimated 2.67, and
+CuZr, TiB2 and ZrN behave the same way. The structure carries
+`info["soft_pack"] = True`. Only if the floors cannot be reached does the
+cell expand, and the two policies below then apply:
 
 | Mode | Cell | Minseps | Use when |
 |---|---|---|---|

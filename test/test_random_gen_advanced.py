@@ -395,7 +395,7 @@ class TestRetryMode:
         from amorphgen.utils.radii import estimate_cell_length
         L_req = estimate_cell_length(self.COMP,
                                      density_scale=self.STALL["density_scale"])
-        a = generate_random(self.COMP, retry_mode="expand", **self.STALL)
+        a = generate_random(self.COMP, retry_mode="expand", _soft_pack=False, **self.STALL)
         # this over-dense setup stalls at least once -> cell must have grown
         assert a.cell.lengths()[0] > L_req + 1e-6
 
@@ -441,3 +441,37 @@ class TestRetryMode:
         ns = _get_parser().parse_args(
             ["--random-gen", "--composition", "SiO2*8", "--retry-mode", "none"])
         assert ns.retry_mode == "none"
+
+
+class TestSoftPack:
+    """Soft-pack: a composition that jams under random sequential addition is
+    re-placed with softened floors and pushed apart to the real floors at the
+    requested density, instead of expanding the cell (2026-09-28)."""
+
+    def test_mgo_keeps_estimated_density_and_floors(self):
+        from ase.neighborlist import neighbor_list
+        from amorphgen.pipeline.random_gen import generate_random, _get_minsep
+        from amorphgen.utils.radii import default_minsep
+        from amorphgen.utils.common import compute_density_gcm3
+        comp = {"Mg": 54, "O": 54}
+        a = generate_random(comp, seed=7)
+        assert a.info.get("soft_pack") is True
+        b = generate_random(comp, seed=7, _soft_pack=False)          # old behaviour: expands
+        assert compute_density_gcm3(a) > 1.15 * compute_density_gcm3(b)
+        floors = default_minsep(list(comp))
+        i, j, d = neighbor_list("ijd", a, max(floors.values()))
+        ratio = min(d[k] / _get_minsep(a[i[k]].symbol, a[j[k]].symbol, floors) for k in range(len(d)))
+        assert ratio >= 0.98, ratio
+
+    def test_push_apart_converges_and_wraps(self):
+        import numpy as np
+        from ase import Atoms
+        from amorphgen.pipeline.random_gen import _push_apart
+        rng = np.random.default_rng(0)
+        a = Atoms("Cu64", positions=rng.uniform(0, 9.5, (64, 3)), cell=[9.5] * 3, pbc=True)
+        out, ok, ratio = _push_apart(a, {"Cu-Cu": 2.3})
+        assert ok and ratio >= 0.985
+        frac = out.get_scaled_positions(wrap=False)
+        assert frac.min() >= -1e-9 and frac.max() <= 1 + 1e-9
+        d = out.get_all_distances(mic=True); np.fill_diagonal(d, 9)
+        assert d.min() >= 0.985 * 2.3

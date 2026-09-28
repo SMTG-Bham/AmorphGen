@@ -334,6 +334,16 @@ orphan: true
 
 ### Fixed after the rc4 upload (on GitHub main; not in the rc4 wheel on PyPI)
 
+- **Soft-pack instead of cell expansion when placement jams.** Random sequential
+  addition stalls near a 0.38 hard-sphere fraction, which the estimated density of
+  dense oxides (MgO, BeO), alloys, borides and large-cation nitrides reaches, and the
+  old response expanded the cell 5 % per retry, silently losing 20-30 % of the density
+  (benchmark: MgO placed at 1.99 instead of 2.67 g/cm3, CuZr 5.13 instead of 5.94, ZrN
+  5.38 instead of 6.22). The first response is now a soft pack at the same cell:
+  placement with floors x0.72, then iterative overlap removal (`_push_apart`) until
+  every pair reaches 0.985 of its floor, which succeeds up to a hard-sphere fraction
+  of about 0.6. All five jamming benchmark classes now keep their estimated density;
+  `info["soft_pack"]` marks the structures. Expansion remains the fallback.
 - **Density rules caught by the 100-system class benchmark (2026-09-28).** Ni80P20,
   Fe80B20 and other metal-rich metalloid glasses were classed as pnictides / borides
   (Ni4P estimated at 0.48 of the glass density; now alloy, 0.90). P2O5 fell through to

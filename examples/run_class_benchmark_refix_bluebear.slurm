@@ -23,7 +23,8 @@ module load Python/3.12.3-GCCcore-13.3.0
 source /rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312/bin/activate
 PKG=/rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/AmorphGen
 SYS=$PKG/examples/class_benchmark_systems.txt
-REFIX="Ni4P Fe4B P2O5 Be3N2 GeSe2 GeS2 As2S3 As2Se3"
+# systems whose rules changed, that jammed in the first pass (now soft-packed), or that were restored/added
+REFIX="GeSe2 GeS2 As2S3 As2Se3 Ge3N4 MgF2 AlF3 Fe2O3 Sb2S3 NiO Cu64Zr36 Pd40Ni40P20 BeO MgO Be3N2 LiCl Li2ZrCl6 BiOBr FeOCl CuZr CuZr2 NiTi Pd4Si TiB2 MgB2 ZrB2 LaB6 ZrN HfN ScN YN TiN ThO2 UO2 Y2O3 GaP InAs InSb WC"
 grep -v "^#" $SYS | grep -wE "$(echo $REFIX | tr ' ' '|')" > classes_v2/systems.txt
 relax_and_analyse () {   # $1 = dir
     amorphgen --batch-opt --input-dir $1/random_initial -o $1/random_opt \
@@ -45,4 +46,12 @@ grep -v "^#" $SYS | while read CLASS NAME COMP RHO KIND; do
     [ -d $D/random_initial ] && [ "$(ls $D/random_opt/*_opt.xyz 2>/dev/null | wc -l)" -eq 0 ] && { echo "== retry $NAME"; relax_and_analyse $D; }
 done
 python $PKG/examples/collect_class_benchmark.py classes $SYS 2>&1 | grep -v "Composition\]" | tail -3
-echo "=== done $(date): classes/class_benchmark.tsv (before) and classes_v2/class_benchmark.tsv (after)"
+# merged view for the paper: every system in the current list, taken from
+# classes_v2/ where it was redone or added and from classes/ otherwise
+rm -rf classes_final; mkdir -p classes_final
+grep -v "^#" $SYS | while read CLASS NAME COMP RHO KIND; do
+    if [ -d classes_v2/$NAME/random_opt ]; then ln -s ../classes_v2/$NAME classes_final/$NAME
+    elif [ -d classes/$NAME ]; then ln -s ../classes/$NAME classes_final/$NAME; fi
+done
+python $PKG/examples/collect_class_benchmark.py classes_final $SYS 2>&1 | grep -v "Composition\]"
+echo "=== done $(date): classes/ (first pass), classes_v2/ (redone + added), classes_final/class_benchmark.tsv (merged, current list)"
