@@ -413,3 +413,8 @@ orphan: true
   no longer defined. The cell now computes the unrelaxed In-O coordination itself.
 - **ASE cross-references in the docs** pointed at the retired wiki.fysik.dtu.dk
   inventory; they now resolve against docs.ase-lib.org.
+- **License metadata in the PEP 639 form.** `license = "MIT"` (an SPDX expression) and
+  `license-files = ["LICENSE"]` replace the `{text = "MIT"}` table and the `License ::`
+  classifier, which setuptools deprecated and stops accepting on 2027-02-18. Building
+  from source now needs setuptools >= 77 (pip's isolated builds fetch it), and the
+  distributions carry `Metadata-Version: 2.4`, so uploading them needs twine >= 6.1.
