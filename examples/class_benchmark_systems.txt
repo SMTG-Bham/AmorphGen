@@ -14,6 +14,7 @@ metal_oxide               Y2O3      Y2O3*44        5.01  c
 metal_oxide               Fe2O3     Fe2O3*44       5.24  c
 metal_oxide               MgO       MgO*108         3.58  c
 metal_oxide               NiO       NiO*108         6.67  c
+metal_oxide               Sm2O3     Sm2O3*44        8.35  c
 rutile_dioxide            TiO2      TiO2*72        3.80  a
 rutile_dioxide            SnO2      SnO2*72        6.95  c
 rutile_dioxide            RuO2      RuO2*72        6.97  c
@@ -57,7 +58,6 @@ alloy                     CuZr2     CuZr2*72       6.90  a
 alloy                     NiTi      NiTi*108       6.45  c
 alloy                     Pd4Si     Pd4Si*43      10.30  a
 alloy                     Cu64Zr36  Cu=138,Zr=78    7.60  a
-alloy                     Pd40Ni40P20  Pd=86,Ni=86,P=43  9.30  a
 halide                    ZnCl2     ZnCl2*72       2.55  a
 halide                    BeF2      BeF2*72        1.99  a
 halide                    CaF2      CaF2*72        3.18  c

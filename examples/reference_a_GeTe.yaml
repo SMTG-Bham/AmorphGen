@@ -1,0 +1,41 @@
+# Literature ranges for amorphous GeTe (phase-change material).
+# Pass to amorphgen via:
+#   amorphgen --analyse --input-dir DIR --reference examples/reference_a_GeTe.yaml
+#
+# Ranges are deliberately conservative: DFT melt-quench (Akola & Jones) and
+# EXAFS/neutron studies agree on fourfold Ge and roughly threefold Te in a
+# defective-octahedral (Peierls-distorted) local geometry with ~90 deg angles,
+# a bimodal Ge-Te bond-length distribution (short ~2.6-2.8 A, long ~3.0-3.2 A)
+# and a large fraction of fourfold ABAB rings. The first-shell cutoff sits in
+# the gap between the two bond-length populations, so an auto-rdf cutoff near
+# 3.0-3.2 A is expected; check the report header.
+
+system: a-GeTe
+
+references:
+  - "Akola & Jones, Phys. Rev. B 76, 235201 (2007)  -- DFT melt-quench a-GeTe and a-GST: CN, rings, ABAB squares"
+  - "Kolobov et al., Nature Materials 3, 703 (2004)  -- EXAFS: umbrella-flip model, short/long Ge-Te bonds"
+  - "Raty et al., Nature Communications 6, 7467 (2015)  -- Peierls distortion in amorphous phase-change materials"
+
+density:
+  expected: [5.50, 5.95]      # amorphous films 5.6-5.9 g/cm^3 (crystal 6.14)
+  units: "g/cm^3"
+
+bond_distances:
+  Ge-Te:
+    expected: [2.72, 2.90]    # short-bond population; mean sits ~2.78-2.85 A
+    units: "A"
+
+coordination:
+  Ge-Te:
+    mean_expected: [3.3, 4.2] # Ge fourfold overall, part of it Ge-Ge; Ge-Te alone 3.3-4
+  Te-Ge:
+    mean_expected: [2.4, 3.2] # Te about threefold
+
+bond_angles:
+  Te-Ge-Te:
+    expected: [88.0, 100.0]   # defective octahedral, ~90-95 deg; a tetrahedral fraction pushes it up
+    units: "deg"
+  Ge-Te-Ge:
+    expected: [88.0, 100.0]
+    units: "deg"
