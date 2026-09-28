@@ -42,14 +42,20 @@ classifiers = [
 # arrives transitively with any MLIP extra ([mace], [chgnet], [sevennet]);
 # device="auto" resolves to "cpu" when torch is absent (utils.common.
 # resolve_device). Keeps the bare install ~50 MB instead of ~2 GB.
+#
+# The lower bounds are tested: the min-deps CI job installs exactly these
+# versions on the oldest supported Python. Raise one when that job fails.
 dependencies = [
-    "ase>=3.22",
+    # ase.filters (imported at module level) arrived in 3.23;
+    # ase.md.nose_hoover_chain.IsotropicMTKNPT (npt_method="mtk") in 3.25.
+    "ase>=3.25",
     "numpy>=1.24",
     "scipy>=1.10",
     "pyyaml>=6.0",
     # Plotting is part of the base analysis story (--analyse --save-plot on a
-    # bare install); matplotlib is ML-free and modest (~30 MB).
-    "matplotlib>=3.5",
+    # bare install); matplotlib is ML-free and modest (~30 MB). Before 3.6.1,
+    # violinplot (the density panel) raises IndexError under numpy>=1.24.
+    "matplotlib>=3.6.1",
 ]
 
 [project.optional-dependencies]

@@ -1342,7 +1342,9 @@ def batch_random(
         lf.write(msg + "\n")
         lf.flush()
 
-    lf = open(logfile, "a" if resume else "w")
+    # UTF-8, not the locale encoding: the auto-derive line has non-ASCII
+    # (→, ρ, Δχ) that cp1252 (the Windows default) cannot encode
+    lf = open(logfile, "a" if resume else "w", encoding="utf-8")
     try:
         _log(f"\n{bar}", lf)
         _log(f"  AmorphGen - Random Structure Generation", lf)

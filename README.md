@@ -883,7 +883,7 @@ Application case studies (these assume you have done the workflow tutorials):
 ```
 AmorphGen/
 ├── .github/workflows/
-│   └── test.yml                    ← CI (pytest on 3.10/3.11/3.12)
+│   └── test.yml                    ← CI (Linux/macOS/Windows, backends, min deps, wheel)
 ├── amorphgen/
 │   ├── __init__.py                 ← v1.0.0rc4
 │   ├── cli.py                      ← CLI entry point (amorphgen command)

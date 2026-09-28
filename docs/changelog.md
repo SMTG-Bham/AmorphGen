@@ -336,6 +336,14 @@ orphan: true
   (env `amorphgen-dev`) adds the torch-sim engine, pytest and the Sphinx toolchain.
   Both install through the `pyproject.toml` extras, so the dependencies are declared in
   one place. `conda env create -f build_tools/environment.yml`.
+- **Wider CI.** Every push and pull request to `main` and `dev` now also runs the
+  torch-free suite on macOS and Windows; the torch-sim engine, CHGNet and pymatgen tests
+  on CPU-only PyTorch (previously skipped in CI), with a coverage report; the suite with
+  every dependency at the lowest version `pyproject.toml` allows; the suite against the
+  built wheel; and a ruff check for syntax errors and undefined names. The docs build
+  treats Sphinx warnings as errors and runs for `dev` too, the `build_tools/` conda
+  environments are built and tested when they or the extras change, and the weekly
+  canary covers SevenNet (`7net-0`) as well as CHGNet. See `CONTRIBUTING.md`.
 
 ### Fixed after the rc4 upload (on GitHub main; not in the rc4 wheel on PyPI)
 
@@ -391,3 +399,17 @@ orphan: true
   binary oxides keep the mirrored layout, multi-cation compounds get one panel per
   cation-centred pair (Ga-O, In-O, Zn-O) plus the anion total (O-(Ga+In+Zn)), which
   also goes into `analysis_cn.csv`.
+- **Lower bounds that could not work.** `ase>=3.22` and `matplotlib>=3.5` allowed
+  versions that break: `import amorphgen` needs `ase.filters` (ASE 3.23), the `mtk`
+  barostat (the stage-4 default) needs `IsotropicMTKNPT` (ASE 3.25), and before 3.6.1
+  matplotlib's `violinplot` (the density panel of `--analyse --save-plot`) raises
+  `IndexError` with numpy >= 1.24. The bounds are now `ase>=3.25` and
+  `matplotlib>=3.6.1`, and the new `min-deps` CI job tests them.
+- **`--random-gen` failed on Windows.** `random_gen.log` was written in the locale
+  encoding, and cp1252 cannot encode the `→`, `ρ` and `Δχ` of the auto-derive line, so
+  `batch_random` raised `UnicodeEncodeError` before placing a structure. The log is now
+  written, and read back by `rank_from_log`, as UTF-8.
+- **Tutorial 1 stopped with a `NameError`** in its summary table: `cn_all_unrelaxed` was
+  no longer defined. The cell now computes the unrelaxed In-O coordination itself.
+- **ASE cross-references in the docs** pointed at the retired wiki.fysik.dtu.dk
+  inventory; they now resolve against docs.ase-lib.org.

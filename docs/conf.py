@@ -67,7 +67,7 @@ napoleon_use_rtype = True
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
-    "ase": ("https://wiki.fysik.dtu.dk/ase/", None),
+    "ase": ("https://docs.ase-lib.org/", None),
 }
 
 # -- HTML output options ------------------------------------------------------

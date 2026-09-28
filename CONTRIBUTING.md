@@ -52,7 +52,40 @@ pytest test/ -v --tb=short --run-mace
 ```
 
 All tests must pass on Python 3.10, 3.11, and 3.12 before a pull request
-will be merged. GitHub Actions CI runs automatically on all pull requests.
+will be merged. GitHub Actions CI runs automatically on every push and pull
+request to `main` and `dev`:
+
+| Job | Checks |
+|---|---|
+| `lint` | syntax errors and undefined names (ruff) in the package, tests, docs config and tutorial notebooks |
+| `test` | the torch-free suite on Python 3.10, 3.11 and 3.12 on Linux, and on 3.12 on macOS and Windows |
+| `backends` | the full suite with CPU-only PyTorch, the torch-sim engine and CHGNet, with a coverage report |
+| `min-deps` | the suite on Python 3.10 with every dependency at the lowest version `pyproject.toml` allows |
+| `package` | the sdist and wheel build, and the suite run against the installed wheel |
+| `light-install` | a bare `pip install` (no extras) stays torch-free |
+
+The documentation builds with Sphinx warnings as errors (`docs.yml`), the
+conda environments in `build_tools/` are built and tested whenever they or
+`pyproject.toml` change (`conda.yml`), and a weekly canary relaxes a structure
+with CHGNet and SevenNet (`canary.yml`). The MACE tests (`--run-mace`) and the
+CUDA tests (`test/test_torchsim_gpu.py`) need a model download or a GPU and are
+run outside CI, before releases.
+
+To run the `backends` or `min-deps` job locally:
+
+```bash
+# backends
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install -e ".[torchsim,chgnet,dev]"
+pytest test/
+
+# min-deps, in a fresh Python 3.10 environment (needs uv)
+uv pip install --resolution lowest-direct -e ".[dev]"
+pytest test/
+```
+
+When `min-deps` fails, the code needs a newer version of a dependency than
+`pyproject.toml` declares: raise that lower bound.
 
 ## Code style
 
