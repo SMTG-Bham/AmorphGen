@@ -334,6 +334,13 @@ orphan: true
 
 ### Fixed after the rc4 upload (on GitHub main; not in the rc4 wheel on PyPI)
 
+- **Placement no longer changes the density silently.** The auto-expand and
+  auto-retry:minsep messages were `logger.info`, and the package configures no logging
+  handler, so a 20-40 % density loss was invisible on the CLI. They are now warnings
+  (visible with no logging setup), and `batch_random` prints and logs every structure's
+  achieved density, with an explicit `WARNING: density X, -44% from the requested Y`
+  line whenever it misses the request by more than 2 %. Soft-packed structures are
+  marked `[soft-packed at the requested cell]`.
 - **Soft-pack instead of cell expansion when placement jams.** Random sequential
   addition stalls near a 0.38 hard-sphere fraction, which the estimated density of
   dense oxides (MgO, BeO), alloys, borides and large-cation nitrides reaches, and the

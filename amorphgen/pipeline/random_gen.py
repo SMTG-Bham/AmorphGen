@@ -973,7 +973,7 @@ def generate_random(
                                 "floors at the requested density", ratio)
                     packed.info["soft_pack"] = True
                     return packed
-                logger.info("  [soft-pack] could not reach the floors (min %.2f "
+                logger.warning("  [soft-pack] could not reach the floors (min %.2f "
                             "of floor); expanding the cell instead", ratio)
             if retry_mode != "none" and _expand_attempt < _MAX_EXPAND_RETRIES:
                 if retry_mode == "reduce-minsep":
@@ -982,7 +982,7 @@ def generate_random(
                     new_L = L
                     new_minsep = _reduce_nonbonded_minsep(
                         minsep, _MINSEP_REDUCE_FACTOR)
-                    logger.info(
+                    logger.warning(
                         "  [auto-retry:minsep] placement stalled at fixed "
                         "L=%.2f A (%d/%d placed); reducing non-bonded "
                         "minseps by 5%% (cell held fixed; bonds untouched)",
@@ -991,7 +991,7 @@ def generate_random(
                 else:
                     new_L = L * _EXPAND_FACTOR
                     new_minsep = minsep
-                    logger.info(
+                    logger.warning(
                         "  [auto-expand] placement stalled at L=%.2f A "
                         "(%d/%d placed); retrying at L=%.2f A "
                         "(physical minsep kept; relaxation densifies)",
@@ -1617,6 +1617,20 @@ def batch_random(
             seed_str = f" (seed={seed_i})" if seed_i is not None else ""
             _log(f"  [{generated+1}/{n_structures}] {out_formula} -> "
                  f"{fname}{seed_str}", lf)
+
+            # The achieved density, always: a placement stall can change it
+            # (cell expansion) and a silent 20-30 % loss is exactly what the
+            # user must not have to dig out of a debug log.
+            from ..utils.common import compute_density_gcm3
+            rho = compute_density_gcm3(atoms)
+            note = " [soft-packed at the requested cell]" if atoms.info.get("soft_pack") else ""
+            wanted = kwargs.get("target_density") or est_density
+            if wanted and abs(rho - wanted) / wanted > 0.02:
+                _log(f"    WARNING: density {rho:.2f} g/cm3, {100 * (rho / wanted - 1):+.0f}% "
+                     f"from the requested {wanted:.2f} (placement stalled and the "
+                     f"cell was expanded){note}", lf)
+            else:
+                _log(f"    density {rho:.2f} g/cm3{note}", lf)
 
             sc_report = atoms.info.get("sc_report")
             if sc_report:
