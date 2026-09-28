@@ -403,7 +403,12 @@ def _batch_optimize_torchsim(files, output_dir, cfg, **kwargs):
             pass
 
     def _is_oom(exc):
-        return "out of memory" in str(exc).lower() or "OutOfMemoryError" in str(exc)
+        # torch raises OutOfMemoryError / "CUDA out of memory"; torch-sim's
+        # neighbour list (NVIDIA warp) raises RuntimeError("Failed to allocate
+        # N bytes on device 'cuda:0'") for the same condition
+        msg = str(exc).lower()
+        return ("out of memory" in msg or "OutOfMemoryError" in str(exc)
+                or "failed to allocate" in msg)
 
     def _relax_chunk(chunk):
         """Relax *chunk*; on a GPU out-of-memory error split it in half and retry.
