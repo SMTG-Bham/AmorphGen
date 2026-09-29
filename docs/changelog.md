@@ -409,9 +409,14 @@ orphan: true
   acting as an oxide cation its positive Shannon radius only fires when the table lists
   one, and sulfur and selenium had only their anionic state, so both fell back to an
   anion radius four times too large (SO3 1.10 against 1.92 g/cm3, SeO2 1.66 against
-  3.95). Their positive states are now in the table, and an element with no positive
-  state falls back to its covalent radius rather than its anion radius. Both now land on
-  the reference density; P2O5, TeO2 and every other composition are unchanged.
+  3.95). Their positive states are now in the table, and a non-metal that is promoted to
+  cation but has no positive state falls back to its covalent radius. The rule is gated
+  on the element actually being a cation in that compound, which charge balance decides,
+  so the chlorine of an oxychloride, the nitrogen of an oxynitride and the hydrogen of a
+  hydroxide keep their ionic radii: giving them covalent ones halved the cell and doubled
+  the density (BiOCl 1.50 of its crystal value instead of 0.75, Si2N2O 1.98 instead of
+  0.78). `anion_elements()` moved to `utils.radii`, where the radius selector can reach
+  it, and is re-exported from `analysis.structure`.
 - **Placement no longer changes the density silently.** The auto-expand and
   auto-retry:minsep messages were `logger.info`, and the package configures no logging
   handler, so a 20-40 % density loss was invisible on the CLI. They are now warnings

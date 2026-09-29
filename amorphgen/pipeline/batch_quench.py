@@ -303,8 +303,10 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
     # the batched engine runs a whole chunk on one noise stream, so the index
     # that has to separate jobs is the JOB's: --run-index, or the SLURM array
     # task, resolved exactly as the ASE path resolves it
-    from ..utils.common import run_index_for
-    job_index = run_index_for(cfg)
+    from ..utils.common import run_index_for, scoped_run_index
+    _explicit = cfg.get("run_index")
+    job_index = (scoped_run_index(0, int(_explicit), "batch")   # same band as the ASE path
+                 if _explicit is not None else run_index_for(cfg))
     batch_size = batch_size or (cfg.get("opt", {}) or {}).get("batch_size") or "auto"
 
     runs = []                      # (run_dir, snapshot_file)
