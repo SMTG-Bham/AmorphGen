@@ -3,7 +3,7 @@
 | File | Environment | Installs |
 |---|---|---|
 | `environment.yml` | `amorphgen` | AmorphGen with MACE and CHGNet, the recommended default |
-| `environment_dev.yml` | `amorphgen-dev` | the same plus the torch-sim engine, pytest and the Sphinx toolchain |
+| `environment_dev.yml` | `amorphgen-dev` | the same plus the torch-sim engine, C/C++ compilers, pytest and the Sphinx toolchain |
 
 Both take Python from conda-forge and install this checkout with pip in editable
 mode, so a `git pull` or a local edit takes effect without reinstalling. The
