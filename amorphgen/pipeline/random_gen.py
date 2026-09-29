@@ -40,6 +40,7 @@ from ..utils.radii import (
     estimate_cell_length as _estimate_cell_length,
     auto_target_cn as _auto_target_cn,
     format_auto_derive_summary as _format_auto_derive_summary,
+    _hydrogenated_host,
 )
 
 logger = logging.getLogger(__name__)
@@ -212,7 +213,9 @@ def _auto_dmax(minsep: dict, target_cn: dict, factor: float = 1.5,
 
     With ``composition`` the pairs are classified in the compound
     (``classify_bond``), so the P-O of a phosphate is a bond and a pair of
-    cations (Li-P, Na-B, K-Si) is not.
+    cations (Li-P, Na-B, K-Si) is not. A hydrogenated network (a-Si:H,
+    a-C:H) has no anions: its host bonds as it does without H (Si-Si as in
+    a-Si, Si-Ge as in SiGe), each X-H is a bond and H-H never is.
     """
     dmax = {}
     cn_elements = set(target_cn.keys())
@@ -223,8 +226,15 @@ def _auto_dmax(minsep: dict, target_cn: dict, factor: float = 1.5,
         s1, s2 = pair.split("-")
         all_elements.add(s1)
         all_elements.add(s2)
-    has_anion = any(s in NONMETALS for s in all_elements)
-    is_pure = all(p.split("-")[0] == p.split("-")[1] for p in minsep)
+    host = _hydrogenated_host(composition) if composition else None
+    if host is not None:
+        has_anion = False
+        is_pure = len(host) == 1
+        bonding = set(host)            # the elements that bond to themselves
+    else:
+        has_anion = any(s in NONMETALS for s in all_elements)
+        is_pure = all(p.split("-")[0] == p.split("-")[1] for p in minsep)
+        bonding = all_elements
 
     for pair, dist in minsep.items():
         s1, s2 = pair.split("-")
@@ -232,7 +242,7 @@ def _auto_dmax(minsep: dict, target_cn: dict, factor: float = 1.5,
         if s1 == s2:
             # Pure elements: tight dmax so atoms are placed close enough
             # for MLIP to relax into proper bonds
-            if is_pure and s1 in cn_elements:
+            if is_pure and s1 in cn_elements and s1 in bonding:
                 dmax[pair] = dist * 1.2
             continue
 
@@ -791,6 +801,7 @@ def generate_random(
     _min_cn_arr = np.zeros(_n_types, dtype=int)
     if use_sc:
         centres = _cation_nonmetals(composition)    # P, S, C, H... as cations
+        host = _hydrogenated_host(composition) or {}  # the C of a-C:H is no anion
         for s in unique_syms:
             idx = _sym_to_idx[s]
             if isinstance(min_cn, dict):
@@ -798,7 +809,8 @@ def generate_random(
             elif min_cn is not None:
                 floor = int(min_cn)
             else:                                   # auto default
-                floor = 2 if s in NONMETALS and s not in centres else 3
+                anion = s in NONMETALS and s not in centres and s not in host
+                floor = 2 if anion else 3
             # never demand more than the target CN (e.g. CN-2 cations)
             tgt = _target_cn_arr[idx]
             if tgt < 999:

@@ -69,6 +69,12 @@ In a phosphate, a sulfate or a carbonate, the P, S or C is a nonmetal but it is 
 
 With a composition, `classify_bond(sym_a, sym_b, composition)` applies these roles: a nonmetal cation and an anion are `ionic`, a nonmetal cation and another cation are `cation-cation` (a second-shell contact across the anion, never a bond), and two cations of a compound with anions are never `ionic`. That last rule is why Na-B in a borate and K-Si in a silicate are placed 2.16 and 2.75 Å apart, like Na-Si, rather than as the ionic bond their Δχ ≥ 1 would suggest.
 
+#### Hydrogenated networks: a-Si:H, a-C:H
+
+C, Si and Ge with H and nothing else, with at most one H per host atom, are the `hydrogenated_network` class: a-Si:H, a-Ge:H, a-C:H up to the polymer-like 50 % H, a-SiC:H and a-SiGe:H. H there caps a host atom through a covalent bond; it is not the H⁻ of LiH, MgH₂ or NaAlH₄, which stay `hydride`. The host keeps what it has without H: its Cordero radii and packing factor, its minimum separations (Si-Si 1.87 Å as in a-Si, C-C 1.22 Å as in a-C, the C-C anion packing of SiC) and its bonds. Each H targets one bond (the hosts target 4) and is kept at 0.8 of its bond from any host (C-H 0.86, Si-H 1.18 Å). Two H can share a host atom (H-H 1.21 Å in a-C:H, 1.67 Å in a-Si:H) but cannot form H₂.
+
+In the density estimate H is sized at 0.90 Å, not its Cordero 0.31 Å, which would give it no volume: each H replaces a host-host bond and brings free volume with it, so the density falls as the H content rises. Si₆₄H₈ (11 % H) comes out at 2.30 g/cm³ (glow-discharge a-Si:H ≈ 2.2), and a-C:H at 2.19, 1.84, 1.52 and 1.24 g/cm³ for 20, 30, 40 and 50 % H (hard a-C:H 1.6–2.2 g/cm³ at 30–40 % H, polymer-like 1.2–1.6 g/cm³ at 40–50 %). The real density also depends on how the film was grown (sp³ fraction, voids), so use `--target-density` when the measured value is known.
+
 ### Automated density
 
 Cell volume is estimated by **class-aware sphere packing**: the composition is
@@ -100,6 +106,7 @@ over every anion-former (oxynitrides, oxyfluorides).
 | `pnictide` | Cordero covalent | 0.32 | GaAs, InP, InAs |
 | `covalent_carbide` | Cordero covalent | 0.32 | SiC, B4C |
 | `group_iv` | Cordero covalent | 0.30 | Si, Ge, C |
+| `hydrogenated_network` | Cordero covalent (host), H 0.90 Å | the H-free host's (0.28–0.32) | a-Si:H, a-Ge:H, a-C:H, a-SiC:H, a-SiGe:H |
 | `chalcogenide` | Cordero covalent | 0.30 | ZnS, CdTe, GeTe |
 | `chalcogenide_glass` | Cordero covalent | 0.23 | GeS2, GeSe2, As2S3, As2Se3 (network glasses; tellurides stay `chalcogenide`) |
 | `elemental_semiconductor` | Cordero covalent | 0.28 | a-Se, a-Te, a-As, a-Sb, a-P |

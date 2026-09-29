@@ -597,3 +597,24 @@ orphan: true
   carries no target CN), so a centre starts with about as many O as Si does in an alkali
   silicate (P 2.75 of 4, C 2.05 of 3 on average), and it relies on the relaxation to
   complete the polyhedron.
+- **Random generation could not build a-Si:H or a-C:H.** H is on the anion table as the
+  H- of LiH, so a-Si:H was classed as a hydride and sized with the Si4+ ionic radius:
+  15.1 g/cm³ for Si64H8 against a measured ~2.2 (a-Ge:H 32 g/cm³). a-C:H was a covalent
+  carbide with H as its anion, at 3.5 g/cm³ whatever its H content against a measured
+  1.2-2.0, and H targeted 6 neighbours. As anions, C and H were kept 2.24 Å from
+  everything, so no C-C or C-H bond could be placed, and the placement of both failed
+  after four cell expansions. C, Si and Ge with H and nothing else, with at most one H per
+  host atom, are now the `hydrogenated_network` class: a-Si:H, a-Ge:H, a-C:H, a-SiC:H,
+  a-SiGe:H. The host keeps what it has without H (Cordero radii, packing factor, minimum
+  separations and bonds of a-Si, a-C, SiC or SiGe), so the estimate runs into those as the
+  H goes to zero. The hosts target 4 bonds and H one, and a network's C gets the
+  three-bond floor of Si. H is kept at 0.8 of its bond from a host (C-H 0.86, Si-H
+  1.18 Å); two H can share a host (H-H 1.21 Å in a-C:H, 1.67 Å in a-Si:H) but cannot
+  form H2. In the density estimate H is sized at 0.90 Å, about 10 Å³ per H, so the density
+  falls with the H content: Si64H8 is 2.30 g/cm³, and a-C:H 2.19, 1.84, 1.52 and
+  1.24 g/cm³ at 20, 30, 40 and 50 % H. The cells now place at that density with every H
+  bonded to a host; a MACE-MPA-0 cell relaxation takes two Si64H8 cells to 2.19 and
+  2.22 g/cm³, with every H on one Si. `--check-dimers` no longer flags the C-C bonds and
+  CH2 pairs of a-C:H. The real hydrides (LiH, MgH2, NaAlH4, TiH2) and all 100
+  class-benchmark systems are unchanged. **Behaviour change:** `infer_oxidation_state`
+  returns `None` for these networks (Si50H50 gave Si +1).

@@ -307,13 +307,17 @@ def infer_oxidation_state(sym: str, composition: dict) -> int | None:
     any other; the Li of Li2SO4 is +1, not the +5 that counting S as an
     anion gave. Returns ``None`` for an anion, for Te (a metalloid on the
     anion table, left to the highest-state default whether it is the
-    anion or the cation), and when the inference is ambiguous (multiple
-    cation species, non-integer oxidation state, or no anions at all),
-    letting the caller fall back to a default Shannon entry.
+    anion or the cation), for the covalent hydrogenated networks (a-Si:H,
+    where charge balance against H- made Si50H50 Si+1), and when the
+    inference is ambiguous (multiple cation species, non-integer oxidation
+    state, or no anions at all), letting the caller fall back to a default
+    Shannon entry.
     """
     if ((sym in ANION_CHARGES or sym in NONMETALS)
             and sym not in cation_nonmetals(composition)):
         return None  # not a cation we resolve here
+    if _hydrogenated_host(composition) is not None:
+        return None  # covalent network, no ionic charges
 
     anions = anion_elements(composition)
 
@@ -518,6 +522,34 @@ _CHALCOGENIDE_GLASS_FORMERS = frozenset({"Ge", "Si", "As", "Sb", "B", "P"})
 _GLASS_METALLOIDS = frozenset({"P", "B", "Si", "Ge", "As", "Sb"})
 _METAL_RICH_ALLOY_MAX_METALLOID_FRAC = 0.35
 
+# Hosts of the hydrogenated group-IV networks (a-Si:H, a-Ge:H, a-C:H, a-SiC:H,
+# a-SiGe:H). Their H caps a host atom through a covalent X-H bond; it is not the
+# H- anion of the metal hydrides (LiH, MgH2, NaAlH4, TiH2).
+_HYDROGENATED_NETWORK_HOSTS = frozenset({"C", "Si", "Ge"})
+
+
+def _hydrogenated_host(composition) -> dict | None:
+    """The H-free host of a hydrogenated group-IV network, else None.
+
+    A network is C, Si and/or Ge with H and nothing else, with at most one H
+    per host atom, so that each host atom keeps at least three of its four
+    bonds in the network: a-Si:H (Si64H8), a-C:H up to the polymer-like 50 %
+    H, a-SiC:H. More H than that makes chains and molecules (polyethylene,
+    SiH4), and any other element (O, N, F, a metal) leaves the compound to
+    the class rules for that element.
+
+    ``composition`` may be a mapping of counts (preferred) or a bare set of
+    symbols, in which case one of each is assumed.
+    """
+    counts = (dict(composition) if hasattr(composition, "items")
+              else {e: 1 for e in composition})
+    host = {e: n for e, n in counts.items() if e != "H"}
+    n_h = counts.get("H", 0)
+    if (n_h <= 0 or not host or not set(host) <= _HYDROGENATED_NETWORK_HOSTS
+            or n_h > sum(host.values())):
+        return None
+    return host
+
 
 def auto_target_cn(composition: dict) -> tuple[dict | None, int]:
     """
@@ -529,6 +561,8 @@ def auto_target_cn(composition: dict) -> tuple[dict | None, int]:
 
     - Metalloids (Si, Ge, B): CN=4, tolerance=0 (strict tetrahedral)
     - Pure Si/Ge: CN=4, tolerance=0
+    - Hydrogenated networks (a-Si:H, a-C:H, a-SiC:H): C, Si, Ge CN=4 and
+      H CN=1 (one X-H bond), tolerance=0
     - Metals in nitrides: CN=4, tolerance=0 (wurtzite tetrahedral)
     - Metals in halides/sulfides: CN=6, tolerance=0 (strict octahedral)
     - Metals in oxides: CN=5, tolerance=1 (flexible 4-6 range)
@@ -589,6 +623,11 @@ def _class_target_cn(composition: dict,
         # Pure group IV (Si, Ge, SiGe) — tetrahedral CN=4
         target_cn = {s: 4 for s in elems}
         return target_cn, 0
+
+    if cls == "hydrogenated_network":
+        # a-Si:H, a-C:H: tetravalent hosts, each H bonded to one of them.
+        # Strict, so no host is placed next to an H that has its bond.
+        return {s: 1 if s == "H" else 4 for s in elems}, 0
 
     if cls == "pnictide":
         # III-V compounds (GaAs, InP, InAs) — tetrahedral CN=4
@@ -950,6 +989,9 @@ def default_minsep(symbols: list[str], scale: float = 0.85,
     a phosphate or the C of a carbonate, is kept at bonding distance from
     its anions (P-O 1.26 A, C-O 1.06 A) and away from the other cations.
 
+    A hydrogenated network (a-Si:H, a-C:H) has no anions: see
+    :func:`_hydrogenated_network_minsep`.
+
     Parameters
     ----------
     symbols : list of str
@@ -965,10 +1007,13 @@ def default_minsep(symbols: list[str], scale: float = 0.85,
     dict
         Minimum separations keyed as "A-B" with A <= B alphabetically.
     """
+    counts = Counter(symbols)
+    host = _hydrogenated_host(counts)
+    if host is not None:
+        return _hydrogenated_network_minsep(host, scale, target_cn)
     unique = sorted(set(symbols))
     minsep = {}
     cn_map = target_cn or {}
-    counts = Counter(symbols)
     centres = cation_nonmetals(counts)
     anion_syms = [s for s in unique if s in NONMETALS and s not in centres]
     has_anion = bool(anion_syms)
@@ -1172,6 +1217,36 @@ def default_minsep(symbols: list[str], scale: float = 0.85,
     return minsep
 
 
+def _hydrogenated_network_minsep(host: dict, scale: float,
+                                 target_cn: dict | None) -> dict:
+    """Minsep of a hydrogenated group-IV network (a-Si:H, a-C:H, a-SiC:H).
+
+    The H-free host keeps the floors it has on its own (Si-Si 1.87 A as in
+    a-Si, C-C 1.22 A as in a-C, the C-C anion packing of SiC). Each H is
+    bonded to a host atom at the covalent radii used for any covalent pair
+    (C-H 0.86, Si-H 1.18 A, 0.8 of the bond), and two H come no closer than
+    on one host atom at a right angle (H-H 1.21 A in a-C:H, 1.67 A in
+    a-Si:H), below the geminal pair of a CH2 (1.78 A) or SiH2 (2.42 A) and
+    far above the 0.74 A of an H2 molecule. As anions, C and H were kept
+    2.24 A from everything, so no C-C or C-H bond could be placed.
+    """
+    minsep = default_minsep(host, scale=scale, target_cn=target_cn)
+    sf = SCALE_FACTORS["covalent"]
+    r_h = covalent_radii[atomic_numbers["H"]]
+    x_h = []
+    for s in sorted(host):
+        r = get_metallic_radius(s) or covalent_radii[atomic_numbers[s]]
+        key = f"{s}-H" if s <= "H" else f"H-{s}"
+        minsep[key] = (r + r_h) * sf
+        x_h.append(minsep[key])
+        logger.info("  minsep %s = %.2f A  (covalent X-H: %.3f + %.3f, "
+                    "scale=%.2f)", key, minsep[key], r, r_h, sf)
+    minsep["H-H"] = 2**0.5 * min(x_h)
+    logger.info("  minsep H-H = %.2f A  (two H on one host atom, right "
+                "angle)", minsep["H-H"])
+    return minsep
+
+
 # ==============================================================================
 # Density / cell volume estimation
 # ==============================================================================
@@ -1262,6 +1337,13 @@ PACKING_FACTORS = {
                                      # Cordero radii for both atoms (Be 0.96,
                                      # O 0.66) + 0.35 -> rho ~2.96 vs measured
                                      # amorphous 3.01 g/cm3 (ionic model: 1.42)
+    "hydrogenated_network": 0.30,  # a-Si:H, a-Ge:H, a-C:H, a-SiC:H. NOMINAL
+                                   # value only: get_packing_factor uses the
+                                   # class of the H-free host (group_iv 0.30,
+                                   # elemental_semiconductor 0.28 for a-C:H,
+                                   # covalent_carbide 0.32), so the estimate
+                                   # runs continuously into a-Si / a-C / SiC
+                                   # as the H goes to zero; see _NETWORK_H_RADIUS
     # Carbides split by cation chemistry (2026-05-11) — see
     # _TRANSITION_METAL_CARBIDE_CATIONS and _classify_compound for the routing.
     "covalent_carbide":     0.32,  # SiC, B4C — Cordero radii, open network
@@ -1280,6 +1362,19 @@ PACKING_FACTORS = {
     "default":         0.52,  # fallback (ionic)
 }
 
+# Radius (A) of H in the density estimate of a hydrogenated network; the host
+# atoms keep their Cordero radii. At its Cordero radius (0.31 A) H adds no
+# volume, so the H content would not move the density: a-C:H stayed near the
+# 3.0 g/cm3 of H-free a-C from 10 to 50 at.% H. But each H replaces a host-host
+# bond and brings its share of free volume (the H-decorated vacancies of
+# a-Si:H), so the measured density falls steadily with H. At 0.90 A and the
+# host packing factor one H adds about 10 A^3, which gives a-Si:H with 11 at.% H
+# 2.30 g/cm3 (glow-discharge a-Si:H ~2.2 at ~10 %) and a-C:H 2.19 / 1.84 /
+# 1.52 / 1.24 at 20 / 30 / 40 / 50 at.% H (hard a-C:H 1.6-2.2 at 30-40 %,
+# polymer-like 1.2-1.6 at 40-50 %; Robertson, Mater. Sci. Eng. R 37, 129
+# (2002); Casiraghi et al., PRB 72, 085401 (2005)).
+_NETWORK_H_RADIUS = 0.90
+
 # NOTE: ``AMORPHOUS_DENSITY_FACTORS`` and the associated elemental
 # density-mixing branch were retired in favour of the unified
 # class-aware sphere-packing model. ``estimate_density()`` (which
@@ -1291,10 +1386,10 @@ def _classify_compound(composition: dict) -> str:
     """
     Classify a compound by material class for packing factor selection.
 
-    Returns one of: "group_iv", "pnictide", "chalcogenide",
-    "covalent_oxide", "covalent_network_oxide", "metal_oxide", "halide",
-    "oxyhalide", "nitride", "carbide", "hydride", "boride", "alloy",
-    "default".
+    Returns one of: "group_iv", "hydrogenated_network", "pnictide",
+    "chalcogenide", "covalent_oxide", "covalent_network_oxide",
+    "metal_oxide", "halide", "oxyhalide", "nitride", "carbide", "hydride",
+    "boride", "alloy", "default".
     """
     elems = set(composition.keys())
     has_metal = any(s not in NONMETALS and s not in METALLOIDS for s in elems)
@@ -1311,6 +1406,13 @@ def _classify_compound(composition: dict) -> str:
     all_metalloid = all(s in METALLOIDS for s in elems)
     if all_metalloid and not chalcogens and not pnictogens:
         return "group_iv"
+
+    # Hydrogenated group-IV networks (a-Si:H, a-Ge:H, a-C:H, a-SiC:H): H caps
+    # a covalent network (see _hydrogenated_host). As the anion of the
+    # "hydride" branch below it gave a-Si:H the Si4+ ionic radius (15 g/cm3),
+    # and a-C:H fell to covalent_carbide with H as the anion (3.5 g/cm3).
+    if _hydrogenated_host(composition) is not None:
+        return "hydrogenated_network"
 
     # Pure single-element covalent / semimetal solids that group-IV doesn't
     # catch (a-Se, a-Te, a-As, a-Sb, a-P, a-S). A one-element system has no
@@ -1536,9 +1638,10 @@ def get_packing_factor(cls: str, composition: dict | None = None) -> float:
     """Packing factor for a material class — composition-aware where needed.
 
     The single dispatch point between the static :data:`PACKING_FACTORS`
-    table and classes whose packing depends on the composition itself
-    (currently only ``oxyhalide``, which interpolates between its halogen-
-    free base class and ``halide`` by halogen fraction). New mixed-anion
+    table and classes whose packing depends on the composition itself:
+    ``oxyhalide``, which interpolates between its halogen-free base class
+    and ``halide`` by halogen fraction, and ``hydrogenated_network``, which
+    takes the packing factor of its H-free host. New mixed-anion
     families (oxynitrides, oxysulfides) should add their interpolation here
     rather than special-casing :func:`estimate_cell_length`. Note the
     obvious oxynitride interpolation is currently a no-op — metal_oxide and
@@ -1547,6 +1650,10 @@ def get_packing_factor(cls: str, composition: dict | None = None) -> float:
     """
     if cls == "oxyhalide" and composition is not None:
         return _oxyhalide_packing_factor(composition)
+    if cls == "hydrogenated_network" and composition is not None:
+        host = _hydrogenated_host(composition)
+        if host is not None:
+            return PACKING_FACTORS[_classify_compound(host)]
     return PACKING_FACTORS.get(cls, PACKING_FACTORS["default"])
 
 
@@ -1630,7 +1737,9 @@ def _radius_for_density(sym: str, cls: str,
     * Ionic compounds (oxides, halides, nitrides, hydrides) -> Shannon
       ionic radii at CN=6 (cation-anion contact length).
     * Covalent compounds (group-IV, pnictides, chalcogenides, borides,
-      carbides) -> Cordero covalent radii (bond-length-based).
+      carbides) -> Cordero covalent radii (bond-length-based). In a
+      hydrogenated network (a-Si:H, a-C:H) the host atoms are Cordero and
+      H is :data:`_NETWORK_H_RADIUS`.
     * Metallic alloys -> Goldschmidt metallic radii (close-packed
       atomic centres).
     """
@@ -1640,7 +1749,9 @@ def _radius_for_density(sym: str, cls: str,
                      "small_cation_nitride", "hydride"}
     covalent_classes = {"group_iv", "elemental_semiconductor", "pnictide",
                         "chalcogenide", "chalcogenide_glass", "covalent_carbide",
-                        "covalent_network_oxide"}
+                        "covalent_network_oxide", "hydrogenated_network"}
+    if cls == "hydrogenated_network" and sym == "H":
+        return _NETWORK_H_RADIUS
     # Infer oxidation state from charge balance when a composition is
     # supplied; falls back to "highest positive" inside get_ionic_radius
     # if inference returns None.
@@ -1802,10 +1913,16 @@ def format_auto_derive_summary(
     # Per-pair: minsep + bond class label (+ Δχ for ionic)
     pair_parts = []
     centres = cation_nonmetals(composition)
+    host = _hydrogenated_host(composition)
     for pair in sorted(minsep):
         a, b = pair.split("-")
         d = minsep[pair]
-        if a == b and a in NONMETALS and a not in centres:
+        if host is not None and a == b == "H":
+            label = "geminal"      # two H on one host atom, not a bond
+        elif (a == b and a in NONMETALS and a not in centres
+              and (host is None or len(host) > 1)):
+            # (the C-C of a-C:H is its bond, as in a-C; that of a-SiC:H is
+            # the anion packing of SiC)
             label = "anion-pack"
         else:
             # the classification default_minsep used; Δχ only where it is

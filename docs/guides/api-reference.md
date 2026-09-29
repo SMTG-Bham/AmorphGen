@@ -471,6 +471,7 @@ All parameters are auto-detected from the composition. No manual tuning needed.
 | Halide (Li2ZrCl6, LiF, NaCl) | Shannon CN=6 sphere packing | 0.58 |
 | Nitride (AlN, GaN, Si3N4) | Shannon CN=6 sphere packing | 0.52 |
 | Hydride (LiH, MgH2) | Shannon CN=6 sphere packing | 0.55 |
+| Hydrogenated network (a-Si:H, a-C:H, a-SiC:H) | Cordero sphere packing, H 0.90 A | H-free host's (0.28-0.32) |
 
 ### Coordination-aware placement (auto coordination targeting)
 
@@ -483,6 +484,7 @@ All parameters are auto-detected from the composition. No manual tuning needed.
 | Chalcogenide (ZnS, CdTe) | 4-6 | 0 | tetrahedral or octahedral |
 | Carbide (SiC, TiC) | 4-6 | 0 | metalloid=4, metal=6 |
 | Hydride (LiH, MgH2) | 6 | 0 | 6 only |
+| Hydrogenated network (a-Si:H, a-C:H) | host 4, H 1 | 0 | 4 / 1 only |
 | Boride (TiB2) | 6 | 0 | 6 only |
 | Pnictide (GaAs, InP) | 4 | 0 | 4 only |
 | Group IV (Si, Ge) | 4 | 0 | 4 only |
