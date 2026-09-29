@@ -250,7 +250,10 @@ The cutoff defines what counts as a "first-shell" bond and affects
 coordination, bond-length statistics, and bond-angle triplets. Default
 in v1.0.0+ is `auto-rdf`, which finds the first minimum of each partial
 RDF, the standard convention in neutron-diffraction analysis of
-glasses.
+glasses. The minimum is read at a resolution of 0.25 Å, so a flat step
+or a noise dip on the falling side of the first peak, common in small
+cells, does not end the shell. Where g(r) is zero over a range, the
+cutoff goes in the middle of it.
 
 | Cutoff mode | When to use |
 |---|---|

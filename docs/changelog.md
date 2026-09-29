@@ -535,3 +535,31 @@ orphan: true
   CLI commands used a `--no-relax` flag that does not exist, a lower-case ensemble
   name, the default 0.5 fs timestep and file names from an older layout. The notebook
   now runs end to end.
+- **The `auto-rdf` cutoff could stop inside the first shell.** The first minimum of
+  g(r) was the first point past the peak that was below half its height and no higher
+  than its neighbours, and in a small cell that can be a flat step or a noise dip on the
+  falling side of the peak. The shipped 64-atom a-Si was cut at 2.53 Å, inside its first
+  shell, and gave a CN of 3.75 instead of 4.00; the 96-atom a-HfO₂ was cut at 2.31 Å,
+  which left out its longer Hf–O bonds (CN 5.47 instead of 5.78). The minimum is now
+  read from g(r) averaged over 0.25 Å, and it has to be the lowest point within 0.25 Å
+  on either side. Where g(r) is zero over a range, the cutoff goes in the middle of it.
+  Cutoffs move outwards, and bonded pairs change most in small cells: a-Si now gets 4.00
+  at 2.84 Å, and the Ir coordination of the 24-atom IrO₂ model goes from 4.0 to 5.4, the
+  value its README lists. The O–O and cation–cation cutoffs of the non-bonded contacts
+  move as well. **Re-run any analysis done with the default cutoff.**
+- **Ring statistics counted paths that cross the cell.** The ring search followed bonds
+  by atom index and ignored which periodic image a bond reached. So a path that came
+  back to another image of its first atom, having crossed the cell, counted as a ring.
+  The 8-atom diamond cell gave 100 % 4-rings, and the shipped 48-atom a-SiO₂ gave 84 %
+  4-rings; it now has 10 % 3-, 23 % 4-, 45 % 5- and 23 % 6-rings. Each bond now carries
+  its cell offset, and a ring has to close on the image it started from, so a structure
+  and its supercells give the same distribution. The shipped Sb₂O₃ and Sb₂O₅ ensembles
+  (112-120 atoms) change as well; a-Si, a-HfO₂ and the 400-atom a-Ga₂O₃ do not.
+  **Re-run ring statistics of small cells.**
+- **`--reference` dropped the Si–O bond check.** The analyser names a bond with its
+  elements in alphabetical order (`O-Si`). `examples/reference_a_SiO2.yaml` writes
+  `Si-O`, so the check found no value and left its row out of the table without saying
+  so. A bond, and the two end atoms of an angle, now match in either order. A
+  coordination entry is still directional: `Si-O` counts O around Si. A reference
+  metric the structures do not have is now listed as `n/a` and counted in the summary,
+  instead of being left out. Of the shipped references only a-SiO₂ was affected.

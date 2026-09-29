@@ -195,7 +195,7 @@ amorphgen --analyse --input-dir my_structures/ \
     --reference reference_a_Ga2O3.yaml
 ```
 
-Each metric is reported as **match** (within range), **concern** (within ~5% of either bound), or **fail** (outside range). Fast, defensible answer to "do my structures agree with the literature?"
+Each metric is reported as **match** (within range), **concern** (within ~5% of either bound), **fail** (outside range), or **n/a** when the structures do not have it (an element that is absent, or no contact within the cutoff). A bond, and the two end atoms of an angle, can be written in either order (`Si-O` or `O-Si`). A coordination entry is directional: `Si-O` counts the O around Si. Fast, defensible answer to "do my structures agree with the literature?"
 
 ## Example: classical potential
 
