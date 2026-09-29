@@ -23,9 +23,10 @@ module load Python/3.12.3-GCCcore-13.3.0
 source /rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312/bin/activate
 PKG=/rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/AmorphGen
 SYS=$PKG/examples/class_benchmark_systems.txt
-# carbon only: reclassified group_iv (a-C / ta-C is a 3D network, not a chain
-# element). Everything else is already in classes_v2/ from the earlier passes.
-REFIX="C"
+# EMPTY after the revert of 2026-09-29: no density rule has changed since the
+# last pass, so classes/ + classes_v2/ are current. Put system names here (space
+# separated) when a rule changes and they need regenerating.
+REFIX=""
 grep -v "^#" $SYS | grep -wE "$(echo $REFIX | tr ' ' '|')" > classes_v2/systems.txt
 relax_and_analyse () {   # $1 = dir
     amorphgen --batch-opt --input-dir $1/random_initial -o $1/random_opt \
