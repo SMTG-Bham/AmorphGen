@@ -858,6 +858,33 @@ def compute_total_correlation(atoms_list, weighting="xray", qmin=0.3, qmax=20.0,
             "window": window}
 
 
+def first_Tr_peak(result, floor=0.05):
+    """First resolved peak of T(r): ``(r_peak, r_lo, r_hi)``.
+
+    The FIRST local maximum, not the largest: in an oxide the second shell is
+    usually taller than the first, so taking a maximum over a fixed window
+    lands on its rising edge. The window runs between the minima either side,
+    which is the interval a diffraction paper integrates for the coordination
+    number. Returns ``(None, None, None)`` when nothing is resolved.
+    """
+    r = np.asarray(result["r"], dtype=float)
+    T = np.asarray(result["T_r"], dtype=float)
+    if len(r) < 5:
+        return None, None, None
+    peaks = [i for i in range(1, len(T) - 1)
+             if T[i] > T[i - 1] and T[i] >= T[i + 1] and T[i] > floor * T.max()]
+    if not peaks:
+        return None, None, None
+    i = peaks[0]
+    lo = i
+    while lo > 0 and T[lo - 1] < T[lo]:
+        lo -= 1
+    hi = i
+    while hi < len(T) - 1 and T[hi + 1] < T[hi]:
+        hi += 1
+    return float(r[i]), float(r[lo]), float(r[hi])
+
+
 def coordination_from_Tr(result, r_lo, r_hi):
     """Coordination number from a T(r) peak: the area under ``r T(r)``.
 

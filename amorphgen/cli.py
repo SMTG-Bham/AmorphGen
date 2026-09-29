@@ -1456,11 +1456,15 @@ def main():
             except ValueError as exc:
                 print(f"  T(r) skipped: {exc}")
             else:
-                from .analysis.rdf import coordination_from_Tr
-                r_arr = np.asarray(tr["r"]); T_arr = np.asarray(tr["T_r"])
-                pk = r_arr[np.argmax(np.where(r_arr < 3.0, T_arr, -np.inf))]
-                print(f"  first T(r) peak at r = {pk:.2f} A; "
-                      f"rho = {tr['rho']:.4f} atoms/A^3")
+                from .analysis.rdf import coordination_from_Tr, first_Tr_peak
+                pk, r_lo, r_hi = first_Tr_peak(tr)
+                if pk is None:
+                    print(f"  no resolved first peak; rho = {tr['rho']:.4f} atoms/A^3")
+                else:
+                    n_first = coordination_from_Tr(tr, r_lo, r_hi)
+                    print(f"  first T(r) peak at r = {pk:.2f} A "
+                          f"({r_lo:.2f}-{r_hi:.2f} A, weighted count {n_first:.2f}); "
+                          f"rho = {tr['rho']:.4f} atoms/A^3")
                 if plot_dir:
                     from .analysis.plotting import plot_tr
                     plot_tr(tr, output_dir=plot_dir,

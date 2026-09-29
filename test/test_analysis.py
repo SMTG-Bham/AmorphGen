@@ -855,3 +855,23 @@ class TestTotalCorrelationFunction:
         head = (plots / "analysis_tr.csv").read_text().splitlines()
         assert "window=None" in head[0] and "qmax=25.0" in head[0]
         assert head[1].startswith("r_A,g_r_weighted,T_r_invA2,G_r")
+
+    def test_first_peak_is_the_first_not_the_tallest(self):
+        """In an oxide the second shell is taller than the first, so a maximum
+        over a fixed window lands on the second peak's rising edge. The helper
+        must return the first LOCAL maximum and the minima either side."""
+        import numpy as np
+        from ase import Atoms
+        from amorphgen.analysis import StructureAnalyser
+        from amorphgen.analysis.rdf import first_Tr_peak
+        rng = np.random.default_rng(3)
+        a = Atoms("In8Ga8Zn8O32", positions=rng.uniform(0, 12, (56, 3)),
+                  cell=[12] * 3, pbc=True)
+        tr = StructureAnalyser([a]).total_correlation(qmin=0.6, qmax=22.0)
+        r = np.asarray(tr["r"]); T = np.asarray(tr["T_r"])
+        pk, lo, hi = first_Tr_peak(tr)
+        assert pk is not None and lo < pk < hi
+        # it is a genuine local maximum, and earlier than the global one
+        i = int(np.argmin(np.abs(r - pk)))
+        assert T[i] >= T[i - 1] and T[i] >= T[i + 1]
+        assert pk <= r[int(np.argmax(T))]
