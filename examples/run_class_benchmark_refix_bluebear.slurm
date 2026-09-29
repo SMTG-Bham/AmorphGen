@@ -23,9 +23,9 @@ module load Python/3.12.3-GCCcore-13.3.0
 source /rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312/bin/activate
 PKG=/rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/AmorphGen
 SYS=$PKG/examples/class_benchmark_systems.txt
-# the chain/layer systems moved to van der Waals radii (2026-09-29) plus carbon,
-# now classified group_iv; everything else is already in classes_v2/
-REFIX="Se Te As Sb P Sb2S3 As2S3 As2Se3 GeSe2 GeS2 C"
+# carbon only: reclassified group_iv (a-C / ta-C is a 3D network, not a chain
+# element). Everything else is already in classes_v2/ from the earlier passes.
+REFIX="C"
 grep -v "^#" $SYS | grep -wE "$(echo $REFIX | tr ' ' '|')" > classes_v2/systems.txt
 relax_and_analyse () {   # $1 = dir
     amorphgen --batch-opt --input-dir $1/random_initial -o $1/random_opt \

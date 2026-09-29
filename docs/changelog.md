@@ -334,17 +334,6 @@ orphan: true
 
 ### Fixed after the rc4 upload (on GitHub main; not in the rc4 wheel on PyPI)
 
-- **Chain and layer networks use van der Waals radii.** The density of a 2-3 fold
-  coordinated network (a-Se, a-Te, a-As, a-Sb, a-P and the GeS2 / GeSe2 / As2S3 /
-  As2Se3 / Sb2S3 glasses) is set by the van der Waals contact between chains, not by
-  the covalent bond. With Cordero radii the packing factor these systems need scatters
-  from 0.19 to 0.33 and the estimates were off by up to 28 % (a-Se +18 %, a-P +28 %,
-  Sb2S3 -19 %); with vdW radii it is 1.03 +/- 0.06 across all ten, and every estimate
-  is now within 8 %. Applied only to `elemental_semiconductor` and
-  `chalcogenide_glass`, since tetrahedral and dense networks need the covalent
-  treatment (the rule would over-predict a-Si by 90 %); falls back to covalent radii
-  where ASE has no vdW radius. Single-element carbon is reclassified `group_iv`
-  (a-C / ta-C is a 3D network, not a chain element).
 - **Placement no longer changes the density silently.** The auto-expand and
   auto-retry:minsep messages were `logger.info`, and the package configures no logging
   handler, so a 20-40 % density loss was invisible on the CLI. They are now warnings
