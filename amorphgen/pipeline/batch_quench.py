@@ -143,11 +143,20 @@ def run(snapshot_files: list[str],
         atoms.calc = calc
         orig_dir = os.getcwd()
         os.chdir(run_dir)
-        # the run's index feeds the per-run seed stream explicitly, so a
-        # single-snapshot run (which writes into work_dir, no run_NNNN/) and
-        # every SLURM array task still get their own velocities and noise
+        # The run's index feeds the per-run seed stream. Three cases:
+        #  - explicit --run-index: use it as the BASE and add this run's own
+        #    index, so a batch stays internally independent;
+        #  - single snapshot, no explicit index: leave it unset, so
+        #    run_index_for falls through to the cwd / SLURM_ARRAY_TASK_ID
+        #    lookup (array tasks sharing a --seed must not collide);
+        #  - multi-snapshot: this run's own index.
         run_cfg = dict(cfg_override or {})
-        if run_cfg.get("run_index") is None:
+        explicit = run_cfg.get("run_index")
+        if explicit is not None:
+            run_cfg["run_index"] = int(explicit) + i
+        elif single_run:
+            run_cfg.pop("run_index", None)
+        else:
             run_cfg["run_index"] = int(run_name[4:])
 
         try:

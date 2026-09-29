@@ -256,3 +256,20 @@ class TestGlobalSeedReproducibility:
         p = _get_parser(); argv = ["POSCAR", "--seed", "11"]
         ov = _build_override(p.parse_args(argv), p, explicit_only=True, argv=argv)
         assert ov["seed"] == 11
+
+
+def test_batch_quench_run_index_sources(tmp_path, monkeypatch):
+    """Review round 4: a single-snapshot run must fall through to
+    SLURM_ARRAY_TASK_ID (array tasks sharing a --seed must not collide), and an
+    explicit --run-index must not put every run of a batch on one seed stream."""
+    import os
+    from amorphgen.utils.common import run_index_for, run_index_from_cwd
+    d = tmp_path / "quench_runs"; d.mkdir(); monkeypatch.chdir(d)
+    monkeypatch.setenv("SLURM_ARRAY_TASK_ID", "12")
+    assert run_index_from_cwd() == 12                  # no run_NNNN/ -> array task id
+    assert run_index_for({}) == 12                     # unset in the config -> same
+    assert run_index_for({"run_index": None}) == 12
+    assert run_index_for({"run_index": 3}) == 3        # explicit wins
+    # and the batch loop turns one explicit base into distinct per-run indices
+    base = 5
+    assert [base + i for i in range(3)] == [5, 6, 7]

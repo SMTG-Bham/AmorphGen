@@ -644,3 +644,40 @@ def test_is_bonding_pair_rules():
     assert b("P", "O", {"Li", "P", "O"}) and b("Si", "N", {"Si", "N"})
     assert b("Si", "Si", {"Si"}) and b("Si", "C", {"Si", "C"}) and b("Ga", "As", {"Ga", "As"})
     assert b("Cu", "Zr", {"Cu", "Zr"}) and b("Cu", "Cu", {"Cu", "Zr"})
+
+
+class TestBondingPairRules:
+    """Review round 4 (2026-09-29): which contacts count as first-shell bonds."""
+
+    @staticmethod
+    def _b(a, b, els):
+        from amorphgen.analysis.structure import is_bonding_pair
+        return is_bonding_pair(a, b, els)
+
+    def test_compound_of_two_anion_elements_has_a_cation(self):
+        """TeO2 and SO3 are made only of elements on the anion list; the least
+        electronegative one is the cation, so Te-O and S-O are bonds and the
+        coordination report is not empty."""
+        assert self._b("Te", "O", {"Te", "O"}) and not self._b("O", "O", {"Te", "O"})
+        assert self._b("S", "O", {"S", "O"}) and not self._b("S", "S", {"S", "O"})
+        assert self._b("Se", "O", {"Se", "O"})
+
+    def test_hydrogen_is_an_anion_only_in_a_hydride(self):
+        assert self._b("Li", "H", {"Li", "H"})                    # hydride
+        assert not self._b("H", "H", {"Mg", "H"})
+        assert self._b("O", "H", {"Na", "O", "H"})                # hydroxide: H is the cation
+        assert self._b("Na", "O", {"Na", "O", "H"})
+        assert not self._b("Na", "H", {"Na", "O", "H"})
+
+    def test_several_true_anions_all_bond_to_the_cation(self):
+        els = {"Bi", "O", "Cl"}
+        assert self._b("Bi", "O", els) and self._b("Bi", "Cl", els)
+        assert not self._b("O", "Cl", els)
+
+    def test_same_element_bonds_only_in_elements_and_metal_alloys(self):
+        assert self._b("Si", "Si", {"Si"})                        # a-Si
+        assert self._b("Cu", "Cu", {"Cu", "Zr"})                  # metallic glass
+        assert not self._b("Ga", "Ga", {"Ga", "As"})              # III-V, not a metal
+        assert not self._b("In", "In", {"In", "P"})
+        assert not self._b("Ti", "Ti", {"Ti", "C"})               # carbide
+        assert not self._b("Ga", "In", {"In", "Ga", "Zn", "O"})   # cation-cation in an oxide

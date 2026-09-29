@@ -53,22 +53,43 @@ def is_bonding_pair(s1: str, s2: str, elements) -> bool:
       (Ga-In, and also hetero pairs the radii table calls covalent such as
       Al-Si or Na-Si in aluminosilicate glasses) and anion-anion contacts are
       second-shell neighbours mediated by the anion.
-    * No anion (a-Si, SiC, GaAs, alloys): the radii classification decides;
-      same-element pairs bond in single-element systems and pure-metal alloys.
+      Which elements are anions depends on the compound, not on a fixed list:
+      hydrogen is an anion only in a hydride (LiH, MgH2) and a cation as soon
+      as a stronger anion is present (O-H in a hydroxide), and a compound whose
+      elements are ALL potential anions has its least electronegative member as
+      the cation (Te in TeO2, S in SO3, Se in SeO2).
+    * No anion (a-Si, SiC, GaAs, alloys): the radii classification decides.
+      A same-element pair is a bond only in a single-element system or a
+      pure-metal alloy (Cu-Cu in CuZr); Ga-Ga in GaAs or Ti-Ti in TiC is a
+      second-shell contact, since those compounds are not metals.
+
+    Known limitation: a polyatomic anion whose central atom is itself in the
+    anion list (N in a nitrate, S in a sulfate) is treated as an anion when a
+    true cation is also present, so N-O and S-O inside the group are not
+    counted. Pass an explicit cutoff dict if you need those.
     """
     try:
         from ..pipeline.random_gen import _classify_bond
-        from ..utils.radii import ANION_CHARGES
+        from ..utils.radii import ANION_CHARGES, NONMETALS, METALLOIDS, PAULING_EN
     except ImportError:
         from amorphgen.pipeline.random_gen import _classify_bond
-        from amorphgen.utils.radii import ANION_CHARGES
+        from amorphgen.utils.radii import (ANION_CHARGES, NONMETALS, METALLOIDS,
+                                           PAULING_EN)
     elements = set(elements)
     anions = {e for e in elements if e in ANION_CHARGES}
-    if anions and len(elements) > 1:
+    # hydrogen is an anion only when it is the ONLY one (a hydride)
+    if len(anions) > 1 and "H" in anions:
+        anions.discard("H")
+    # every element is a potential anion (TeO2, SO3): the least electronegative
+    # one is the cation, as charge balance requires
+    if anions == elements and len(elements) > 1:
+        anions.discard(min(anions, key=lambda e: PAULING_EN.get(e, 2.0)))
+    if anions and anions != elements:
         return (s1 in anions) != (s2 in anions)
     bt = _classify_bond(s1, s2)
     if s1 == s2:
-        return len(elements) == 1 or bt == "metallic"
+        all_metal = all(e not in NONMETALS and e not in METALLOIDS for e in elements)
+        return len(elements) == 1 or (bt == "metallic" and all_metal)
     return bt in ("ionic", "covalent", "metallic")
 
 

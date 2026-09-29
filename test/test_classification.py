@@ -468,3 +468,17 @@ def test_benchmark_density_fixes(composition, ref, lo, hi):
     m = sum(atomic_masses[atomic_numbers[e]] * n for e, n in composition.items())
     rho = m * 1.66054 / L ** 3
     assert lo <= rho / ref <= hi, rho
+
+
+@pytest.mark.parametrize("composition, expected", [
+    # the metal-rich glass rule is for transition / noble metals; s-block
+    # compounds are Zintl phases and keep their pnictide / boride treatment
+    ({"Li": 162, "P": 54}, "pnictide"),
+    ({"Na": 162, "Sb": 54}, "pnictide"),
+    ({"Cs": 162, "Sb": 54}, "pnictide"),
+    ({"Ni": 172, "P": 43}, "alloy"),
+    ({"Fe": 172, "B": 43}, "alloy"),
+    ({"Pd": 86, "Ni": 86, "P": 43}, "alloy"),
+])
+def test_metal_rich_glass_rule_excludes_s_block(composition, expected):
+    assert _classify_compound(composition) == expected

@@ -334,6 +334,28 @@ orphan: true
 
 ### Fixed after the rc4 upload (on GitHub main; not in the rc4 wheel on PyPI)
 
+- **Review round 4 (2026-09-29), all five findings confirmed and fixed.**
+  - *Compounds made only of anion-list elements had no bonds at all.* `is_bonding_pair`
+    treated O, S, Se, Te, N, H and the halogens as anions unconditionally, so in TeO2 and
+    SO3 every pair was anion-anion: the coordination table fell back to Te-Te, and the
+    angles and CN plot came out empty (visible as a blank CN column for TeO2 in the class
+    benchmark). Anions are now decided per compound: hydrogen is an anion only in a
+    hydride and a cation once a stronger anion is present (O-H in a hydroxide), and a
+    compound whose elements are all potential anions takes its least electronegative
+    member as the cation (Te in TeO2, S in SO3). Oxyhalides are unaffected: Bi-O and
+    Bi-Cl still bond, O-Cl still does not.
+  - *Same-element metallic pairs counted as bonds outside metals.* Ga-Ga in GaAs, In-In
+    in InP and Ti-Ti in TiC were reported as first-shell bonds, inflating the metal's
+    coordination. Restricted to single-element systems and pure-metal alloys, as the
+    docstring always said.
+  - *SLURM array tasks still shared one MD seed stream.* `batch_quench` set an explicit
+    run index of 0 for a single-snapshot run, so the `SLURM_ARRAY_TASK_ID` fallback added
+    the day before was never reached. A single-snapshot run now leaves the index unset.
+  - *An explicit `--run-index` collapsed a whole batch onto one seed stream.* It is now
+    the base, and each run adds its own index.
+  - *The metal-rich glass rule reached the s-block.* Li3P, Na3Sb, Cs3Sb and the like were
+    reclassified as alloys and given metallic radii; the rule is now restricted to
+    transition and noble metals, as its comment stated.
 - **Placement no longer changes the density silently.** The auto-expand and
   auto-retry:minsep messages were `logger.info`, and the package configures no logging
   handler, so a 20-40 % density loss was invisible on the CLI. They are now warnings

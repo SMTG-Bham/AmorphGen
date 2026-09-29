@@ -460,6 +460,12 @@ _CHALCOGENIDE_GLASS_FORMERS = frozenset({"Ge", "Si", "As", "Sb", "B", "P"})
 # metals (Ni80P20, Fe80B20, Pd80Si20); below this fraction the composition is
 # an alloy, not a pnictide or boride
 _GLASS_METALLOIDS = frozenset({"P", "B", "Si", "Ge", "As", "Sb"})
+
+# Alkali and alkaline-earth metals are excluded from the metal-rich glass rule:
+# Li3P, Na3Sb, Mg2Si and the like are Zintl phases / semiconductors, not
+# metallic glasses, and keep their pnictide / boride treatment
+_S_BLOCK_METALS = frozenset({"Li", "Na", "K", "Rb", "Cs", "Fr",
+                             "Be", "Mg", "Ca", "Sr", "Ba", "Ra"})
 _METAL_RICH_ALLOY_MAX_METALLOID_FRAC = 0.35
 
 
@@ -1182,7 +1188,8 @@ def _classify_compound(composition: dict) -> str:
     # untouched.
     metals = {s for s in elems if s not in NONMETALS and s not in METALLOIDS}
     minority = elems - metals
-    if metals and minority and minority <= _GLASS_METALLOIDS:
+    if (metals and minority and minority <= _GLASS_METALLOIDS
+            and not (metals & _S_BLOCK_METALS)):
         f_metalloid = sum(composition[s] for s in minority) / sum(composition.values())
         if f_metalloid < _METAL_RICH_ALLOY_MAX_METALLOID_FRAC:
             return "alloy"
