@@ -1534,6 +1534,11 @@ def batch_random(
             else:
                 write(fname, atoms, format=ase_format)
 
+            # snapshot the placement result before --relax moves the cell
+            from ..utils.common import compute_density_gcm3
+            rho_placed = compute_density_gcm3(atoms)
+            soft_packed = bool(atoms.info.get("soft_pack"))
+
             if relax and calc is not None:
                 from ..utils.common import compute_density_gcm3, require_stress
                 from ase.geometry import cell_to_cellpar
@@ -1618,19 +1623,20 @@ def batch_random(
             _log(f"  [{generated+1}/{n_structures}] {out_formula} -> "
                  f"{fname}{seed_str}", lf)
 
-            # The achieved density, always: a placement stall can change it
-            # (cell expansion) and a silent 20-30 % loss is exactly what the
-            # user must not have to dig out of a debug log.
-            from ..utils.common import compute_density_gcm3
-            rho = compute_density_gcm3(atoms)
-            note = " [soft-packed at the requested cell]" if atoms.info.get("soft_pack") else ""
+            # The density AS PLACED, always: a placement stall changes it (cell
+            # expansion) and a silent 20-30 % loss is exactly what the user must
+            # not have to dig out of a debug log. Measured before any relaxation,
+            # which legitimately moves the density and reports it on its own
+            # "Final density" line.
+            note = " [soft-packed at the requested cell]" if soft_packed else ""
             wanted = kwargs.get("target_density") or est_density
-            if wanted and abs(rho - wanted) / wanted > 0.02:
-                _log(f"    WARNING: density {rho:.2f} g/cm3, {100 * (rho / wanted - 1):+.0f}% "
-                     f"from the requested {wanted:.2f} (placement stalled and the "
-                     f"cell was expanded){note}", lf)
+            if wanted and abs(rho_placed - wanted) / wanted > 0.02:
+                _log(f"    WARNING: placed at {rho_placed:.2f} g/cm3, "
+                     f"{100 * (rho_placed / wanted - 1):+.0f}% from the requested "
+                     f"{wanted:.2f} (placement stalled and the cell was expanded)"
+                     f"{note}", lf)
             else:
-                _log(f"    density {rho:.2f} g/cm3{note}", lf)
+                _log(f"    placed at {rho_placed:.2f} g/cm3{note}", lf)
 
             sc_report = atoms.info.get("sc_report")
             if sc_report:

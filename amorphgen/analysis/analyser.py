@@ -597,12 +597,13 @@ class StructureAnalyser:
                 from amorphgen.pipeline.random_gen import _classify_bond
             from collections import Counter
             from .structure import is_bonding_pair
+            _comp = Counter(self.atoms_list[0].get_chemical_symbols())
 
             bonding_cn = {}
             nonbonded_cn = {}
             for pair, data in cn.items():
                 s1, s2 = pair.split("-")
-                if is_bonding_pair(s1, s2, Counter(self.atoms_list[0].get_chemical_symbols())):
+                if is_bonding_pair(s1, s2, _comp):
                     bonding_cn[pair] = data
                 else:
                     nonbonded_cn[pair] = data

@@ -748,3 +748,27 @@ class TestBondingPairRules:
         assert not self._b("N", "O", {"Li": 29, "P": 10, "O": 33, "N": 5})
         # ... while a real tellurite still promotes Te, oxidiser present
         assert ae({"Na": 2, "Te": 1, "O": 4}) == {"O"}
+
+
+def test_metal_rich_glass_through_the_analyser_and_plotter(tmp_path):
+    """Review round 11: the analyser and the plotter must pass element COUNTS,
+    not a bare set, or the metal-fraction test cannot fire and Ni80P20 loses its
+    Ni-Ni bonds. Drives the real report and plot, so reverting the Counter call
+    sites fails here."""
+    import numpy as np
+    from ase import Atoms
+    from amorphgen.analysis import StructureAnalyser
+    rng = np.random.default_rng(0)
+    n_ni, n_p = 80, 20
+    a = Atoms("Ni80P20", positions=rng.uniform(0, 11, (n_ni + n_p, 3)),
+              cell=[11] * 3, pbc=True)
+    sa = StructureAnalyser([a], cutoff=3.0)
+    text = sa.summary()
+    body = text if isinstance(text, str) else "\n".join(text)
+    assert "Ni-Ni" in body.split("Non-bonded contacts")[0], body[:400]
+    cn = sa.coordination()
+    assert cn["Ni-Ni"]["mean"] > 0
+    assert sa.total_coordination(centre="Ni")["Ni"]["mean"] > 0
+    sa.plot(output_dir=str(tmp_path))          # the plotter takes the same path
+    assert (tmp_path / "analysis_cn.csv").exists()
+    assert "Ni-Ni" in (tmp_path / "analysis_cn.csv").read_text()

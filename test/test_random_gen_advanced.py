@@ -475,3 +475,31 @@ class TestSoftPack:
         assert frac.min() >= -1e-9 and frac.max() <= 1 + 1e-9
         d = out.get_all_distances(mic=True); np.fill_diagonal(d, 9)
         assert d.min() >= 0.985 * 2.3
+
+
+def test_relax_does_not_print_a_false_placement_stall(tmp_path, monkeypatch, capsys):
+    """Review round 11: the density warning must describe the PLACEMENT, not the
+    relaxed cell. A relaxation legitimately moves the density and reports it on
+    its own 'Final density' line; comparing that with the placement target made
+    every relax run claim the placement had stalled."""
+    from ase.io import read
+    from amorphgen.pipeline import random_gen as rg
+
+    real = rg.generate_random
+
+    def shrink_after_relax(atoms, cfg_override=None, calc=None, **kw):
+        """Stand in for the relax step: change the cell, as a real one does."""
+        atoms.set_cell(atoms.cell * 0.90, scale_atoms=True)
+        return atoms
+
+    monkeypatch.setattr(rg, "_opt_run", shrink_after_relax, raising=False)
+    files = rg.batch_random({"Si": 8, "O": 16}, n_structures=1,
+                            output_dir=str(tmp_path), seed=1)
+    out = capsys.readouterr().out
+    assert "placed at" in out, out[-800:]
+    assert "placement stalled" not in out, out[-800:]
+    # and the placed value is the one reported, not a post-relax number
+    placed = read(str(tmp_path / "random_initial" / "random_0000.xyz"))
+    from amorphgen.utils.common import compute_density_gcm3
+    rho = compute_density_gcm3(placed)
+    assert f"placed at {rho:.2f}" in out

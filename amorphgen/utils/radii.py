@@ -118,8 +118,8 @@ SHANNON_IONIC_RADII = {
     "As": {5: {4: 0.335, 6: 0.460}},
     # Anions (CN-independent)
     "O":  {-2: {6: 1.400}},
-    "S":  {-2: {6: 1.840}},
-    "Se": {-2: {6: 1.980}},
+    "S":  {-2: {6: 1.840}, 4: {6: 0.37}, 6: {4: 0.12, 6: 0.29}},
+    "Se": {-2: {6: 1.980}, 4: {6: 0.50}, 6: {4: 0.28, 6: 0.42}},
     "Te": {-2: {6: 2.210}, 4: {6: 0.970}, 6: {6: 0.560}},
     "F":  {-1: {6: 1.330}},
     "Cl": {-1: {6: 1.810}},
@@ -1438,6 +1438,10 @@ def _radius_for_density(sym: str, cls: str,
         positive = [k for k in SHANNON_IONIC_RADII.get(sym, {}) if k > 0]
         if positive:
             ox = max(positive)
+        else:
+            # no positive state tabulated: the anion radius would be ~4x too
+            # large, so use the covalent radius rather than mis-size the cell
+            return covalent_radii[atomic_numbers[sym]]
     # Antimony is oxidation-state split: Sb(V) is d0 and octahedral with no lone
     # pair, so it uses its small ionic radius like Nb(V)/Ta(V) (dense oxides such
     # as Sb2O5). Sb(III) has a stereochemically active lone pair giving open

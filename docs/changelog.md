@@ -394,6 +394,24 @@ orphan: true
   Li3P, Na3Sb and Cs3Sb are Zintl phases and keep their pnictide treatment, while
   Ni80P20, Fe80B20 and Pd80Si20 remain alloys.
 
+- **A relaxation no longer reports a false placement stall.** The density line added
+  with the warning above was printed after `--relax` had moved the cell, so it compared
+  the relaxed density with the placement target and claimed "placement stalled and the
+  cell was expanded" on any relaxation that shifted the density by more than 2 %, which
+  is most of them. The placement is now measured before the relaxation and reported as
+  `placed at ...`; the relaxed value keeps its own `Final density` line.
+- **The seed reached the ASE engine only.** `--hybrid-ensemble --engine torchsim` seeded
+  its batched MD from the stage, chunk and resume offset alone, so two SLURM array tasks
+  running the same inputs with one `--seed` drew identical momenta and thermostat noise:
+  the problem the run-index work had just fixed for the ASE path. The job's run index is
+  now part of the torch-sim seed as well.
+- **SO3 and SeO2 densities were half their true value.** The rule that gives a non-metal
+  acting as an oxide cation its positive Shannon radius only fires when the table lists
+  one, and sulfur and selenium had only their anionic state, so both fell back to an
+  anion radius four times too large (SO3 1.10 against 1.92 g/cm3, SeO2 1.66 against
+  3.95). Their positive states are now in the table, and an element with no positive
+  state falls back to its covalent radius rather than its anion radius. Both now land on
+  the reference density; P2O5, TeO2 and every other composition are unchanged.
 - **Placement no longer changes the density silently.** The auto-expand and
   auto-retry:minsep messages were `logger.info`, and the package configures no logging
   handler, so a 20-40 % density loss was invisible on the CLI. They are now warnings
