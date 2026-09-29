@@ -383,9 +383,12 @@ orphan: true
   set, so a stage cannot mistake a local index for an explicit one and band it twice.
   Out-of-range values are refused rather than wrapped, since folding `snapshot_100003`
   onto `snapshot_0003` would silently merge two streams, and every snapshot filename is
-  checked before the first run starts rather than when its turn comes. **Behaviour change:** these indices are seed labels, and they have
-  moved, so a run resumed across this change draws different velocities and thermostat
-  noise from that point on. Finish a running ensemble before updating, or regenerate it.
+  checked before the first run starts rather than when its turn comes. A pipeline run
+  started in `run_0003/` and one given `--run-index 3` get the same index on purpose:
+  both say "this is run 3" of the same workflow. **Behaviour change:** these indices are
+  seed labels and they have moved, so a run resumed across this change draws different
+  velocities and thermostat noise from that point on. Finish a running ensemble before
+  updating, or regenerate it.
 
   *Classification.* The metal-rich metalloid-glass rule no longer reaches the s-block:
   Li3P, Na3Sb and Cs3Sb are Zintl phases and keep their pnictide treatment, while
