@@ -239,8 +239,9 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
     # gets one panel per cation-centred pair plus the anion's total over all
     # its cations (O-(Ga+In+Zn)). Single-element and alloy systems, which
     # have no cation-anion pair, fall back to every pair with CN > 0.5.
+    from collections import Counter
     from .structure import is_bonding_pair
-    _elements = set(analyser.atoms_list[0].get_chemical_symbols())
+    _elements = Counter(analyser.atoms_list[0].get_chemical_symbols())
 
     def _is_bond(pair):
         a, b = pair.split("-")

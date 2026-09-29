@@ -27,6 +27,34 @@ from copy import deepcopy
 from ase.io import read, write, iread
 
 
+_ARRAY_STRIDE = 100000       # keeps SLURM array tasks / --run-index jobs from overlapping
+
+
+def _run_seed_index(snap_file: str, loop_idx: int, explicit, single_run: bool) -> int:
+    """Index that feeds the per-run MD seed stream (velocities, thermostat noise).
+
+    Priority, highest first:
+      1. an explicit ``--run-index`` (YAML ``run_index``), scoped by the run's
+         position so a multi-snapshot job stays internally independent and two
+         jobs with different indices cannot overlap;
+      2. the ``snapshot_NNNN`` number in the filename, which is the snapshot's
+         own stable identity: it survives resumes and is the same in every job;
+      3. ``SLURM_ARRAY_TASK_ID``, likewise scoped, so array tasks that each take
+         one structure and share a ``--seed`` do not collide;
+      4. the position in the loop.
+    """
+    if explicit is not None:
+        return int(explicit) if single_run else int(explicit) * _ARRAY_STRIDE + loop_idx
+    m = re.match(r"snapshot[_-]?(\d+)",
+                 os.path.splitext(os.path.basename(snap_file))[0])
+    if m:
+        return int(m.group(1))
+    task = os.environ.get("SLURM_ARRAY_TASK_ID")
+    if task and task.isdigit():
+        return int(task) * _ARRAY_STRIDE + loop_idx
+    return loop_idx
+
+
 def _run_dir_name(snap_file: str, fallback_idx: int) -> str:
     """Pick a self-documenting run-dir name from a snapshot filename.
 
@@ -143,21 +171,10 @@ def run(snapshot_files: list[str],
         atoms.calc = calc
         orig_dir = os.getcwd()
         os.chdir(run_dir)
-        # The run's index feeds the per-run seed stream. Three cases:
-        #  - explicit --run-index: use it as the BASE and add this run's own
-        #    index, so a batch stays internally independent;
-        #  - single snapshot, no explicit index: leave it unset, so
-        #    run_index_for falls through to the cwd / SLURM_ARRAY_TASK_ID
-        #    lookup (array tasks sharing a --seed must not collide);
-        #  - multi-snapshot: this run's own index.
         run_cfg = dict(cfg_override or {})
-        explicit = run_cfg.get("run_index")
-        if explicit is not None:
-            run_cfg["run_index"] = int(explicit) + i
-        elif single_run:
-            run_cfg.pop("run_index", None)
-        else:
-            run_cfg["run_index"] = int(run_name[4:])
+        run_cfg["run_index"] = _run_seed_index(
+            snap_file, i, cfg_override.get("run_index") if cfg_override else None,
+            single_run)
 
         try:
             # MD stages get the resume flag for FRAME-level resume within

@@ -43,53 +43,109 @@ def build_neighbour_dict(atoms, cutoff, get_cutoff_fn):
     return nbr_dict, syms
 
 
-def is_bonding_pair(s1: str, s2: str, elements) -> bool:
-    """Whether an s1-s2 contact counts as a first-shell BOND in a system made
-    of ``elements`` (the rule shared by the coordination report, the total
-    coordination, the bond angles and the CN plot).
+# Highest positive oxidation state, for the charge-balance test that decides
+# which elements act as anions in a given compound. The Shannon table lists
+# only the anionic state for S, N, H and the halogens, so the common positive
+# states of the p-block are given here.
+# a same-element metal pair is a first-shell bond above this metal fraction
+_METAL_RICH_BOND_FRACTION = 0.70
 
-    * Compound with an anion (O, N, S, Se, Te, halides, hydride): a pair is a
-      bond only when exactly one member is an anion. Cation-cation contacts
-      (Ga-In, and also hetero pairs the radii table calls covalent such as
-      Al-Si or Na-Si in aluminosilicate glasses) and anion-anion contacts are
-      second-shell neighbours mediated by the anion.
-      Which elements are anions depends on the compound, not on a fixed list:
-      hydrogen is an anion only in a hydride (LiH, MgH2) and a cation as soon
-      as a stronger anion is present (O-H in a hydroxide), and a compound whose
-      elements are ALL potential anions has its least electronegative member as
-      the cation (Te in TeO2, S in SO3, Se in SeO2).
-    * No anion (a-Si, SiC, GaAs, alloys): the radii classification decides.
-      A same-element pair is a bond only in a single-element system or a
-      pure-metal alloy (Cu-Cu in CuZr); Ga-Ga in GaAs or Ti-Ti in TiC is a
-      second-shell contact, since those compounds are not metals.
+_MAX_POSITIVE_OS = {"H": 1, "C": 4, "N": 5, "O": 2, "F": 1, "P": 5, "S": 6,
+                    "Cl": 7, "Se": 6, "Br": 7, "Te": 6, "I": 7}
 
-    Known limitation: a polyatomic anion whose central atom is itself in the
-    anion list (N in a nitrate, S in a sulfate) is treated as an anion when a
-    true cation is also present, so N-O and S-O inside the group are not
-    counted. Pass an explicit cutoff dict if you need those.
+
+def _max_positive_os(sym: str) -> int:
+    try:
+        from ..utils.radii import SHANNON_IONIC_RADII
+    except ImportError:
+        from amorphgen.utils.radii import SHANNON_IONIC_RADII
+    if sym in _MAX_POSITIVE_OS:
+        return _MAX_POSITIVE_OS[sym]
+    states = [k for k in SHANNON_IONIC_RADII.get(sym, {}) if k > 0]
+    return max(states) if states else 4
+
+
+def anion_elements(composition) -> set:
+    """Which elements act as ANIONS in this compound, decided by charge balance.
+
+    Membership of the anion table is not enough on its own: tellurium is the
+    anion in CdTe and the cation in TeO2, sulfur the anion in ZnS and the
+    cation in a sulfate, hydrogen the anion in LiH and the cation in a
+    hydroxide. So every element on the anion table starts as a candidate
+    anion, and while the cations present cannot supply the positive charge the
+    candidates demand, the least electronegative candidate is promoted to
+    cation. This reproduces the chemistry without a lookup table of exceptions:
+    La2O2S balances with sulfur as an anion and keeps it, H2SO4 does not and
+    promotes first hydrogen then sulfur, leaving the sulfate O as the anion.
+
+    ``composition`` may be a mapping of counts (preferred) or a bare set of
+    symbols, in which case one of each is assumed.
+    """
+    try:
+        from ..utils.radii import ANION_CHARGES, PAULING_EN
+    except ImportError:
+        from amorphgen.utils.radii import ANION_CHARGES, PAULING_EN
+    counts = (dict(composition) if hasattr(composition, "items")
+              else {e: 1 for e in composition})
+    anions = {e for e in counts if e in ANION_CHARGES}
+    if not anions:
+        return set()
+    cations = set(counts) - anions
+    # The most electronegative element is always an anion, so it is never a
+    # demotion candidate: an off-stoichiometry cell (a random Ga16Zn16O48 test
+    # composition, a defective model) must not end up with no anion at all.
+    least_first = sorted(anions, key=lambda e: PAULING_EN.get(e, 2.0))[:-1]
+    for candidate in least_first:
+        positive = sum(_max_positive_os(e) * counts[e] for e in cations)
+        negative = sum(-ANION_CHARGES[e] * counts[e] for e in anions)
+        if positive >= negative:
+            break
+        anions.discard(candidate)
+        cations.add(candidate)
+    return anions
+
+
+def is_bonding_pair(s1: str, s2: str, composition) -> bool:
+    """Whether an s1-s2 contact counts as a first-shell BOND in this compound
+    (the rule shared by the coordination report, the total coordination, the
+    bond angles and the CN plot).
+
+    * Compound with an anion: a pair is a bond only when exactly one member is
+      an anion, and which elements those are comes from :func:`anion_elements`
+      (charge balance), not from a fixed list. Cation-cation contacts (Ga-In,
+      and hetero pairs the radii table calls covalent such as Al-Si or Na-Si in
+      aluminosilicate glasses) and anion-anion contacts are second-shell
+      neighbours mediated by the anion.
+    * No anion (a-Si, SiC, GaAs, alloys): the radii classification decides. A
+      same-element pair is a bond in a single-element system, and in a
+      metal-rich composition (at least 70 % metal atoms, which covers the
+      metallic glasses Ni80P20, Fe80B20, Pd80Si20 as well as CuZr); Ga-Ga in
+      GaAs or Ti-Ti in TiC is a second-shell contact, since those compounds are
+      not metals.
+
+    ``composition`` may be a mapping of counts (preferred: the metal-fraction
+    test needs them) or a bare set of symbols.
     """
     try:
         from ..pipeline.random_gen import _classify_bond
-        from ..utils.radii import ANION_CHARGES, NONMETALS, METALLOIDS, PAULING_EN
+        from ..utils.radii import NONMETALS, METALLOIDS
     except ImportError:
         from amorphgen.pipeline.random_gen import _classify_bond
-        from amorphgen.utils.radii import (ANION_CHARGES, NONMETALS, METALLOIDS,
-                                           PAULING_EN)
-    elements = set(elements)
-    anions = {e for e in elements if e in ANION_CHARGES}
-    # hydrogen is an anion only when it is the ONLY one (a hydride)
-    if len(anions) > 1 and "H" in anions:
-        anions.discard("H")
-    # every element is a potential anion (TeO2, SO3): the least electronegative
-    # one is the cation, as charge balance requires
-    if anions == elements and len(elements) > 1:
-        anions.discard(min(anions, key=lambda e: PAULING_EN.get(e, 2.0)))
+        from amorphgen.utils.radii import NONMETALS, METALLOIDS
+    counts = (dict(composition) if hasattr(composition, "items")
+              else {e: 1 for e in composition})
+    elements = set(counts)
+    anions = anion_elements(counts)
     if anions and anions != elements:
         return (s1 in anions) != (s2 in anions)
     bt = _classify_bond(s1, s2)
     if s1 == s2:
-        all_metal = all(e not in NONMETALS and e not in METALLOIDS for e in elements)
-        return len(elements) == 1 or (bt == "metallic" and all_metal)
+        if len(elements) == 1:
+            return True
+        n_metal = sum(n for e, n in counts.items()
+                      if e not in NONMETALS and e not in METALLOIDS)
+        metal_fraction = n_metal / sum(counts.values())
+        return bt == "metallic" and metal_fraction >= _METAL_RICH_BOND_FRACTION
     return bt in ("ionic", "covalent", "metallic")
 
 
@@ -181,9 +237,11 @@ def compute_all_angles(atoms_list, max_cutoff, get_cutoff_fn,
         except ImportError:
             from amorphgen.pipeline.random_gen import _classify_bond
 
+        from collections import Counter
         unique = sorted(set(atoms_list[0].get_chemical_symbols()))
+        comp = Counter(atoms_list[0].get_chemical_symbols())
         bonding_pairs = {(s1, s2) for s1 in unique for s2 in unique
-                         if is_bonding_pair(s1, s2, unique)}
+                         if is_bonding_pair(s1, s2, comp)}
 
     angle_data = {}
 

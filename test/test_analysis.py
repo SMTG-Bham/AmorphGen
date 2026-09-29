@@ -681,3 +681,39 @@ class TestBondingPairRules:
         assert not self._b("In", "In", {"In", "P"})
         assert not self._b("Ti", "Ti", {"Ti", "C"})               # carbide
         assert not self._b("Ga", "In", {"In", "Ga", "Zn", "O"})   # cation-cation in an oxide
+
+    def test_anion_set_follows_charge_balance(self):
+        """Review round 5: membership of the anion table is not enough. The
+        same element is an anion or a cation depending on what it is with."""
+        from amorphgen.analysis.structure import anion_elements as ae
+        assert ae({"Cd": 1, "Te": 1}) == {"Te"}          # telluride: Te is the anion
+        assert ae({"Te": 1, "O": 2}) == {"O"}            # tellurite: Te is the cation
+        assert ae({"Na": 2, "Te": 1, "O": 4}) == {"O"}   # ... even with a real cation present
+        assert ae({"La": 2, "O": 2, "S": 1}) == {"O", "S"}   # oxysulfide: both balance
+        assert ae({"H": 2, "S": 1, "O": 4}) == {"O"}     # sulfate: H and S are cations
+        assert ae({"Na": 1, "N": 1, "O": 3}) == {"O"}    # nitrate
+        assert ae({"Li": 1, "H": 1}) == {"H"}            # hydride
+        assert ae({"Na": 1, "O": 1, "H": 1}) == {"O"}    # hydroxide
+        assert ae({"Bi": 1, "O": 1, "Cl": 1}) == {"O", "Cl"}
+        assert ae({"Cu": 1, "Zr": 1}) == set()
+
+    def test_metal_rich_glasses_keep_their_metal_metal_bonds(self):
+        """Ni80P20, Fe80B20 and Pd80Si20 are classified as alloys, so their
+        metal-metal contacts must count as bonds; GaAs and TiC are not metals."""
+        assert self._b("Ni", "Ni", {"Ni": 80, "P": 20})
+        assert self._b("Fe", "Fe", {"Fe": 80, "B": 20})
+        assert self._b("Pd", "Pd", {"Pd": 80, "Si": 20})
+        assert self._b("Cu", "Cu", {"Cu": 50, "Zr": 50})
+        assert not self._b("Ga", "Ga", {"Ga": 1, "As": 1})
+        assert not self._b("Ti", "Ti", {"Ti": 1, "C": 1})
+        assert not self._b("Be", "Be", {"Be": 2, "C": 1})
+
+    def test_off_stoichiometry_cells_keep_an_anion(self):
+        """A charge-unbalanced composition (a random test cell, a defective
+        model) must not end up with no anion at all: the most electronegative
+        element is never demoted."""
+        from amorphgen.analysis.structure import anion_elements as ae
+        assert ae({"Ga": 16, "Zn": 16, "O": 48}) == {"O"}
+        assert ae({"Si": 30, "O": 40}) == {"O"}
+        assert self._b("Ga", "O", {"Ga": 16, "Zn": 16, "O": 48})
+        assert not self._b("Ga", "Zn", {"Ga": 16, "Zn": 16, "O": 48})

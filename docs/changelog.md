@@ -334,6 +334,31 @@ orphan: true
 
 ### Fixed after the rc4 upload (on GitHub main; not in the rc4 wheel on PyPI)
 
+- **Review round 5 (2026-09-29): which elements are anions is now decided by charge
+  balance.** Round 4 replaced a fixed anion list with a set of special cases, and the
+  special cases were wrong in turn: tellurium and selenium went back to being anions as
+  soon as a real cation was present (so Te-O was not a bond in a sodium or zinc
+  tellurite, while Na-Te was), and taking hydrogen off the list early stopped the
+  all-anion rule from ever firing for H2SO4 or HNO3. `anion_elements()` now starts every
+  element of the anion table as a candidate and promotes the least electronegative one
+  to cation while the cations present cannot supply the charge the candidates demand,
+  never demoting the most electronegative element. That reproduces the chemistry from
+  the composition alone: Te is the anion in CdTe and the cation in TeO2 and in a
+  tellurite, S the anion in ZnS and in La2O2S but the cation in a sulfate, H the anion
+  in LiH and the cation in a hydroxide, and nitrates and sulfates keep their N-O and
+  S-O bonds. Checked on 35 compositions.
+- **Metal-metal bonds in metal-metalloid glasses.** Requiring every element to be a
+  metal dropped Ni-Ni in Ni80P20, Fe-Fe in Fe80B20 and Pd-Pd in Pd80Si20, which the
+  classifier calls alloys. A same-element metal pair now bonds above a 70 % metal atom
+  fraction, which keeps Ga-Ga in GaAs, Ti-Ti in TiC and Be-Be in Be2C out. The analysis
+  call sites pass element counts instead of a bare set so the fraction can be computed.
+- **Run-index priority.** An explicit `--run-index` first (scoped by position, so two
+  jobs with different indices cannot overlap), then the `snapshot_NNNN` number from the
+  filename, which is the snapshot's stable identity across jobs and resumes, then
+  `SLURM_ARRAY_TASK_ID` (likewise scoped), then the position in the loop. Round 4 had
+  dropped the filename number for single-snapshot runs, so outside SLURM every such run
+  shared index 0, and its `--run-index` base overlapped between jobs. The test now
+  drives the batch loop instead of asserting arithmetic.
 - **Review round 4 (2026-09-29), all five findings confirmed and fixed.**
   - *Compounds made only of anion-list elements had no bonds at all.* `is_bonding_pair`
     treated O, S, Se, Te, N, H and the halogens as anions unconditionally, so in TeO2 and
