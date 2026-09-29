@@ -766,6 +766,20 @@ def merge_config(defaults: dict, overrides: dict | None) -> dict:
     return cfg
 
 
+def stage_file(name: str, work_dir=None) -> str:
+    """Path a stage runner writes its file ``name`` to.
+
+    Relative names stay in the current directory, which is the run's work
+    dir once MeltQuenchPipeline or batch_quench has changed into it. A stage
+    called on its own is given ``work_dir`` instead: ``name`` goes inside it
+    (created if missing), unless ``name`` is absolute.
+    """
+    if work_dir is None:
+        return name
+    os.makedirs(work_dir, exist_ok=True)
+    return os.path.join(work_dir, name)
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Snapshot extraction
 # ═════════════════════════════════════════════════════════════════════════════

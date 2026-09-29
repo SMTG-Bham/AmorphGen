@@ -516,3 +516,22 @@ orphan: true
 - **`draft-pdf.yml` removed.** It built the JOSS draft from `paper/`, which was deleted
   in June, so it could no longer run. The README's package layout no longer lists
   `paper/`.
+- **The stage functions ignored `work_dir=`.** `opt_cell.run`, `equilibrate.run`,
+  `melt_cell.run`, `quench.run` and `final_opt.run` took the keyword into `**kwargs`
+  and wrote their log, trajectory and output structure to the current directory. They
+  now write them into `work_dir`, which is created if missing. Without it they write to
+  the current directory as before, which is where `MeltQuenchPipeline` and
+  `batch_quench` run each stage.
+- **Tutorials.** Five notebooks left over from the old numbering (`T1_random_gen`, the
+  two in `T2_MQ_via_7_steps`, `T3_mix_random_MQ` and `T4_classical_potential`)
+  duplicated Tutorials 3-6 and are removed, with the logs that came with them. Tutorial
+  6 had never been run and now ships with its output; its coordination table used a
+  3.0 Å cutoff that counted second-shell oxygens (Si 4.6 instead of 4.1) and now
+  closes the first shell. Tutorial 7 stopped with a `ZeroDivisionError` (its colour
+  scale divided by the number of temperatures minus one, and it had been run with one),
+  so its Arrhenius cells never ran. Its trajectory analysis had found nothing anyway:
+  `equilibrate.run` wrote the trajectory outside the `work_dir` it was given, and the
+  time axis treated frames, which are saved every 100 MD steps, as one step apart. Its
+  CLI commands used a `--no-relax` flag that does not exist, a lower-case ensemble
+  name, the default 0.5 fs timestep and file names from an older layout. The notebook
+  now runs end to end.

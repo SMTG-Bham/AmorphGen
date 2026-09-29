@@ -240,6 +240,21 @@ atoms = pipe.run(stages=[1, 4, 5, 6, 7])
 atoms = pipe.run(stages=[1, 4, 5, 6, 7], resume=True)
 ```
 
+A stage can also run on its own. `work_dir` sets where its log, trajectory and
+output structure go (default: the current directory):
+
+```python
+from amorphgen.pipeline import equilibrate
+from amorphgen.utils.calculators import get_calculator
+
+calc = get_calculator("mace-mpa-0", device="cuda")
+liquid = equilibrate.run(
+    "mq_run/stage1_opt.xyz", calc=calc, stage="high",
+    cfg_override={"eq_high": {"ensemble": "NVT", "T": 3000, "steps": 20000}},
+    work_dir="eq_3000K",
+)  # eq_3000K/stage4_eq.log, stage4_eq_traj.xyz, stage4_eq.xyz
+```
+
 ### Structure Analysis
 
 ```python
