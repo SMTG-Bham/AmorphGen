@@ -11,7 +11,15 @@ description = "Amorphous structure generation via melt-quench MD and random plac
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
+# Names only, so the metadata lists the authors in this order in one field (an
+# entry with an email goes to a separate Author-email field); the contact
+# address is on the maintainer.
 authors = [
+    {name = "Chaiyawat Kaewmeechai"},
+    {name = "Louie Slocombe"},
+    {name = "David O. Scanlon"},
+]
+maintainers = [
     {name = "Chaiyawat Kaewmeechai", email = "c.kaewmeechai@bham.ac.uk"},
 ]
 keywords = [

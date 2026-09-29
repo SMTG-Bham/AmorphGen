@@ -349,6 +349,10 @@ orphan: true
   3.14. The `backends` job and the `build_tools/` conda environments stay on 3.12:
   CHGNet 0.4.2 publishes wheels up to 3.12 only, so on 3.13 and 3.14 pip compiles it,
   which needs a C compiler.
+- **`CITATION.cff` and `CODE_OF_CONDUCT.md`.** GitHub's "Cite this repository" button
+  now gives the reference the README asks for, in APA and BibTeX. The code of conduct
+  adopts the Contributor Covenant 3.0 and says where to report a problem. A test checks
+  that `CITATION.cff` names the current release, so a version bump has to update it.
 
 ### Fixed after the rc4 upload (on GitHub main; not in the rc4 wheel on PyPI)
 

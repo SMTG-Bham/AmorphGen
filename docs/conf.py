@@ -4,7 +4,7 @@
 # -- Project information -----------------------------------------------------
 project = "AmorphGen"
 copyright = "2026, Chaiyawat Kaewmeechai"
-author = "Chaiyawat Kaewmeechai"
+author = "Chaiyawat Kaewmeechai, Louie Slocombe, David O. Scanlon"
 version = "1.0.0rc4"
 release = "1.0.0rc4"
 

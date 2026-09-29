@@ -25,7 +25,7 @@ from .utils.convert import convert
 from .utils.common import extract_snapshots
 
 __version__ = "1.0.0rc4"
-__author__ = "Chaiyawat Kaewmeechai"
+__author__ = "Chaiyawat Kaewmeechai, Louie Slocombe, David O. Scanlon"
 
 __all__ = [
     "MeltQuenchPipeline",

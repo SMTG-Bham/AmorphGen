@@ -193,8 +193,9 @@ amorphgen/
 
 ## Code of conduct
 
-Please be respectful and constructive in all interactions. We are committed
-to providing a welcoming and inclusive experience for everyone.
+Everyone taking part in AmorphGen is expected to follow the
+[code of conduct](https://github.com/SMTG-Bham/AmorphGen/blob/main/CODE_OF_CONDUCT.md),
+which also says how to report a problem.
 
 ## Questions?
 

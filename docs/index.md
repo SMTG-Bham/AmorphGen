@@ -243,6 +243,7 @@ amorphgen --list-models   # see all 20+ model variants
 
 ## Authors & Contact
 
+**Authors:** [Chaiyawat Kaewmeechai](https://orcid.org/0000-0003-1603-2659), [Louie Slocombe](https://orcid.org/0000-0002-6986-5526) and [David O. Scanlon](https://orcid.org/0000-0001-9174-8601)<br>
 **Maintainer:** [Chaiyawat Kaewmeechai](https://cywkmc21.github.io/), University of Birmingham<br>
 **Email:** `c[dot]kaewmeechai[at]bham[dot]ac[dot]uk`
 
@@ -258,7 +259,7 @@ preparation) and the GitHub repository:
 
 ```bibtex
 @misc{amorphgen,
-  author = {Kaewmeechai, Chaiyawat and Scanlon, David O.},
+  author = {Kaewmeechai, Chaiyawat and Slocombe, Louie and Scanlon, David O.},
   title  = {AmorphGen: A Python package for amorphous structure generation
             with machine-learning and classical interatomic potentials},
   year   = {2026},

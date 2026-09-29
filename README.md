@@ -993,7 +993,7 @@ and the foundation model(s) you used.
 **AmorphGen:**
 ```bibtex
 @misc{amorphgen,
-  author = {Kaewmeechai, Chaiyawat and Scanlon, David O.},
+  author = {Kaewmeechai, Chaiyawat and Slocombe, Louie and Scanlon, David O.},
   title  = {AmorphGen: A Python package for amorphous structure generation
             with machine-learning and classical interatomic potentials},
   year   = {2026},
