@@ -215,8 +215,6 @@ def plot_energy_convergence(source, timestep_fs: float = DEFAULT_TIMESTEP_FS,
     drift_eV_per_ps : float
         Linear drift in energy. Should be ~0 if equilibrated.
     """
-    import matplotlib
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     # Get time array from log or compute from timestep
@@ -345,8 +343,6 @@ def plot_block_averages(source, n_blocks: int = 4,
                         n_atoms: int | None = None, ax=None,
                         frame_stride: int = TRAJ_LOG_INTERVAL):
     """Visualise block averaging: block means vs overall mean +/- 2*SEM."""
-    import matplotlib
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     is_eq, bd = block_average_test(source, n_blocks, discard_fraction,
@@ -500,8 +496,6 @@ def plot_msd(traj, timestep_fs: float = DEFAULT_TIMESTEP_FS, ax=None,
         D > 1e-6 cm^2/s indicates liquid/diffusive behaviour.
         D < 1e-6 cm^2/s indicates frozen/glass behaviour.
     """
-    import matplotlib
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     time_ps, msd_dict = compute_msd(traj, timestep_fs=timestep_fs,
@@ -556,8 +550,6 @@ def plot_temperature(source, timestep_fs: float = DEFAULT_TIMESTEP_FS,
     T_target : float, optional
         Target temperature (K). If given, shows expected fluctuation band.
     """
-    import matplotlib
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     if isinstance(source, str) and source.endswith('.log'):
@@ -665,8 +657,6 @@ def plot_rdf_time_windows(traj, pairs: list[tuple[str, str]] | None = None,
 
     If the RDFs from all windows overlap, the structure is equilibrated.
     """
-    import matplotlib
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     frames = _load_trajectory(traj)
@@ -793,8 +783,6 @@ def plot_cn_vs_time(traj, pairs: list[tuple[str, str, float]],
     cutoffs : list of float, optional
         Bond cutoffs per pair. None = auto from covalent radii.
     """
-    import matplotlib
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     if cutoffs is None:
@@ -875,8 +863,6 @@ def convergence_report(source, timestep_fs: float = DEFAULT_TIMESTEP_FS,
         energy_drift_eV_per_atom_per_ps, block_test_passed, block_data,
         diffusion_coefficients_cm2_s, summary_text.
     """
-    import matplotlib
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import os
 

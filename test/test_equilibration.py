@@ -242,8 +242,6 @@ class TestPartialRdfNormalisation:
 class TestPlotEnergyConvergence:
     """Plot helpers should run without raising — even if no display backend."""
     def test_runs_on_log(self, tmp_path):
-        import matplotlib
-        matplotlib.use("Agg")
         from amorphgen.utils.equilibration import plot_energy_convergence
         log = tmp_path / "stage_eq.log"
         log.write_text(
@@ -258,8 +256,6 @@ class TestPlotEnergyConvergence:
 
 class TestPlotBlockAverages:
     def test_renders_without_error(self):
-        import matplotlib
-        matplotlib.use("Agg")
         from ase import Atoms
         from amorphgen.utils.equilibration import plot_block_averages
 
@@ -283,8 +279,6 @@ class TestPlotBlockAverages:
 
 class TestPlotMsd:
     def test_runs_on_drifting_traj(self):
-        import matplotlib
-        matplotlib.use("Agg")
         from ase import Atoms
         import numpy as _np
         from amorphgen.utils.equilibration import plot_msd
@@ -299,8 +293,6 @@ class TestPlotMsd:
 
 class TestPlotTemperature:
     def test_runs_on_log(self, tmp_path):
-        import matplotlib
-        matplotlib.use("Agg")
         from amorphgen.utils.equilibration import plot_temperature
         log = tmp_path / "tlog.log"
         log.write_text(
@@ -341,8 +333,6 @@ class TestComputeCnVsTime:
 
 class TestConvergenceReport:
     def test_runs_on_log_file(self, tmp_path):
-        import matplotlib
-        matplotlib.use("Agg")
         from amorphgen.utils.equilibration import convergence_report
 
         # convergence_report needs energies — supply via a log file (the

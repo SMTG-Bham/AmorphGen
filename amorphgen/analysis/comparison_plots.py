@@ -57,6 +57,7 @@ from ase.units import _Nav
 # not pull matplotlib — keeps doc builds and lightweight scripts fast.
 
 from .analyser import StructureAnalyser
+from .plotting import _figure
 
 
 # ─── Okabe-Ito colour-blind-safe palette ──────────────────────────────────
@@ -165,13 +166,11 @@ def _assign_colours(ensembles: list[EnsembleSpec]) -> None:
 def _save(fig, output_dir: str, prefix: str, name: str,
           save_pdf: bool = True, dpi: int = 300) -> None:
     """Save fig as PNG and (optionally) PDF under output_dir/prefix_name.*."""
-    import matplotlib.pyplot as plt
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     base = os.path.join(output_dir, f"{prefix}_{name}" if prefix else name)
     fig.savefig(base + ".png", dpi=dpi, bbox_inches="tight")
     if save_pdf:
         fig.savefig(base + ".pdf", bbox_inches="tight")
-    plt.close(fig)
 
 
 def _per_structure_density(files: list[str]) -> np.ndarray:
@@ -209,10 +208,9 @@ def plot_partial_rdf(ensembles: list[EnsembleSpec],
     rmax
         Max r in Å. ``None`` = auto from cell.
     """
-    import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
     _assign_colours(ensembles)
-    fig, ax = plt.subplots(figsize=(5.0, 4.0))
+    fig, ax = _figure(figsize=(5.0, 4.0))
     csv_rows = [["ensemble", "pair", "r_A", "g_r"]]
 
     auto_rmax = None
@@ -264,10 +262,9 @@ def plot_coordination(ensembles: list[EnsembleSpec],
     on the negative half-plane. For mono-element systems, set
     ``bot_key=None``.
     """
-    import matplotlib.pyplot as plt
     from matplotlib.ticker import FuncFormatter
     _assign_colours(ensembles)
-    fig, ax = plt.subplots(figsize=(5.0, 4.0))
+    fig, ax = _figure(figsize=(5.0, 4.0))
     csv_rows = [["ensemble", "site", "CN", "fraction_percent"]]
 
     cn_tops = [(e, e.analyser().coordination()[top_key]["distribution"])
@@ -339,13 +336,12 @@ def plot_bond_angles(ensembles: list[EnsembleSpec],
     angle_keys
         ``[(triplet, linestyle), ...]`` — e.g. ``[("O-Si-O", "-")]``.
     """
-    import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
     _assign_colours(ensembles)
     if bins is None:
         bins = np.arange(40, 181, 2)        # last edge 180: linear triplets count
     centres = 0.5 * (bins[:-1] + bins[1:])
-    fig, ax = plt.subplots(figsize=(5.0, 4.0))
+    fig, ax = _figure(figsize=(5.0, 4.0))
     csv_rows = [["ensemble", "triplet", "angle_deg", "probability_density"]]
 
     for ens in ensembles:
@@ -391,9 +387,8 @@ def plot_density(ensembles: list[EnsembleSpec],
         ``(rho_lo, rho_hi)`` in g/cm³, drawn as a cap-bar at x=1. Pass
         ``None`` to hide the experiment column.
     """
-    import matplotlib.pyplot as plt
     _assign_colours(ensembles)
-    fig, ax = plt.subplots(figsize=(5.0, 4.0))
+    fig, ax = _figure(figsize=(5.0, 4.0))
     csv_rows = [["ensemble", "structure_index", "density_g_per_cm3"]]
 
     has_exp = exp_density is not None

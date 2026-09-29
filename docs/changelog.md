@@ -487,3 +487,14 @@ orphan: true
   committed. They now use configs and commands that exist. The validation page's
   reproduction also generated 160 atoms instead of 400 and collected the results from
   the pre-rc2 `run_*/run_0000/` layout.
+- **Plotting switched notebooks off inline figures.** `StructureAnalyser.plot()`,
+  `plot_sq`, `plot_rings`, `plot_pair_panels` and the equilibration plots
+  (`convergence_report`, `plot_msd` and the rest) called `matplotlib.use("Agg")`. After
+  one call a notebook showed no more figures, `plt.show()` only warning that
+  FigureCanvasAgg is non-interactive, and a script lost its interactive backend the same
+  way. The analysis plots, `compare_ensembles` included, only write files: they now draw
+  on a `matplotlib.figure.Figure` outside pyplot, so they leave the backend and the open
+  figures alone, and the files are unchanged. The equilibration plots return pyplot
+  figures on the caller's backend, so a notebook shows them inline, including those of
+  `convergence_report()` without `output_dir`. Without a display, as on a compute node,
+  matplotlib picks Agg by itself.
