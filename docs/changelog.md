@@ -372,11 +372,14 @@ orphan: true
   drew the same numbers. A run's index is now its `snapshot_NNNN` number when the
   filename has one and its position in the loop otherwise, which keeps a run's seed
   stable when the input set changes or a resume selects differently. That local index is
-  then banded by where the run's scope came from: an explicit `--run-index` (YAML
-  `run_index`) and a `SLURM_ARRAY_TASK_ID` each occupy their own range, so two runs can
-  only share an index when they come from the same source with the same local identity.
-  The pipeline path bands a bare `--run-index` the same way, so the flag means one thing
-  in both modes. **Behaviour change:** these indices are seed labels, and they have
+  then banded by where the run's scope came from. Each source has its own range: an
+  explicit `--run-index` on an ensemble, a `SLURM_ARRAY_TASK_ID` on an ensemble, the same
+  two on the single-structure pipeline, and no scope at all. Two runs therefore share a
+  seed stream only when they come from the same source with the same scope and the same
+  local identity. The banded value travels under its own config key, so a stage cannot
+  mistake a local index for an explicit one and band it twice. Out-of-range values are
+  refused rather than wrapped, since folding `snapshot_100003` onto `snapshot_0003` would
+  silently merge two streams. **Behaviour change:** these indices are seed labels, and they have
   moved, so a run resumed across this change draws different velocities and thermostat
   noise from that point on. Finish a running ensemble before updating, or regenerate it.
 

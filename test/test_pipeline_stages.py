@@ -265,7 +265,7 @@ def test_run_seed_index_bands_and_stability(tmp_path, monkeypatch):
     runs collide only within one source. Snapshot numbers here are deliberately
     not equal to the loop positions."""
     from amorphgen.pipeline.batch_quench import _run_seed_index as idx
-    from amorphgen.utils.common import scoped_run_index, _INDEX_BAND
+    from amorphgen.utils.common import scoped_run_index, _INDEX_BAND, _INDEX_STRIDE
     monkeypatch.delenv("SLURM_ARRAY_TASK_ID", raising=False)
     # local identity: the filename number, not the loop position
     assert idx("snapshot_0007_frame01.xyz", 0) == 7
@@ -284,7 +284,19 @@ def test_run_seed_index_bands_and_stability(tmp_path, monkeypatch):
     # two jobs that both use --run-index cannot overlap either
     assert not ({idx(f"s{k}.xyz", k, 0) for k in range(3)} & {idx("s.xyz", 0, 1)})
     # and the pipeline path bands a bare --run-index the same way
-    assert scoped_run_index(0, explicit=3) == idx("x.xyz", 0, 3)
+    # the value a stage actually receives, i.e. through run_index_for, is what
+    # matters: the earlier tests stopped at _run_seed_index and missed a double
+    # banding downstream that put three unrelated runs on one stream
+    from amorphgen.utils.common import run_index_for
+    through = [run_index_for({"seed_index": idx("snapshot_0003.xyz", 0)}),        # batch, no flag
+               run_index_for({"seed_index": idx("snapshot_0000.xyz", 0, 3)}),     # batch, --run-index 3
+               run_index_for({"run_index": 3})]                                   # pipeline, --run-index 3
+    assert len(set(through)) == 3, through
+    monkeypatch.setenv("SLURM_ARRAY_TASK_ID", "3")
+    through += [run_index_for({"seed_index": idx("snapshot_0000.xyz", 0)}),       # batch under SLURM 3
+                run_index_for({})]                                                # pipeline under SLURM 3
+    monkeypatch.delenv("SLURM_ARRAY_TASK_ID")
+    assert len(set(through)) == 5, through
 
 
 def test_batch_quench_assigns_distinct_seed_indices(tmp_path, monkeypatch):
@@ -302,7 +314,7 @@ def test_batch_quench_assigns_distinct_seed_indices(tmp_path, monkeypatch):
     seen = []
 
     def fake_eq(atoms, cfg_override=None, **kw):
-        seen.append(cfg_override.get("run_index"))
+        seen.append(cfg_override.get("seed_index"))
         return atoms
 
     monkeypatch.delenv("SLURM_ARRAY_TASK_ID", raising=False)
@@ -328,7 +340,7 @@ def test_batch_quench_single_snapshot_uses_the_slurm_array_task(tmp_path, monkey
     seen = []
 
     def fake_eq(atoms, cfg_override=None, **kw):
-        seen.append(cfg_override.get("run_index"))
+        seen.append(cfg_override.get("seed_index"))
         return atoms
 
     for task in ("4", "9"):
@@ -337,7 +349,7 @@ def test_batch_quench_single_snapshot_uses_the_slurm_array_task(tmp_path, monkey
              patch.object(bq, "get_calculator", lambda **kw: None):
             bq.run([str(src)], cfg_override={"model": "lennard-jones"},
                    work_dir=str(tmp_path / f"w{task}"), stages=[4])
-    assert seen == [scoped_run_index(0, task=4), scoped_run_index(0, task=9)], seen
+    assert seen == [scoped_run_index(0, 4, "slurm"), scoped_run_index(0, 9, "slurm")], seen
 
 
 def test_batch_quench_single_snapshot_with_explicit_run_index(tmp_path, monkeypatch):
@@ -352,7 +364,7 @@ def test_batch_quench_single_snapshot_with_explicit_run_index(tmp_path, monkeypa
     seen = []
 
     def fake_eq(atoms, cfg_override=None, **kw):
-        seen.append(cfg_override.get("run_index"))
+        seen.append(cfg_override.get("seed_index"))
         return atoms
 
     monkeypatch.delenv("SLURM_ARRAY_TASK_ID", raising=False)
@@ -365,3 +377,18 @@ def test_batch_quench_single_snapshot_with_explicit_run_index(tmp_path, monkeypa
             bq.run([str(src)], cfg_override=cfg,
                    work_dir=str(tmp_path / f"w{base}"), stages=[4])
     assert len(set(seen)) == 3, seen
+
+
+def test_scoped_run_index_refuses_out_of_range_values():
+    """Wrapping would be silent: snapshot_100003 folding onto snapshot_0003, or
+    --run-index 100000 spilling into the next band, puts two runs on one seed
+    stream. Both are refused instead."""
+    import pytest
+    from amorphgen.utils.common import scoped_run_index, _INDEX_STRIDE
+    with pytest.raises(ValueError, match="outside"):
+        scoped_run_index(_INDEX_STRIDE + 3)
+    with pytest.raises(ValueError, match="outside"):
+        scoped_run_index(0, _INDEX_STRIDE, "batch")
+    with pytest.raises(ValueError, match="unknown run-index source"):
+        scoped_run_index(0, 1, "nonsense")
+    assert scoped_run_index(_INDEX_STRIDE - 1) == _INDEX_STRIDE - 1

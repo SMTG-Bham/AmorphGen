@@ -30,6 +30,7 @@ _VALID_TOP_KEYS = {
     "mace_model": (str, type(None)),
     "seed": (int, type(None)),
     "run_index": (int, type(None)),
+    "seed_index": (int, type(None)),
     "engine": str,
     "model_path": (str, type(None)),
     "device": str,

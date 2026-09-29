@@ -47,10 +47,10 @@ def _run_seed_index(snap_file: str, loop_idx: int, explicit=None) -> int:
                  os.path.splitext(os.path.basename(snap_file))[0])
     local = int(m.group(1)) if m else loop_idx
     if explicit is not None:
-        return scoped_run_index(local, explicit=int(explicit))
+        return scoped_run_index(local, int(explicit), "batch")
     task = os.environ.get("SLURM_ARRAY_TASK_ID")
     if task and task.isdigit():
-        return scoped_run_index(local, task=int(task))
+        return scoped_run_index(local, int(task), "slurm")
     return scoped_run_index(local)
 
 
@@ -171,7 +171,7 @@ def run(snapshot_files: list[str],
         orig_dir = os.getcwd()
         os.chdir(run_dir)
         run_cfg = dict(cfg_override or {})
-        run_cfg["run_index"] = _run_seed_index(
+        run_cfg["seed_index"] = _run_seed_index(
             snap_file, i, cfg_override.get("run_index") if cfg_override else None)
 
         try:

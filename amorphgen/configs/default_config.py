@@ -34,6 +34,7 @@ DEFAULT_CONFIG = {
     # per-run streams via SeedSequence) and, in --random-gen, the placement.
     "seed": None,
     "run_index": None,   # explicit run index for the per-run seed stream (--run-index)
+    "seed_index": None,  # internal: the banded index batch_quench hands to a stage
     # Relaxation engine for the ensemble modes: "ase" (default) or "torchsim"
     # (batched, optional extra amorphgen[torchsim]).
     "engine": "ase",
