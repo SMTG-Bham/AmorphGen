@@ -89,7 +89,7 @@ over every anion-former (oxynitrides, oxyfluorides).
 | `covalent_carbide` | Cordero covalent | 0.32 | SiC, B4C |
 | `group_iv` | Cordero covalent | 0.30 | Si, Ge, C |
 | `chalcogenide` | Cordero covalent | 0.30 | ZnS, CdTe, GeTe |
-| `chalcogenide_glass` | Cordero covalent | 0.23 | GeS2, GeSe2, As2S3, As2Se3 (network glasses; tellurides stay `chalcogenide`) |
+| `chalcogenide_glass` | **van der Waals** | 1.05 | GeS2, GeSe2, As2S3, As2Se3, Sb2S3 (chain / corner-sharing glasses; tellurides stay `chalcogenide`) |
 | `elemental_semiconductor` | Cordero covalent | 0.28 | a-Se, a-Te, a-As, a-Sb, a-P |
 
 The dioxide split (rutile vs fluorite) and the small- vs large-cation nitride

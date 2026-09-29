@@ -22,7 +22,7 @@ import logging
 from functools import lru_cache
 
 import numpy as np
-from ase.data import covalent_radii, atomic_numbers, atomic_masses
+from ase.data import covalent_radii, vdw_radii, atomic_numbers, atomic_masses
 
 logger = logging.getLogger(__name__)
 
@@ -455,6 +455,10 @@ _COVALENT_OXIDE_CATIONS = frozenset({"Be"})
 
 # Glass-forming cations of the corner-sharing chalcogenide glasses
 _CHALCOGENIDE_GLASS_FORMERS = frozenset({"Ge", "Si", "As", "Sb", "B", "P"})
+
+# Classes whose density comes from van der Waals contact between chains or
+# layers rather than from the covalent bond length (see _radius_for_density)
+_VDW_RADIUS_CLASSES = frozenset({"elemental_semiconductor", "chalcogenide_glass"})
 
 # Metalloids that form metal-rich metallic glasses with transition / noble
 # metals (Ni80P20, Fe80B20, Pd80Si20); below this fraction the composition is
@@ -1099,13 +1103,20 @@ PACKING_FACTORS = {
     "hydride":         0.55,  # LiH, MgH2, NaAlH4
     # Covalent — Cordero covalent radii
     "group_iv":        0.30,  # Si, Ge, C (tetrahedral covalent network)
-    "elemental_semiconductor": 0.28,  # a-Se, a-Te, a-As, a-Sb, a-P (chain/layer, Cordero)
+    "elemental_semiconductor": 1.01,  # a-Se, a-Te, a-As, a-Sb, a-P: 2-3 fold
+                                      # chain / layer elements, VAN DER WAALS
+                                      # radii at unit packing (measured
+                                      # 0.94-1.09 on the five elements)  # a-Se, a-Te, a-As, a-Sb, a-P (chain/layer, Cordero)
     "pnictide":        0.32,  # GaAs, InP, InAs (III-V compounds)
     "chalcogenide":    0.30,  # ZnS, CdTe, GeTe (II-VI / IV-VI)
-    "chalcogenide_glass": 0.23,  # GeS2, GeSe2, As2S3, As2Se3: corner-sharing
-                                 # network glasses (sulfides/selenides of the
-                                 # network formers); 0.30 over-predicts them by
-                                 # 20-50 % (benchmark 2026-09-28)
+    "chalcogenide_glass": 1.05,  # GeS2, GeSe2, As2S3, As2Se3, Sb2S3: chain /
+                                 # corner-sharing network glasses. VAN DER WAALS
+                                 # radii (see _radius_for_density): the density
+                                 # of a low-coordination network is set by the
+                                 # van der Waals contact between chains, not by
+                                 # the covalent bond, and vdW spheres then fill
+                                 # the cell (pf ~ 1). Measured pf on the five
+                                 # glasses: 0.99-1.12.
     "boride":          0.60,  # TiB2, MgB2, ZrB2 — Goldschmidt cation +
                               # Cordero B (carbide-style; calibrated
                               # 2026-07-31: diborides land 80-84 % of
@@ -1167,6 +1178,8 @@ def _classify_compound(composition: dict) -> str:
     # covalent radii, not the ionic "highest positive" fallback, which gives
     # nonsense (e.g. pure As → As(5+) radius → ~150 g/cm3). This is the bonding
     # analogue of the radius rule: ΔEN = 0 ⇒ covalent.
+    if len(elems) == 1 and elems <= {"C"}:
+        return "group_iv"          # a-C / ta-C is a 3D network like a-Si, not a chain element
     if len(elems) == 1:
         (only_el,) = elems
         if ((only_el in NONMETALS or only_el in METALLOIDS)
@@ -1436,6 +1449,20 @@ def _radius_for_density(sym: str, cls: str,
     # as Sb2O5). Sb(III) has a stereochemically active lone pair giving open
     # structures (Sb2O3) where the small ionic radius badly over-predicts the
     # density, so it falls back to the Cordero covalent radius.
+    if cls in _VDW_RADIUS_CLASSES:
+        # Low-coordination chain / layer networks of the heavy p-block: the
+        # cell volume is set by the van der Waals contact between chains, and
+        # the vdW spheres (which overlap heavily along the covalent bonds)
+        # fill it at a packing factor of about 1. Covalent radii need a
+        # packing factor that scatters by a factor of 1.7 over the same
+        # systems (0.19-0.33); vdW radii cluster at 1.03 +/- 0.06. Checked
+        # BEFORE the Sb rule below, which is about oxides.
+        # ASE has no vdW radius for most transition metals: fall back.
+        r = vdw_radii[atomic_numbers[sym]]
+        if r == r:                                   # not NaN
+            return float(r)
+        return covalent_radii[atomic_numbers[sym]]
+
     if sym == "Sb":
         return 0.60 if ox == 5 else covalent_radii[atomic_numbers["Sb"]]
     if cls in ionic_classes:
