@@ -267,19 +267,18 @@ def test_run_seed_index_priority(tmp_path, monkeypatch):
     from amorphgen.pipeline.batch_quench import _run_seed_index as idx, _ARRAY_STRIDE
     monkeypatch.delenv("SLURM_ARRAY_TASK_ID", raising=False)
     # the snapshot's own number, not the loop position
-    assert idx("snapshot_0007_frame01.xyz", 0, None, True) == 7
-    assert idx("snapshot_0003_frame88.xyz", 1, None, False) == 3
-    assert [idx(f"snapshot_{n:04d}.xyz", i, None, False)
-            for i, n in enumerate((7, 3, 11))] == [7, 3, 11]
+    assert idx("snapshot_0007_frame01.xyz", 0) == 7
+    assert idx("snapshot_0003_frame88.xyz", 1) == 3
+    assert [idx(f"snapshot_{n:04d}.xyz", i) for i, n in enumerate((7, 3, 11))] == [7, 3, 11]
     # plain filenames outside SLURM fall back to the loop position
-    assert [idx(f"s{k}.xyz", k, None, False) for k in range(3)] == [0, 1, 2]
+    assert [idx(f"s{k}.xyz", k) for k in range(3)] == [0, 1, 2]
     # a single-snapshot run under SLURM takes the array task, scoped
     for task in ("4", "5"):
         monkeypatch.setenv("SLURM_ARRAY_TASK_ID", task)
-        assert idx("s.xyz", 0, None, True) == int(task) * _ARRAY_STRIDE
+        assert idx("s.xyz", 0) == int(task) * _ARRAY_STRIDE
     monkeypatch.delenv("SLURM_ARRAY_TASK_ID")
     # an explicit index is scoped too, single run or not, so no two jobs overlap
-    jobs = [{idx(f"s{k}.xyz", k, base, n == 1) for k in range(n)}
+    jobs = [{idx(f"s{k}.xyz", k, base) for k in range(n)}
             for base, n in ((0, 3), (1, 1), (2, 5))]
     for a in range(len(jobs)):
         for c in range(a + 1, len(jobs)):
@@ -311,3 +310,29 @@ def test_batch_quench_assigns_distinct_seed_indices(tmp_path, monkeypatch):
                cfg_override={"model": "lennard-jones"}, work_dir=str(tmp_path / "w"),
                stages=[4])
     assert seen == [3, 7, 11], seen          # the snapshot numbers, not the loop positions
+
+
+def test_batch_quench_single_snapshot_uses_the_slurm_array_task(tmp_path, monkeypatch):
+    """A single-structure run whose file carries no snapshot number must take
+    its seed index from SLURM_ARRAY_TASK_ID, so array tasks sharing a --seed do
+    not start from identical velocities. Driven through bq.run, not the helper."""
+    from unittest.mock import patch
+    from ase.build import bulk
+    from ase.io import write
+    from amorphgen.pipeline import batch_quench as bq
+    from amorphgen.pipeline.batch_quench import _ARRAY_STRIDE
+    src = tmp_path / "one.xyz"
+    write(str(src), bulk("Cu", cubic=True), format="extxyz")
+    seen = []
+
+    def fake_eq(atoms, cfg_override=None, **kw):
+        seen.append(cfg_override.get("run_index"))
+        return atoms
+
+    for task in ("4", "9"):
+        monkeypatch.setenv("SLURM_ARRAY_TASK_ID", task)
+        with patch.object(bq.equilibrate, "run", fake_eq), \
+             patch.object(bq, "get_calculator", lambda **kw: None):
+            bq.run([str(src)], cfg_override={"model": "lennard-jones"},
+                   work_dir=str(tmp_path / f"w{task}"), stages=[4])
+    assert seen == [4 * _ARRAY_STRIDE, 9 * _ARRAY_STRIDE], seen

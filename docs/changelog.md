@@ -334,6 +334,19 @@ orphan: true
 
 ### Fixed after the rc4 upload (on GitHub main; not in the rc4 wheel on PyPI)
 
+- **Review round 7 (2026-09-29): the charge-balance rule simplified.** Round 6 protected
+  doped cells and mixed-chalcogen glasses with two settings, a 15 % tolerance and a gate
+  that only let oxygen or fluorine oxidise a chalcogen. Both are gone: an element is
+  promoted to cation only when that brings the compound CLOSER to charge balance. In a
+  chalcogen-rich glass or a doped cell the promotion would overshoot far past neutrality
+  (Ge20S10Se70: a gap of 80 before, 480 after; F-doped silica: 2 before, 254 after), so
+  every anion is kept, while a real tellurite, sulfate, nitrate or hydroxide improves and
+  promotes. Identical results on 40 of 41 compositions tested against the previous rule,
+  with two tuned constants removed; the one difference is a thiosulfate, where the two
+  options tie exactly and neither rule describes a central-plus-terminal sulfur. The
+  `single_run` argument of `_run_seed_index` is gone, since the stride now applies in
+  every case, and a test drives the single-snapshot SLURM path through `batch_quench.run`
+  rather than the helper.
 - **Review round 6 (2026-09-29): two guards on the charge-balance rule, and the last
   seed collision.** The bare balance test of round 5 was too literal in two ways.
   *Mixed-chalcogen glasses*: with S and Se, or Se and Te, present and no oxidiser, the

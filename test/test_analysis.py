@@ -734,6 +734,7 @@ class TestBondingPairRules:
         """A single dopant or defect atom must not turn the major anion into a
         cation: the charge-balance test has a tolerance."""
         from amorphgen.analysis.structure import anion_elements as ae
+        # promoting the major anion here would overshoot balance, so it is kept
         assert ae({"Si": 32, "O": 64, "F": 2}) == {"O", "F"}      # F-doped silica
         assert ae({"Na": 32, "Cl": 32, "O": 1}) == {"Cl", "O"}    # O impurity in NaCl
         assert ae({"Li": 29, "P": 10, "O": 33, "N": 5}) == {"O", "N"}   # LiPON

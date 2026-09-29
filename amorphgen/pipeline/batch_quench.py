@@ -30,7 +30,7 @@ from ase.io import read, write, iread
 _ARRAY_STRIDE = 100000       # keeps SLURM array tasks / --run-index jobs from overlapping
 
 
-def _run_seed_index(snap_file: str, loop_idx: int, explicit, single_run: bool) -> int:
+def _run_seed_index(snap_file: str, loop_idx: int, explicit=None) -> int:
     """Index that feeds the per-run MD seed stream (velocities, thermostat noise).
 
     Priority, highest first:
@@ -44,8 +44,8 @@ def _run_seed_index(snap_file: str, loop_idx: int, explicit, single_run: bool) -
       4. the position in the loop.
     """
     if explicit is not None:
-        # the stride applies to a single-snapshot run too: without it, job B
-        # with --run-index 1 and one snapshot would land on the same index as
+        # scoped in every case, single snapshot or not: without the stride, job
+        # B with --run-index 1 and one snapshot would land on the same index as
         # job A's second run with --run-index 0
         return int(explicit) * _ARRAY_STRIDE + loop_idx
     m = re.match(r"snapshot[_-]?(\d+)",
@@ -176,8 +176,7 @@ def run(snapshot_files: list[str],
         os.chdir(run_dir)
         run_cfg = dict(cfg_override or {})
         run_cfg["run_index"] = _run_seed_index(
-            snap_file, i, cfg_override.get("run_index") if cfg_override else None,
-            single_run)
+            snap_file, i, cfg_override.get("run_index") if cfg_override else None)
 
         try:
             # MD stages get the resume flag for FRAME-level resume within
