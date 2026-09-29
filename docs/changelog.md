@@ -394,6 +394,16 @@ orphan: true
   Li3P, Na3Sb and Cs3Sb are Zintl phases and keep their pnictide treatment, while
   Ni80P20, Fe80B20 and Pd80Si20 remain alloys.
 
+- **`--tr`: the total correlation function T(r) = 4 pi r rho g(r)**, the curve a
+  diffraction paper plots beside S(q) (`StructureAnalyser.total_correlation()`,
+  `rdf.compute_total_correlation()`). It follows the experiment's own route: the
+  weighted S(q), then the Fourier transform over the measured q range, then the
+  4 pi r rho factor, with `--tr-qrange` and `--tr-window` exposing the two choices
+  that decide whether two curves can be compared at all. The reduced PDF G(r) comes
+  with it, and `rdf.coordination_from_Tr()` integrates a peak of r*T(r) for the
+  coordination number a diffraction paper would quote. This is NOT the unweighted
+  `--total-rdf` curve: for a multi-element system the scattering weights matter, and
+  in IGZO the indium correlations dominate the X-ray weighted one.
 - **A relaxation no longer reports a false placement stall.** The density line added
   with the warning above was printed after `--relax` had moved the cell, so it compared
   the relaxed density with the placement target and claimed "placement stalled and the

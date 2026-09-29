@@ -32,6 +32,9 @@ DEFAULT_SMEARING = 0.05
 # exact shell averages; 0.05 halves the low-q speckle for ~5% of the FSDP.
 DEFAULT_SQ_SMOOTH = 0.05
 
+# numpy 2 renamed trapz -> trapezoid
+_trapezoid = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
+
 
 def _gaussian_smear(r, g_r, sigma):
     """Apply Gaussian broadening to g(r)."""
@@ -775,6 +778,99 @@ def compute_structure_factor(atoms_list, pair=None, qmax=15.0, nq=300,
         s_q[iq] = 1.0 + 4.0 * np.pi * rho * _trapz(integrand, dx=dr)
 
     return {"q": q_values.tolist(), "s_q": s_q.tolist()}
+
+
+def compute_total_correlation(atoms_list, weighting="xray", qmin=0.3, qmax=20.0,
+                              nq=400, rmax=10.0, nr=600, sigma_q=DEFAULT_SQ_SMOOTH,
+                              window="lorch"):
+    """Total correlation function T(r) in the diffraction convention.
+
+    This is the quantity a diffraction paper plots beside S(Q), because the area
+    under a peak of ``r T(r)`` is a coordination number. Reproducing it from a
+    model takes the same three steps the experiment uses, and doing anything
+    else makes the curves incomparable:
+
+    1. the weighted total structure factor S(Q) (:func:`compute_structure_factor_direct`);
+    2. g(r) by Fourier transform over the MEASURED Q range,
+
+       .. math::
+          g(r) = 1 + \\frac{1}{2\\pi^2 r \\rho}
+                 \\int_{Q_\\min}^{Q_\\max} Q\\,[S(Q) - 1]\\,\\sin(Qr)\\,dQ
+
+    3. :math:`T(r) = 4\\pi r \\rho\\, g(r)`, with the reduced PDF
+       :math:`G(r) = 4\\pi r \\rho\\,[g(r) - 1]` returned alongside.
+
+    The g(r) here is SCATTERING-WEIGHTED and is not the same curve as
+    :func:`compute_rdf` with ``pair=None``, which weights every pair equally.
+    For a multi-element system the two differ substantially: in IGZO the indium
+    correlations dominate the X-ray weighted one.
+
+    Parameters
+    ----------
+    weighting : {"xray", "neutron", "unweighted"}
+        Scattering weights for S(Q); match the experiment being compared with.
+    qmin, qmax : float
+        Integration limits in inverse Angstrom. Set them to the experiment's
+        own range: ``qmax`` controls the real-space resolution and the
+        truncation ripple, and a model integrated over a wider range than the
+        measurement will show sharper peaks for that reason alone. The model
+        itself cannot supply information below ``2*pi/L``.
+    window : {"lorch", None}
+        ``"lorch"`` multiplies the integrand by ``sinc(Q/Qmax)``, damping the
+        termination ripple at the cost of broadening the peaks. Diffraction
+        papers usually say which they used; match it.
+
+    Returns
+    -------
+    dict
+        ``{"r", "g_r", "T_r", "G_r", "q", "s_q", "rho", "weighting",
+        "qmin", "qmax", "window"}``. ``rho`` is the atomic number density in
+        atoms per cubic Angstrom, averaged over the ensemble.
+    """
+    if window not in ("lorch", None, "none"):
+        raise ValueError(f"window must be 'lorch' or None, got {window!r}")
+    atoms_list = list(atoms_list)
+    if not atoms_list:
+        raise ValueError("compute_total_correlation: no structures given")
+
+    sq = compute_structure_factor_direct(atoms_list, qmax=qmax, nq=nq,
+                                         weighting=weighting, sigma_q=sigma_q)
+    q = np.asarray(sq["q"], dtype=float)
+    s = np.asarray(sq["s_q"], dtype=float)
+    n = np.asarray(sq.get("n_per_bin", np.ones_like(q)), dtype=float)
+    keep = (n > 0) & np.isfinite(s) & (q >= qmin)
+    if keep.sum() < 8:
+        raise ValueError(
+            f"compute_total_correlation: only {int(keep.sum())} usable S(Q) points "
+            f"above qmin={qmin}; the cell may be too small (q_min = 2*pi/L).")
+    q, s = q[keep], s[keep]
+
+    rho = float(np.mean([len(a) / a.get_volume() for a in atoms_list]))
+    r = np.linspace(max(0.1, rmax / nr), rmax, nr)
+    w = np.sinc(q / q.max()) if window == "lorch" else np.ones_like(q)
+    integrand = (q * (s - 1.0) * w)[None, :] * np.sin(np.outer(r, q))
+    g = 1.0 + _trapezoid(integrand, q, axis=1) / (2.0 * np.pi ** 2 * r * rho)
+    return {"r": r.tolist(), "g_r": g.tolist(),
+            "T_r": (4.0 * np.pi * r * rho * g).tolist(),
+            "G_r": (4.0 * np.pi * r * rho * (g - 1.0)).tolist(),
+            "q": q.tolist(), "s_q": s.tolist(), "rho": rho,
+            "weighting": weighting, "qmin": float(qmin), "qmax": float(qmax),
+            "window": window}
+
+
+def coordination_from_Tr(result, r_lo, r_hi):
+    """Coordination number from a T(r) peak: the area under ``r T(r)``.
+
+    Returns the SCATTERING-WEIGHTED count over every pair inside the window,
+    which is what a diffraction paper integrates. It is not a partial
+    coordination number: use :meth:`StructureAnalyser.coordination` for those.
+    """
+    r = np.asarray(result["r"], dtype=float)
+    T = np.asarray(result["T_r"], dtype=float)
+    m = (r >= r_lo) & (r <= r_hi)
+    if not m.any():
+        raise ValueError(f"no T(r) points between {r_lo} and {r_hi} A")
+    return float(_trapezoid(r[m] * T[m], r[m]))
 
 
 def compute_averaged_rdf(atoms_list, pair=None, rmax=None, nbins=200):

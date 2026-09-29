@@ -772,3 +772,86 @@ def test_metal_rich_glass_through_the_analyser_and_plotter(tmp_path):
     sa.plot(output_dir=str(tmp_path))          # the plotter takes the same path
     assert (tmp_path / "analysis_cn.csv").exists()
     assert "Ni-Ni" in (tmp_path / "analysis_cn.csv").read_text()
+
+
+class TestTotalCorrelationFunction:
+    """T(r) = 4 pi r rho g(r) in the diffraction convention."""
+
+    @staticmethod
+    def _fcc_cu(n=3, a=3.61):
+        from ase.build import bulk
+        return bulk("Cu", "fcc", a=a, cubic=True).repeat((n, n, n))
+
+    def test_first_peak_gives_the_known_coordination(self):
+        """For fcc Cu the first shell holds 12 atoms, and the area under
+        r*T(r) over that peak must recover it. This is what a diffraction
+        paper integrates, so it pins the normalisation, the density and the
+        transform together."""
+        from amorphgen.analysis import StructureAnalyser
+        from amorphgen.analysis.rdf import coordination_from_Tr
+        sa = StructureAnalyser([self._fcc_cu()])
+        tr = sa.total_correlation(weighting="unweighted", qmin=0.5, qmax=25.0,
+                                  nq=600, rmax=6.0, nr=600)
+        n = coordination_from_Tr(tr, 2.0, 3.2)
+        assert 10.5 <= n <= 13.5, n          # 12 with transform broadening
+
+    def test_peak_position_and_density(self):
+        from amorphgen.analysis import StructureAnalyser
+        import numpy as np
+        cu = self._fcc_cu()
+        sa = StructureAnalyser([cu])
+        tr = sa.total_correlation(weighting="unweighted", qmin=0.5, qmax=25.0, rmax=6.0)
+        r = np.asarray(tr["r"]); T = np.asarray(tr["T_r"])
+        first = r[np.argmax(np.where(r < 3.2, T, -np.inf))]
+        assert abs(first - 3.61 / np.sqrt(2)) < 0.12, first     # fcc nearest neighbour
+        assert abs(tr["rho"] - len(cu) / cu.get_volume()) < 1e-9
+        # G(r) = T(r) - 4 pi r rho, by definition
+        G = np.asarray(tr["G_r"]); g = np.asarray(tr["g_r"])
+        assert np.allclose(G, T - 4 * np.pi * r * tr["rho"], atol=1e-8)
+        assert np.allclose(T, 4 * np.pi * r * tr["rho"] * g, atol=1e-8)
+
+    def test_weighting_changes_the_curve_for_a_multi_element_system(self):
+        """The weighted g(r) is NOT the unweighted one: in IGZO the indium
+        correlations dominate the X-ray weighting."""
+        import numpy as np
+        from ase import Atoms
+        from amorphgen.analysis import StructureAnalyser
+        rng = np.random.default_rng(0)
+        a = Atoms("In8Ga8Zn8O32", positions=rng.uniform(0, 12, (56, 3)),
+                  cell=[12] * 3, pbc=True)
+        sa = StructureAnalyser([a])
+        x = np.asarray(sa.total_correlation(weighting="xray", qmin=0.6, qmax=18.0)["g_r"])
+        u = np.asarray(sa.total_correlation(weighting="unweighted", qmin=0.6, qmax=18.0)["g_r"])
+        assert not np.allclose(x, u, atol=0.05)
+
+    def test_window_and_bad_arguments(self):
+        import pytest
+        from amorphgen.analysis import StructureAnalyser
+        import numpy as np
+        sa = StructureAnalyser([self._fcc_cu()])
+        lo = np.asarray(sa.total_correlation(qmin=0.5, qmax=25.0, window="lorch")["T_r"])
+        no = np.asarray(sa.total_correlation(qmin=0.5, qmax=25.0, window=None)["T_r"])
+        assert not np.allclose(lo, no)          # the window changes the ripple
+        with pytest.raises(ValueError, match="window must be"):
+            sa.total_correlation(window="hann")
+        with pytest.raises(ValueError, match="usable S\\(Q\\) points"):
+            sa.total_correlation(qmin=30.0, qmax=20.0)   # no S(Q) survives qmin
+
+    def test_cli_tr_flag_writes_the_plot_and_csv(self, tmp_path, monkeypatch, capsys):
+        import sys
+        from ase.io import write
+        from amorphgen.cli import main
+        src = tmp_path / "cu.xyz"
+        write(str(src), self._fcc_cu(), format="extxyz")
+        plots = tmp_path / "p"
+        monkeypatch.setattr(sys, "argv", ["amorphgen", "--analyse", str(src), "--tr",
+                                          "--tr-qrange", "0.5", "25", "--tr-window", "none",
+                                          "--save-plot", str(plots)])
+        main()
+        out = capsys.readouterr().out
+        assert "T(r): xray weighting, q = 0.5-25.0" in out and "none window" in out
+        assert "first T(r) peak at r =" in out
+        assert (plots / "analysis_tr.png").exists()
+        head = (plots / "analysis_tr.csv").read_text().splitlines()
+        assert "window=None" in head[0] and "qmax=25.0" in head[0]
+        assert head[1].startswith("r_A,g_r_weighted,T_r_invA2,G_r")

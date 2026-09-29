@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import numpy as np
 import os
 
 
@@ -405,6 +406,22 @@ def _add_arguments(p):
                            "analysis_sq_partials.png. Independent of "
                            "--sq-weighting (the weighting only combines "
                            "the partials into the total).")
+    g_an.add_argument("--tr", action="store_true",
+                      help="Total correlation function T(r) = 4*pi*r*rho*g(r), "
+                           "the curve diffraction papers plot beside S(q): the "
+                           "weighted S(q) Fourier-transformed over the measured "
+                           "q range. Directly comparable with published data, "
+                           "unlike the unweighted g(r) of --total-rdf. Saved as "
+                           "analysis_tr.png + CSV (r, weighted g(r), T(r), G(r)).")
+    g_an.add_argument("--tr-qrange", nargs=2, type=float, default=(0.3, 20.0),
+                      metavar=("QMIN", "QMAX"),
+                      help="Integration limits for --tr in 1/A (default 0.3 20). "
+                           "Set them to the experiment's own range: qmax fixes the "
+                           "real-space resolution and the truncation ripple.")
+    g_an.add_argument("--tr-window", default="lorch", choices=["lorch", "none"],
+                      help="Window for the --tr transform: 'lorch' damps the "
+                           "qmax truncation ripple (default), 'none' leaves it. "
+                           "Match whichever the paper used.")
     g_an.add_argument("--pair-panels", action="store_true",
                       help="Also plot each element pair in its own panel: "
                            "analysis_rdf_panels.png for g(r) and, with "
@@ -1422,6 +1439,36 @@ def main():
                         pair_panels=plot_kwargs.get("pair_panels", False))
             else:
                 print("  (pass --save-plot DIR to write the S(q) PNG + CSV)")
+
+        # T(r): CLI flag > YAML key, weighted like --sq
+        if args.tr or an_cfg.get("tr", False):
+            tr_w = args.sq_weighting
+            if not _typed("--sq-weighting") and "sq_weighting" in an_cfg:
+                tr_w = an_cfg["sq_weighting"]
+            qlo, qhi = (an_cfg.get("tr_qrange", args.tr_qrange)
+                        if not _typed("--tr-qrange") else args.tr_qrange)
+            win = args.tr_window if _typed("--tr-window") else an_cfg.get("tr_window", args.tr_window)
+            print(f"\n  T(r): {tr_w} weighting, q = {qlo}-{qhi} 1/A, "
+                  f"{win} window")
+            try:
+                tr = sa.total_correlation(weighting=tr_w, qmin=qlo, qmax=qhi,
+                                          window=None if win == "none" else win)
+            except ValueError as exc:
+                print(f"  T(r) skipped: {exc}")
+            else:
+                from .analysis.rdf import coordination_from_Tr
+                r_arr = np.asarray(tr["r"]); T_arr = np.asarray(tr["T_r"])
+                pk = r_arr[np.argmax(np.where(r_arr < 3.0, T_arr, -np.inf))]
+                print(f"  first T(r) peak at r = {pk:.2f} A; "
+                      f"rho = {tr['rho']:.4f} atoms/A^3")
+                if plot_dir:
+                    from .analysis.plotting import plot_tr
+                    plot_tr(tr, output_dir=plot_dir,
+                            dpi=plot_kwargs.get("dpi", 300),
+                            save_pdf=plot_kwargs.get("save_pdf", False),
+                            show_title=plot_kwargs.get("show_title", False))
+                else:
+                    print("  (pass --save-plot DIR to write the T(r) PNG + CSV)")
 
         # Ring statistics and Voronoi indices: CLI flag > YAML key.
         # (YAML: rings: true | "Ge-O"; voronoi: true | "Ge"; the older

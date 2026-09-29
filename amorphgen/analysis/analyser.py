@@ -414,6 +414,25 @@ class StructureAnalyser:
                                                sigma_q=sigma_q,
                                                partials=partials)
 
+    def total_correlation(self, weighting="xray", qmin=0.3, qmax=20.0, nq=400,
+                          rmax=10.0, nr=600, window="lorch"):
+        """Total correlation function T(r) = 4 pi r rho g(r), the curve a
+        diffraction paper plots beside S(Q).
+
+        The g(r) behind it is SCATTERING-WEIGHTED and obtained by Fourier
+        transforming the weighted S(Q) over the measured Q range, so it is
+        directly comparable with published data and is NOT the same as
+        :meth:`rdf` with ``pair=None``, which weights every pair equally.
+        Set ``qmin``/``qmax``/``window`` to the experiment's own values.
+
+        Returns a dict with ``r``, ``g_r``, ``T_r``, ``G_r`` (the reduced PDF),
+        the ``q``/``s_q`` used, and ``rho``.
+        """
+        from .rdf import compute_total_correlation
+        return compute_total_correlation(self.atoms_list, weighting=weighting,
+                                         qmin=qmin, qmax=qmax, nq=nq, rmax=rmax,
+                                         nr=nr, window=window)
+
     def averaged_rdf(self, pair=None, rmax=None, nbins=200):
         """Compute RDF per structure with mean and standard deviation.
 
