@@ -2,7 +2,8 @@
 
 ## Requirements
 
-- Python 3.10, 3.11, or 3.12
+- Python 3.10 to 3.14. CHGNet publishes wheels up to 3.12 only; on 3.13 and
+  3.14 pip compiles it from source, which needs a C compiler.
 - ASE (Atomic Simulation Environment)
 - An MLIP backend **only** for MLIP relaxation / melt-quench MD; the base
   install is deliberately torch-free

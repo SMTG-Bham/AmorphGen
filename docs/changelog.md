@@ -344,6 +344,11 @@ orphan: true
   treats Sphinx warnings as errors and runs for `dev` too, the `build_tools/` conda
   environments are built and tested when they or the extras change, and the weekly
   canary covers SevenNet (`7net-0`) as well as CHGNet. See `CONTRIBUTING.md`.
+- **Python 3.13 and 3.14.** The torch-free suite now runs on Python 3.10 to 3.14 on
+  Linux, and on 3.14 (was 3.12) on macOS and Windows, and the classifiers list 3.13 and
+  3.14. The `backends` job and the `build_tools/` conda environments stay on 3.12:
+  CHGNet 0.4.2 publishes wheels up to 3.12 only, so on 3.13 and 3.14 pip compiles it,
+  which needs a C compiler.
 
 ### Fixed after the rc4 upload (on GitHub main; not in the rc4 wheel on PyPI)
 

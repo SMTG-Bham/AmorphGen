@@ -51,14 +51,14 @@ pytest test/ -v --tb=short
 pytest test/ -v --tb=short --run-mace
 ```
 
-All tests must pass on Python 3.10, 3.11, and 3.12 before a pull request
-will be merged. GitHub Actions CI runs automatically on every push and pull
+All tests must pass on Python 3.10 to 3.14 before a pull request will be
+merged. GitHub Actions CI runs automatically on every push and pull
 request to `main` and `dev`:
 
 | Job | Checks |
 |---|---|
 | `lint` | syntax errors and undefined names (ruff) in the package, tests, docs config and tutorial notebooks |
-| `test` | the torch-free suite on Python 3.10, 3.11 and 3.12 on Linux, and on 3.12 on macOS and Windows |
+| `test` | the torch-free suite on Python 3.10 to 3.14 on Linux, and on 3.14 on macOS and Windows |
 | `backends` | the full suite with CPU-only PyTorch, the torch-sim engine and CHGNet, with a coverage report |
 | `min-deps` | the suite on Python 3.10 with every dependency at the lowest version `pyproject.toml` allows |
 | `package` | the sdist and wheel build, and the suite run against the installed wheel |

@@ -9,7 +9,8 @@ Both take Python from conda-forge and install this checkout with pip in editable
 mode, so a `git pull` or a local edit takes effect without reinstalling. The
 Python dependencies come from the extras in the root `pyproject.toml`, which
 stays the one place they are declared. conda resolves both files to Python 3.12,
-the newest version in the CI matrix and the one the torch-sim engine needs.
+the newest version CHGNet publishes wheels for and the oldest the torch-sim
+engine runs on.
 
 On Linux, pip's PyTorch wheel bundles the CUDA libraries it was built with, so a
 GPU node needs an NVIDIA driver recent enough for that CUDA release: compare

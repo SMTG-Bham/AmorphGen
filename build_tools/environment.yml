@@ -10,8 +10,9 @@ channels:
   - nodefaults
 
 dependencies:
-  # From the requires-python floor to the newest Python in the CI matrix. conda
-  # picks 3.12, which the optional torch-sim engine needs.
+  # From the requires-python floor to 3.12, the newest Python CHGNet publishes
+  # wheels for: on 3.13+ pip would compile it, and this file installs no
+  # compiler. conda picks 3.12, which the optional torch-sim engine needs.
   - python>=3.10,<3.13
   - pip
   - pip:
