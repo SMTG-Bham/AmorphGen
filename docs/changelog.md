@@ -460,3 +460,26 @@ orphan: true
   `pyproject.toml`, and the tests that raised warnings of their own (unclosed files,
   Berendsen MD started from rest, expected warnings not asserted, a class-scoped fixture
   written as a method, which pytest 10 rejects) are fixed.
+- **Next steps after `--random-gen` found no structures.** `--random-gen` writes to
+  `<work-dir>/random_initial/` (and `random_opt/` with `--relax`), but the README, the
+  `--examples` text and several guides passed `<work-dir>` itself to `--batch-opt` or
+  `--hybrid-ensemble` (and `<work-dir>/random_0000.xyz` to the pipeline), and
+  `--batch-opt` then exited 0 having done nothing. The examples now name the
+  subdirectory, `--batch-opt` exits 1 when it has nothing to optimise, and
+  `--batch-opt`, `--hybrid-ensemble` and `--batch-quench` given a random-gen work dir
+  name the subdirectory that holds its structures.
+- **CHGNet with `default_dtype: float64` failed only after hours of MD.** The CHGNet
+  configs in the MQ-ensemble and YAML guides set float64, which CHGNet does not support,
+  and under `--mq-ensemble` the error came in phase 3, after stages 1-4, because the
+  melt-quench stages build their calculator without `default_dtype`. The configs now
+  leave it at `auto`, and the CLI refuses the combination before any work starts.
+  **Behaviour change:** the 7-stage pipeline, which ran such a config at float32
+  without saying so, now refuses it too.
+- **Flags and example files the docs referred to but that do not exist.** The sweep
+  example used a `--quench-rate` flag (now `--quench-steps-per-T`), and the validation
+  page, the MQ-ensemble guide and a docstring named `examples/hybrid_stages_4567_cuda.yaml`,
+  `examples/mq_stages_1234_cuda.yaml`, `mq_stages_567.yaml`, `examples/hpc/` with its
+  SLURM scripts, and `examples/test_structure_factor.py`, none of which were ever
+  committed. They now use configs and commands that exist. The validation page's
+  reproduction also generated 160 atoms instead of 400 and collected the results from
+  the pre-rc2 `run_*/run_0000/` layout.

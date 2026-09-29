@@ -60,10 +60,10 @@ ga2o3_mq/
 
 ### Hybrid ensemble (random + quench)
 
-Take a directory of disordered structures (e.g. `--random-gen` outputs) and run stages 4-5-6-7 on each:
+Take a directory of disordered structures (e.g. the `random_opt/` subdirectory of a `--random-gen --relax` run) and run stages 4-5-6-7 on each:
 
 ```bash
-amorphgen --hybrid-ensemble --input-dir random_structures/ \
+amorphgen --hybrid-ensemble --input-dir random_structures/random_opt/ \
     --config hybrid.yaml --device cuda --model chgnet \
     -o ga2o3_hybrid/
 ```
@@ -129,7 +129,8 @@ amorphgen --random-gen --composition "SiO2*16" \
 ### Batch optimisation
 
 ```bash
-amorphgen --batch-opt --input-dir random_structures/ \
+# --random-gen writes its structures to random_initial/ inside its work dir
+amorphgen --batch-opt --input-dir random_structures/random_initial/ \
     --model chgnet --cell-filter cubic
 ```
 

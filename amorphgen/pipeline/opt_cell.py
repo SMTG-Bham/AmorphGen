@@ -284,8 +284,12 @@ def batch_optimize(
             if files:
                 break
     if not files:
+        from .random_gen import random_gen_dir_hint
         print(f"[BatchOpt] No structure files found in {input_dir}/")
         print(f"  Searched: {pattern}, *.extxyz, *.vasp, *.cif")
+        hint = random_gen_dir_hint(input_dir)
+        if hint:
+            print(hint)
         return []
 
     if indices:

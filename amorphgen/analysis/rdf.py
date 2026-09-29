@@ -668,7 +668,7 @@ def compute_structure_factor(atoms_list, pair=None, qmax=15.0, nq=300,
     inverse-Angstrom is dominated by heavy-atom cation-cation
     correlations and cancels in the unweighted sum because
     the cation-anion partial dips at the same q. The ``"xray"``
-    weighting recovers it. See ``examples/test_structure_factor.py``
+    weighting recovers it. See ``docs/notes/sq_xrd_methodology.md``
     for a worked example on a-Ga2O3 (Kaewmeechai et al., Phys. Rev. B
     111, 035203, 2025).
     """

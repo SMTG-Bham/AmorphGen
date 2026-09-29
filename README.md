@@ -367,7 +367,7 @@ random_gen:
 
 ```bash
 amorphgen --random-gen --config random_gen_config.yaml --work-dir SiO2_sc
-amorphgen --batch-opt --input-dir SiO2_sc --work-dir SiO2_sc_opt --config random_gen_config.yaml
+amorphgen --batch-opt --input-dir SiO2_sc/random_initial --work-dir SiO2_sc_opt --config random_gen_config.yaml
 ```
 
 See `amorphgen/configs/example_config.yaml` for all available options.
@@ -447,9 +447,13 @@ paths = batch_random(
 
 **Step 2: Batch optimise:**
 
+`--random-gen` writes the generated structures to `<work-dir>/random_initial/`
+(and, with `--relax`, the relaxed ones to `<work-dir>/random_opt/`), so point
+`--input-dir` at that subdirectory:
+
 ```bash
 amorphgen --batch-opt \
-    --input-dir random_Ga2O3 \
+    --input-dir random_Ga2O3/random_initial \
     --work-dir random_Ga2O3_opt \
     --model mace-mpa-0 --device cpu --fmax 0.01
 ```
@@ -461,7 +465,7 @@ from amorphgen.utils import get_calculator
 calc = get_calculator(model="mace-mpa-0", device="cpu", default_dtype="float64")
 
 batch_optimize(
-    input_dir="random_Ga2O3",
+    input_dir="random_Ga2O3/random_initial",
     output_dir="random_Ga2O3_opt",
     calc=calc,
 )

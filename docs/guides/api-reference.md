@@ -41,12 +41,12 @@ amorphgen --random-gen --config config.yaml
 ### Batch Optimisation
 
 ```bash
-# Optimise all structures in a directory
-amorphgen --batch-opt --input-dir random_structures/ \
+# Optimise all structures in a directory (--random-gen writes to random_initial/)
+amorphgen --batch-opt --input-dir random_structures/random_initial/ \
           --model chgnet --device cpu --fmax 0.01
 
 # With cell filter
-amorphgen --batch-opt --input-dir random_structures/ \
+amorphgen --batch-opt --input-dir random_structures/random_initial/ \
           --cell-filter cubic
 
 # Cell filter options: FrechetCellFilter (default), UnitCellFilter,
@@ -175,7 +175,7 @@ from amorphgen.utils import get_calculator
 calc = get_calculator(model="chgnet", device="cpu")
 
 paths = batch_optimize(
-    input_dir="random_SiO2",
+    input_dir="random_SiO2/random_initial",
     output_dir="optimised_SiO2",
     cfg_override={
         "opt": {

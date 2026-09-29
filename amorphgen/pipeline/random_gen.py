@@ -1638,3 +1638,25 @@ def batch_random(
         lf.close()
 
     return paths
+
+
+def random_gen_dir_hint(directory: str) -> str:
+    """Point at the structures of a ``--random-gen`` work dir.
+
+    :func:`batch_random` writes structures only to the ``random_initial/``
+    (as placed) and ``random_opt/`` (relaxed) subdirectories of its output
+    dir, so a mode that reads the top level of that dir finds none. Returns
+    the lines to print after its "no structure files" error, or ``""`` when
+    neither subdirectory holds a structure.
+    """
+    exts = tuple({ext for _, ext in _FORMAT_MAP.values()})
+    found = []
+    for sub, what in (("random_initial", "as placed"), ("random_opt", "relaxed")):
+        path = os.path.join(directory, sub)
+        if os.path.isdir(path) and any(f.endswith(exts) for f in os.listdir(path)):
+            found.append(f"    {path}/   ({what})")
+    if not found:
+        return ""
+    head = f"  {directory} is a --random-gen output directory; its structures are in:"
+    tail = "  Pass " + ("that directory" if len(found) == 1 else "one of these") + " instead."
+    return "\n".join([head, *found, tail])
