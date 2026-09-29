@@ -343,7 +343,7 @@ def plot_bond_angles(ensembles: list[EnsembleSpec],
     from matplotlib.lines import Line2D
     _assign_colours(ensembles)
     if bins is None:
-        bins = np.arange(40, 180, 2)
+        bins = np.arange(40, 181, 2)        # last edge 180: linear triplets count
     centres = 0.5 * (bins[:-1] + bins[1:])
     fig, ax = plt.subplots(figsize=(5.0, 4.0))
     csv_rows = [["ensemble", "triplet", "angle_deg", "probability_density"]]

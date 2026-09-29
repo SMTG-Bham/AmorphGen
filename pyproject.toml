@@ -135,3 +135,19 @@ amorphgen = ["configs/*.yaml"]
 [tool.pytest.ini_options]
 testpaths = ["test"]
 addopts = ["-v", "--tb=short"]
+# Warnings raised inside dependencies, which AmorphGen cannot act on; its own
+# code raises none of them. Matched by message only: pytest.warns re-emits the
+# warnings it does not match under the module name "warnings", which a module
+# pattern (":ase") would miss.
+filterwarnings = [
+    # ASE <= 3.29 sets ndarray.shape in place (Atoms.copy, MolecularDynamics,
+    # the .traj reader), which NumPy 2.5 deprecates: thousands per run. Drop
+    # once an ASE release reshapes instead.
+    "ignore:Setting the shape on a NumPy array has been deprecated:DeprecationWarning",
+    # Loading a MACE foundation model (the GPU and --run-mace tests): MACE and
+    # e3nn use TorchScript, which torch deprecates, and MACE sets
+    # TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD on import, which torch then reports.
+    "ignore:`torch.jit.load` is deprecated:FutureWarning",
+    "ignore:`torch.jit.script` is deprecated:FutureWarning",
+    "ignore:Environment variable TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD detected:UserWarning",
+]

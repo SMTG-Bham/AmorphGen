@@ -166,8 +166,8 @@ def _build_cell_filter(atoms, cell_filter: str):
     if cell_filter == "none" or cell_filter is None:
         return atoms
     elif cell_filter == "cubic":
-        from ase.filters import ExpCellFilter
-        return ExpCellFilter(atoms, hydrostatic_strain=True)
+        from ..utils.common import cubic_cell_filter
+        return cubic_cell_filter(atoms)
     elif cell_filter == "ExpCellFilter":
         from ase.filters import ExpCellFilter
         return ExpCellFilter(atoms)

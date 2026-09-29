@@ -389,7 +389,7 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
 
     if all_angle_data:
         fig, ax = plt.subplots(figsize=(7, 4.5))
-        bins = np.arange(40, 180, 2)
+        bins = np.arange(40, 181, 2)        # last edge 180: linear triplets count
         bin_centres = (bins[:-1] + bins[1:]) / 2
 
         for i, (triplet, angles) in enumerate(all_angle_data.items()):

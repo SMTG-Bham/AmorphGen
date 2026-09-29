@@ -284,7 +284,8 @@ class TestDimerReport:
 
     def test_analyser_method(self):
         from amorphgen.analysis import StructureAnalyser
-        sa = StructureAnalyser([self._peroxide_structure()])
+        # radii cutoffs: six atoms give no g(r) minimum for auto-rdf to find
+        sa = StructureAnalyser([self._peroxide_structure()], cutoff="auto")
         assert sa.dimer_report()["total"] == 1
 
 

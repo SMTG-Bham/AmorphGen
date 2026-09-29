@@ -230,3 +230,21 @@ class TestPolyhedralConnectivity:
         assert ti["mean_edge_links"] == pytest.approx(2.0)
         assert ti["mean_corner_links"] == pytest.approx(8.0)
         assert r["link_percent"]["edge"] == pytest.approx(20.0)
+
+
+class TestBondAnglePlots:
+    def test_linear_triplets_are_binned(self, tmp_path):
+        """Every Si-O-Si of ideal beta-cristobalite is 180 deg. The angle bins
+        used to stop at 178, which made that curve 0/0 (NaN, not drawn)."""
+        import csv
+        from ase.spacegroup import crystal
+        from amorphgen.analysis.comparison_plots import EnsembleSpec, plot_bond_angles
+        crist = crystal(["Si", "O"], basis=[(0, 0, 0), (0.125, 0.125, 0.125)], spacegroup=227,
+                        cellpar=[7.16, 7.16, 7.16, 90, 90, 90])
+        write(str(tmp_path / "c.xyz"), crist, format="extxyz")
+        ens = EnsembleSpec("crist", [str(tmp_path / "c.xyz")], cutoff="auto")
+        plot_bond_angles([ens], [("Si-O-Si", "-")], str(tmp_path), save_pdf=False)
+        with open(tmp_path / "angles.csv") as fh:
+            density = {float(r["angle_deg"]): float(r["probability_density"])
+                       for r in csv.DictReader(fh)}
+        assert density[179.0] == pytest.approx(0.5)    # all in the last 2-degree bin

@@ -236,11 +236,13 @@ def _batched_stage_checkpoint(dirs, logname, trajname, endname, n_steps, interva
             write(os.path.join(d, trajname), fr[:n_common], format="extxyz")
         logpath = os.path.join(d, logname)
         if os.path.isfile(logpath):
-            lines = open(logpath).read().splitlines()
+            with open(logpath) as fh:
+                lines = fh.read().splitlines()
             is_row = [bool(l.strip()) and l.split()[0].isdigit() for l in lines]
             head = [l for l, r in zip(lines, is_row) if not r]
             body = [l for l, r in zip(lines, is_row) if r][:n_common]
-            open(logpath, "w").write("\n".join(head + body) + "\n")
+            with open(logpath, "w") as fh:
+                fh.write("\n".join(head + body) + "\n")
     return [fr[n_common - 1] for fr in frames], done, False
 
 
@@ -291,14 +293,16 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
                         dtype="float64" if cfg.get("default_dtype") in (None, "auto") else cfg["default_dtype"])
     size_file = os.path.join(work_dir, "batch_size.json")
     if str(batch_size).lower() == "auto" and resume and os.path.isfile(size_file):
-        batch_size = json.load(open(size_file))["batch_size"]     # same chunking as the killed job
+        with open(size_file) as fh:
+            batch_size = json.load(fh)["batch_size"]     # same chunking as the killed job
         print(f"  [Resume] chunk size {batch_size} taken from {size_file}")
     if str(batch_size).lower() == "auto":
         from ..utils.torchsim_engine import estimate_batch_size
         batch_size = estimate_batch_size(model, [read(f) for _, f in runs[:4]], fraction=0.5,
                                          md=True, fallback=16)
     batch_size = int(batch_size)
-    json.dump({"batch_size": batch_size}, open(size_file, "w"))
+    with open(size_file, "w") as fh:
+        json.dump({"batch_size": batch_size}, fh)
     bar = "=" * 65
     print(f"\n{bar}\n  Batch quench (torch-sim engine): {len(runs)} runs, stages {stages}, "
           f"chunks of {batch_size}\n  Output: {work_dir}/\n{bar}")

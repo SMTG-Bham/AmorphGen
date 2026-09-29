@@ -164,7 +164,7 @@ class TestBatchNVT:
         assert all(np.abs(a.get_momenta()).sum() > 0 for a in out)
         assert all(150 < a.get_temperature() < 450 for a in out)            # 32-atom cells: wide band
         assert len(read(str(tmp_path / "run_0000" / "stage4_eq_traj.xyz"), index=":")) == 4
-        assert sum(1 for _ in open(tmp_path / "run_0000" / "stage4_eq.log")) == 6   # header(2) + 4 frames
+        assert len((tmp_path / "run_0000" / "stage4_eq.log").read_text().splitlines()) == 6   # header(2) + 4 frames
         again = batch_nvt(self._cells(), m, 300.0, n_steps=400, timestep_fs=1.0, seed=1, log=lambda *a: None)
         assert np.allclose(out[0].positions, again[0].positions)              # seeded noise
         other = batch_nvt(self._cells(), m, 300.0, n_steps=400, timestep_fs=1.0, seed=2, log=lambda *a: None)
@@ -252,6 +252,8 @@ class TestPhase3:
         assert estimate_batch_size(m, [_rattled_cu(0)], fallback=7) == 7
         assert estimate_batch_size(m, [_rattled_cu(0)], md=True) == 16
 
+    # --opt-steps 5: the chunking is under test, not the relaxation
+    @pytest.mark.filterwarnings("ignore:All systems have reached the maximum number of steps")
     def test_cli_batch_size_auto_and_int(self, tmp_path, monkeypatch, capsys):
         """--batch-size accepts 'auto' (CPU -> 16 per chunk) or an integer."""
         from amorphgen.cli import main
@@ -277,7 +279,8 @@ class TestPhase3:
 
     @staticmethod
     def _log_steps(path):
-        return [int(l.split()[0]) for l in open(path) if l.strip() and l.split()[0].isdigit()]
+        with open(path) as fh:
+            return [int(l.split()[0]) for l in fh if l.strip() and l.split()[0].isdigit()]
 
     def test_frame_level_resume_continues_from_common_frame(self, tmp_path, capsys):
         run_torchsim, src, cfg, w = self._stage4_runs(tmp_path)
@@ -351,8 +354,10 @@ class TestPhase3:
         import json
         run_torchsim, src, cfg, w = self._stage4_runs(tmp_path, steps=100)
         run_torchsim(src, cfg_override=cfg, work_dir=w, stages=[4], batch_size="auto")
-        assert json.load(open(os.path.join(w, "batch_size.json")))["batch_size"] == 16
-        json.dump({"batch_size": 1}, open(os.path.join(w, "batch_size.json"), "w"))   # pretend the probe said 1
+        with open(os.path.join(w, "batch_size.json")) as fh:
+            assert json.load(fh)["batch_size"] == 16
+        with open(os.path.join(w, "batch_size.json"), "w") as fh:
+            json.dump({"batch_size": 1}, fh)                  # pretend the probe said 1
         os.remove(os.path.join(w, "run_0000", "final_amorphous.xyz"))
         run_torchsim(src, cfg_override=cfg, work_dir=w, stages=[4], batch_size="auto", resume=True)
         out = capsys.readouterr().out

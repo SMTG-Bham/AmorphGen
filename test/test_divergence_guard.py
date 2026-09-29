@@ -105,10 +105,11 @@ def test_md_observer_raises_before_writing_nan(tmp_path):
     dyn = Langevin(atoms, timestep=1.0 * units.fs,
                    temperature_K=300, friction=0.01, fixcm=False)
     traj = tmp_path / "stage_traj.xyz"
-    attach_outputs(dyn, atoms, str(tmp_path / "stage.log"), str(traj))
+    logger, writer = attach_outputs(dyn, atoms, str(tmp_path / "stage.log"), str(traj))
 
     with pytest.raises(DivergenceError):
         dyn.run(5)
+    logger.close(); writer.close()
 
     # The guard runs before the trajectory writer, so no NaN frame is persisted.
     if traj.exists():

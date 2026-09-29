@@ -58,12 +58,14 @@ class TestLJOnCuda:
         assert all(120 < a.get_temperature() < 500 for a in out)
 
 
-class TestMaceOnCuda:
-    @pytest.fixture(scope="class")
-    def model(self):
-        pytest.importorskip("mace")
-        return build_model("mace-mpa-0", device="cuda", dtype="float64")
+# Module level: pytest deprecates class-scoped fixtures defined as instance methods.
+@pytest.fixture(scope="class")
+def model():
+    pytest.importorskip("mace")
+    return build_model("mace-mpa-0", device="cuda", dtype="float64")
 
+
+class TestMaceOnCuda:
     def test_relax_matches_ase_mace_energy(self, model):
         """torch-sim relaxation reaches the force/pressure tolerance, and ASE's
         MACE calculator agrees on the energy of the relaxed structure."""
@@ -79,6 +81,8 @@ class TestMaceOnCuda:
             P = -np.trace(b.get_stress(voigt=False)) / 3 / units.GPa
             assert abs(P) < 0.05
 
+    # the 50-step pre-relax only takes the worst forces off before the MD
+    @pytest.mark.filterwarnings("ignore:All systems have reached the maximum number of steps")
     def test_batched_md_temperature_and_speed(self, model):
         ats = [_sio2(s) for s in range(1, 5)]
         ats = batch_relax(ats, model, fmax=0.5, max_steps=50, cell_filter="none", log=lambda *a: None)

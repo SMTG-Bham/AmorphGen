@@ -124,6 +124,21 @@ def make_cubic(atoms):
     return atoms
 
 
+def cubic_cell_filter(atoms):
+    """Cell filter for ``cell_filter="cubic"``: volume relaxes, shape stays.
+
+    ``FrechetCellFilter`` with hydrostatic strain, in place of the
+    ``ExpCellFilter`` that ASE deprecated in 3.23. Under hydrostatic strain
+    the two return the same forces; ``exp_cell_factor=1`` keeps
+    ExpCellFilter's scale for the cell rows (the virial, ``|P| V``), which
+    the optimisation loops' ``max|force| < fmax`` test includes. Frechet's
+    default divides them by the number of atoms, which loosens the pressure
+    criterion by that factor, to ~0.1 GPa at fmax = 0.01 eV/A.
+    """
+    from ase.filters import FrechetCellFilter
+    return FrechetCellFilter(atoms, hydrostatic_strain=True, exp_cell_factor=1.0)
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # MD dynamics builder
 # ═════════════════════════════════════════════════════════════════════════════

@@ -430,3 +430,28 @@ orphan: true
   (`compute_msd`) is now measured relative to the centre of mass, so a drift of the
   whole system, from this or from the net momentum that the `mtk` and
   `parrinello-rahman` integrators conserve, no longer reads as diffusion.
+- **`cell_filter: cubic` without ASE's deprecated `ExpCellFilter`.** The isotropic cell
+  relaxation, the default of `--random-gen --relax`, `--batch-opt` and
+  `--hybrid-ensemble`, now runs through `FrechetCellFilter` with hydrostatic strain,
+  which gives the same forces as `ExpCellFilter` for this deformation. It uses
+  `exp_cell_factor=1`, `ExpCellFilter`'s scale for the cell forces, so the convergence
+  test still requires |P| V < fmax; `FrechetCellFilter`'s default divides the cell
+  forces by the number of atoms, which would let a relaxation stop at about 0.1 GPa at
+  fmax = 0.01 eV/Å. In a check on a strained 108-atom Cu cell, every ASE optimiser took
+  the same number of steps with either filter. An explicit `-C ExpCellFilter` still
+  selects ASE's deprecated filter.
+- **Bond-angle plots left out angles above 178°.** The histogram bins of `--analyse
+  --save-plot` and of the ensemble comparison plots ended at 178°, so linear triplets
+  (every Si-O-Si of ideal β-cristobalite, the trans O-M-O of an ideal octahedron) were
+  not counted, and a triplet type with only such angles became an invisible NaN curve.
+  The bins now end at 180°, which adds a 179° row to the comparison plots' `angles.csv`.
+- **File handles closed.** The torch-sim batch quench wrote `batch_size.json`, and on
+  resume rewrote the stage logs, through file objects it never closed, leaving the
+  flush to the garbage collector.
+- **A quiet test suite.** `pytest test/` reported about 9,900 warnings, nearly all NumPy
+  2.5's deprecation of setting `ndarray.shape`, which ASE 3.29 triggers inside
+  `Atoms.copy`, the MD integrators and the `.traj` reader. That warning and the
+  TorchScript and `weights_only` notices of loading a MACE model are now filtered in
+  `pyproject.toml`, and the tests that raised warnings of their own (unclosed files,
+  Berendsen MD started from rest, expected warnings not asserted, a class-scoped fixture
+  written as a method, which pytest 10 rejects) are fixed.

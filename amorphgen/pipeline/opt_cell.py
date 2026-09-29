@@ -146,8 +146,8 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt", **kwargs):
             target = atoms
         elif filter_name == "cubic":
             # Keep cubic shape (a=b=c, 90 deg) but allow volume to change
-            from ase.filters import ExpCellFilter
-            target = ExpCellFilter(atoms, hydrostatic_strain=True)
+            from ..utils.common import cubic_cell_filter
+            target = cubic_cell_filter(atoms)
             _log("  [cell] Cubic: isotropic volume only, shape fixed", lf)
         elif filter_name == "ExpCellFilter":
             from ase.filters import ExpCellFilter

@@ -490,7 +490,7 @@ All defaults can be overridden via CLI flags (`--target-cn`, `--cn-tolerance`,
 |-------|-------------|
 | `FrechetCellFilter` | Default. Riemannian metric, best convergence for non-cubic cells |
 | `UnitCellFilter` | Classic ASE filter, relaxes full cell in Cartesian |
-| `ExpCellFilter` | Exponential cell filter, good for large deformations |
+| `ExpCellFilter` | Exponential cell filter; deprecated in ASE 3.23 in favour of `FrechetCellFilter`, which corrects its cell gradients |
 | `StrainFilter` | Relaxes cell via strain tensor only (no positions) |
 | `cubic` | Isotropic volume only (keeps a=b=c, 90 deg angles) |
 | `none` | Fixed cell, positions only |
