@@ -90,6 +90,11 @@ def anion_elements(composition) -> set:
     promotion really is the chemistry, it improves the balance and happens:
     TeO2, a tellurite, a sulfate, a nitrate, a hydroxide.
 
+    Known limitation: an element that is a cation in one site of a polyatomic
+    group and an anion in another cannot be both. In a thiosulfate the central
+    sulfur is cation-like and the terminal sulfur is an anion; the rule keeps
+    both as anions, so the S-O bonds are not counted. Rare in amorphous work.
+
     ``composition`` may be a mapping of counts (preferred) or a bare set of
     symbols, in which case one of each is assumed.
     """

@@ -421,7 +421,14 @@ def test_run_index_sources(tmp_path, monkeypatch):
     monkeypatch.delenv("SLURM_ARRAY_TASK_ID", raising=False)
     assert run_index_from_cwd() == 0
     monkeypatch.setenv("SLURM_ARRAY_TASK_ID", "12")
-    assert run_index_from_cwd() == 12
-    assert run_index_for({"run_index": 3}) == 3 and run_index_for({}) == 12
-    a = stage_rng(5, 4, 12).random(3); b = stage_rng(5, 4, 3).random(3)
+    # the array task and an explicit --run-index live in their own bands, so a
+    # task id can never be mistaken for a run_NNNN directory or a snapshot number
+    from amorphgen.utils.common import scoped_run_index, _INDEX_BAND
+    assert run_index_from_cwd() == scoped_run_index(0, task=12) >= 2 * _INDEX_BAND
+    assert run_index_for({}) == scoped_run_index(0, task=12)
+    assert run_index_for({"run_index": 3}) == scoped_run_index(0, explicit=3)
+    assert run_index_for({"run_index": scoped_run_index(7, explicit=1)}) == \
+        scoped_run_index(7, explicit=1)          # already banded: passed through
+    a = stage_rng(5, 4, run_index_for({})).random(3)
+    b = stage_rng(5, 4, run_index_for({"run_index": 3})).random(3)
     assert not np.allclose(a, b)

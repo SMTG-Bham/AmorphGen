@@ -363,6 +363,25 @@ def stage_rng(seed, stage: int, run_index: int = 0):
         np.random.SeedSequence([int(seed), int(stage), int(run_index)]))
 
 
+# The MD seed index has to separate runs that share a ``seed``. Sources are
+# banded so that two runs can only collide when they come from the same source
+# AND carry the same local index: the snapshot number (or the position in the
+# loop) occupies [0, _INDEX_STRIDE), an explicit ``--run-index`` the band above
+# it, and a SLURM array task the band above that.
+_INDEX_STRIDE = 100_000
+_INDEX_BAND = 10_000_000_000        # _INDEX_STRIDE * 100_000: room for either source
+
+
+def scoped_run_index(local: int, explicit=None, task=None) -> int:
+    """Seed index for one MD run, banded by where the index came from."""
+    local = int(local) % _INDEX_STRIDE
+    if explicit is not None:
+        return _INDEX_BAND + int(explicit) * _INDEX_STRIDE + local
+    if task is not None:
+        return 2 * _INDEX_BAND + int(task) * _INDEX_STRIDE + local
+    return local
+
+
 def run_index_from_cwd() -> int:
     """Index of a ``run_NNNN`` working directory (batch / ensemble modes).
 
@@ -375,7 +394,7 @@ def run_index_from_cwd() -> int:
     if m:
         return int(m.group(1))
     task = os.environ.get("SLURM_ARRAY_TASK_ID")
-    return int(task) if task and task.isdigit() else 0
+    return scoped_run_index(0, task=int(task)) if task and task.isdigit() else 0
 
 
 def run_index_for(cfg: dict) -> int:
@@ -383,7 +402,11 @@ def run_index_for(cfg: dict) -> int:
     config (set by batch_quench per run, or ``--run-index``) beats the
     working-directory / SLURM inference."""
     ri = cfg.get("run_index") if cfg else None
-    return int(ri) if ri is not None else run_index_from_cwd()
+    if ri is None:
+        return run_index_from_cwd()
+    # batch_quench hands over an already-banded index; a bare --run-index from
+    # the pipeline path is banded here so the flag means the same in both modes
+    return int(ri) if int(ri) >= _INDEX_BAND else scoped_run_index(0, explicit=int(ri))
 
 
 def resolve_ramp(T_start: float, T_end: float, T_step: float) -> list[float]:

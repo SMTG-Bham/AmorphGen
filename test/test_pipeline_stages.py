@@ -258,31 +258,33 @@ class TestGlobalSeedReproducibility:
         assert ov["seed"] == 11
 
 
-def test_run_seed_index_priority(tmp_path, monkeypatch):
-    """Review round 6: the index that seeds each run's velocities and thermostat
-    noise. Explicit --run-index first, then the snapshot_NNNN identity, then the
-    SLURM array task, then the loop position -- and no two runs of any two jobs
-    may share an index. The snapshot numbers here are deliberately NOT equal to
-    the loop positions, so a rule that ignored the filename would fail."""
-    from amorphgen.pipeline.batch_quench import _run_seed_index as idx, _ARRAY_STRIDE
+def test_run_seed_index_bands_and_stability(tmp_path, monkeypatch):
+    """Review round 8: the seed index of one MD run. Its LOCAL identity is the
+    snapshot_NNNN number when there is one (so a run keeps its seed when the
+    input set changes), and that is banded by where the scope came from, so two
+    runs collide only within one source. Snapshot numbers here are deliberately
+    not equal to the loop positions."""
+    from amorphgen.pipeline.batch_quench import _run_seed_index as idx
+    from amorphgen.utils.common import scoped_run_index, _INDEX_BAND
     monkeypatch.delenv("SLURM_ARRAY_TASK_ID", raising=False)
-    # the snapshot's own number, not the loop position
+    # local identity: the filename number, not the loop position
     assert idx("snapshot_0007_frame01.xyz", 0) == 7
-    assert idx("snapshot_0003_frame88.xyz", 1) == 3
     assert [idx(f"snapshot_{n:04d}.xyz", i) for i, n in enumerate((7, 3, 11))] == [7, 3, 11]
-    # plain filenames outside SLURM fall back to the loop position
-    assert [idx(f"s{k}.xyz", k) for k in range(3)] == [0, 1, 2]
-    # a single-snapshot run under SLURM takes the array task, scoped
-    for task in ("4", "5"):
-        monkeypatch.setenv("SLURM_ARRAY_TASK_ID", task)
-        assert idx("s.xyz", 0) == int(task) * _ARRAY_STRIDE
+    assert [idx(f"s{k}.xyz", k) for k in range(3)] == [0, 1, 2]   # else the loop position
+    # a run keeps its seed when another file appears beside it
+    assert idx("snapshot_0007.xyz", 0, 5) == idx("snapshot_0007.xyz", 1, 5)
+    # the three sources occupy disjoint bands
+    local = {idx(f"s{k}.xyz", k) for k in range(4)} | {idx("snapshot_0003.xyz", 0)}
+    explicit = {idx(f"s{k}.xyz", k, b) for b in (0, 2) for k in range(4)}
+    monkeypatch.setenv("SLURM_ARRAY_TASK_ID", "2")
+    slurm = {idx(f"s{k}.xyz", k) for k in range(4)}
     monkeypatch.delenv("SLURM_ARRAY_TASK_ID")
-    # an explicit index is scoped too, single run or not, so no two jobs overlap
-    jobs = [{idx(f"s{k}.xyz", k, base) for k in range(n)}
-            for base, n in ((0, 3), (1, 1), (2, 5))]
-    for a in range(len(jobs)):
-        for c in range(a + 1, len(jobs)):
-            assert not (jobs[a] & jobs[c]), (a, c, jobs[a] & jobs[c])
+    assert not (local & explicit) and not (local & slurm) and not (explicit & slurm)
+    assert max(local) < _INDEX_BAND
+    # two jobs that both use --run-index cannot overlap either
+    assert not ({idx(f"s{k}.xyz", k, 0) for k in range(3)} & {idx("s.xyz", 0, 1)})
+    # and the pipeline path bands a bare --run-index the same way
+    assert scoped_run_index(0, explicit=3) == idx("x.xyz", 0, 3)
 
 
 def test_batch_quench_assigns_distinct_seed_indices(tmp_path, monkeypatch):
@@ -320,7 +322,7 @@ def test_batch_quench_single_snapshot_uses_the_slurm_array_task(tmp_path, monkey
     from ase.build import bulk
     from ase.io import write
     from amorphgen.pipeline import batch_quench as bq
-    from amorphgen.pipeline.batch_quench import _ARRAY_STRIDE
+    from amorphgen.utils.common import scoped_run_index
     src = tmp_path / "one.xyz"
     write(str(src), bulk("Cu", cubic=True), format="extxyz")
     seen = []
@@ -335,4 +337,31 @@ def test_batch_quench_single_snapshot_uses_the_slurm_array_task(tmp_path, monkey
              patch.object(bq, "get_calculator", lambda **kw: None):
             bq.run([str(src)], cfg_override={"model": "lennard-jones"},
                    work_dir=str(tmp_path / f"w{task}"), stages=[4])
-    assert seen == [4 * _ARRAY_STRIDE, 9 * _ARRAY_STRIDE], seen
+    assert seen == [scoped_run_index(0, task=4), scoped_run_index(0, task=9)], seen
+
+
+def test_batch_quench_single_snapshot_with_explicit_run_index(tmp_path, monkeypatch):
+    """An explicit --run-index on a single snapshot, through bq.run: two such
+    jobs must not share a seed index, and neither may collide with a plain run."""
+    from unittest.mock import patch
+    from ase.build import bulk
+    from ase.io import write
+    from amorphgen.pipeline import batch_quench as bq
+    src = tmp_path / "one.xyz"
+    write(str(src), bulk("Cu", cubic=True), format="extxyz")
+    seen = []
+
+    def fake_eq(atoms, cfg_override=None, **kw):
+        seen.append(cfg_override.get("run_index"))
+        return atoms
+
+    monkeypatch.delenv("SLURM_ARRAY_TASK_ID", raising=False)
+    for base in (None, 0, 1):
+        cfg = {"model": "lennard-jones"}
+        if base is not None:
+            cfg["run_index"] = base
+        with patch.object(bq.equilibrate, "run", fake_eq), \
+             patch.object(bq, "get_calculator", lambda **kw: None):
+            bq.run([str(src)], cfg_override=cfg,
+                   work_dir=str(tmp_path / f"w{base}"), stages=[4])
+    assert len(set(seen)) == 3, seen

@@ -724,7 +724,11 @@ class TestBondingPairRules:
         from amorphgen.analysis.structure import anion_elements as ae
         assert ae({"Ge": 20, "S": 10, "Se": 70}) == {"S", "Se"}
         assert ae({"Ge": 20, "Se": 40, "Te": 40}) == {"Se", "Te"}
-        assert ae({"Ge": 2, "Sb": 2, "Te": 5}) == {"Te"}
+        assert ae({"Ge": 2, "Sb": 2, "Te": 5}) == {"Te"}          # one chalcogen only
+        assert ae({"As": 40, "S": 30, "Se": 30}) == {"S", "Se"}   # two, neither promoted
+        assert self._b("As", "S", {"As": 40, "S": 30, "Se": 30})
+        assert self._b("As", "Se", {"As": 40, "S": 30, "Se": 30})
+        assert not self._b("S", "Se", {"As": 40, "S": 30, "Se": 30})
         assert self._b("Ge", "Se", {"Ge": 20, "S": 10, "Se": 70})
         assert self._b("Ge", "Te", {"Ge": 20, "Se": 40, "Te": 40})
         assert not self._b("S", "Se", {"Ge": 20, "S": 10, "Se": 70})
@@ -732,7 +736,7 @@ class TestBondingPairRules:
 
     def test_dopants_and_defects_do_not_flip_the_major_anion(self):
         """A single dopant or defect atom must not turn the major anion into a
-        cation: the charge-balance test has a tolerance."""
+        cation: promoting it would overshoot charge balance, so it is kept."""
         from amorphgen.analysis.structure import anion_elements as ae
         # promoting the major anion here would overshoot balance, so it is kept
         assert ae({"Si": 32, "O": 64, "F": 2}) == {"O", "F"}      # F-doped silica

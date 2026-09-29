@@ -27,35 +27,31 @@ from copy import deepcopy
 from ase.io import read, write, iread
 
 
-_ARRAY_STRIDE = 100000       # keeps SLURM array tasks / --run-index jobs from overlapping
-
-
 def _run_seed_index(snap_file: str, loop_idx: int, explicit=None) -> int:
-    """Index that feeds the per-run MD seed stream (velocities, thermostat noise).
+    """Index that feeds one run's MD seed stream (velocities, thermostat noise).
 
-    Priority, highest first:
-      1. an explicit ``--run-index`` (YAML ``run_index``), scoped by the run's
-         position so a multi-snapshot job stays internally independent and two
-         jobs with different indices cannot overlap;
-      2. the ``snapshot_NNNN`` number in the filename, which is the snapshot's
-         own stable identity: it survives resumes and is the same in every job;
-      3. ``SLURM_ARRAY_TASK_ID``, likewise scoped, so array tasks that each take
-         one structure and share a ``--seed`` do not collide;
-      4. the position in the loop.
+    The run's LOCAL identity is the ``snapshot_NNNN`` number in its filename
+    when it has one, and the position in the loop otherwise. Using the filename
+    number keeps a run's seed stable when the input set changes: adding a file
+    to the directory, or resuming with a different selection, must not give
+    ``run_0007`` a different seed halfway through.
+
+    That local index is then banded by where the run's scope comes from (see
+    :func:`~amorphgen.utils.common.scoped_run_index`): an explicit
+    ``--run-index`` and a ``SLURM_ARRAY_TASK_ID`` each get their own band, so
+    two runs can only share an index when they come from the same source with
+    the same local identity.
     """
-    if explicit is not None:
-        # scoped in every case, single snapshot or not: without the stride, job
-        # B with --run-index 1 and one snapshot would land on the same index as
-        # job A's second run with --run-index 0
-        return int(explicit) * _ARRAY_STRIDE + loop_idx
+    from ..utils.common import scoped_run_index
     m = re.match(r"snapshot[_-]?(\d+)",
                  os.path.splitext(os.path.basename(snap_file))[0])
-    if m:
-        return int(m.group(1))
+    local = int(m.group(1)) if m else loop_idx
+    if explicit is not None:
+        return scoped_run_index(local, explicit=int(explicit))
     task = os.environ.get("SLURM_ARRAY_TASK_ID")
     if task and task.isdigit():
-        return int(task) * _ARRAY_STRIDE + loop_idx
-    return loop_idx
+        return scoped_run_index(local, task=int(task))
+    return scoped_run_index(local)
 
 
 def _run_dir_name(snap_file: str, fallback_idx: int) -> str:

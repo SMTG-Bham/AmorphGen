@@ -367,11 +367,18 @@ orphan: true
   be computed.
 
   *MD seed streams.* Runs that shared a `--seed` could share their velocities and
-  thermostat noise. The index that separates them now follows one priority: an explicit
-  `--run-index`, then the `snapshot_NNNN` number in the filename, which is the snapshot's
-  stable identity across jobs and resumes, then `SLURM_ARRAY_TASK_ID`, then the position
-  in the loop. The explicit index and the array task are scoped by a stride, so no two
-  runs of any two jobs can collide.
+  thermostat noise: the run index came from the `run_NNNN/` directory name alone, and a
+  single-snapshot run writes straight into the work directory, so every SLURM array task
+  drew the same numbers. A run's index is now its `snapshot_NNNN` number when the
+  filename has one and its position in the loop otherwise, which keeps a run's seed
+  stable when the input set changes or a resume selects differently. That local index is
+  then banded by where the run's scope came from: an explicit `--run-index` (YAML
+  `run_index`) and a `SLURM_ARRAY_TASK_ID` each occupy their own range, so two runs can
+  only share an index when they come from the same source with the same local identity.
+  The pipeline path bands a bare `--run-index` the same way, so the flag means one thing
+  in both modes. **Behaviour change:** these indices are seed labels, and they have
+  moved, so a run resumed across this change draws different velocities and thermostat
+  noise from that point on. Finish a running ensemble before updating, or regenerate it.
 
   *Classification.* The metal-rich metalloid-glass rule no longer reaches the s-block:
   Li3P, Na3Sb and Cs3Sb are Zintl phases and keep their pnictide treatment, while
@@ -420,16 +427,6 @@ orphan: true
 - **Resume could turn a `traj_format: traj` trajectory into extxyz.** The torn-frame
   repair rewrote the file in the format guessed from the `*_traj.xyz` name; it now keeps
   the file's real format (binary trajectory or extxyz), so the resumed stage can append.
-- **Hetero cation-cation pairs were counted as bonds** by the coordination report, the
-  total coordination, the bond angles and the CN plot when the radii table classed them
-  covalent (Al-Si, Na-Si in aluminosilicate and soda-lime glasses), inflating totals and
-  adding spurious angles. One rule now applies everywhere (`structure.is_bonding_pair`):
-  in a compound with an anion, a pair is a bond only when exactly one member is an anion.
-- **Same MD seed stream for every job in single-snapshot and SLURM-array runs.** The
-  run index came from the `run_NNNN/` directory name only, and a single-snapshot run
-  writes straight into the work directory. `batch_quench` now passes each run's index
-  explicitly, `SLURM_ARRAY_TASK_ID` is used outside a run directory, and `--run-index`
-  (YAML `run_index`) sets it by hand.
 - **CN plot of multi-cation compounds showed a cation-cation pair.** For IGZO the
   mirrored-bars layout picked Ga-In / In-Ga (second-shell contacts) because the
   reciprocal-pair search ran over every pair. The plot now uses bonded pairs only:
