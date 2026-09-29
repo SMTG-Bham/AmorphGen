@@ -563,3 +563,37 @@ orphan: true
   coordination entry is still directional: `Si-O` counts O around Si. A reference
   metric the structures do not have is now listed as `n/a` and counted in the summary,
   instead of being left out. Of the shipped references only a-SiO₂ was affected.
+- **Random generation mangled oxoanion compounds.** The radii rules took every nonmetal
+  for an anion, including the centre of an oxoanion (P in a phosphate, S in a sulfate, C
+  in a carbonate, N in a nitrate, Cl in a perchlorate, I in an iodate) and the H of a
+  hydroxide. So P-O was kept 2.46 Å apart against a 1.53 Å bond (S-O 2.27, C-O 2.24,
+  N-O 2.29, O-H 2.24 Å), and no generated P, S, C, N or H had an O within bonding
+  distance. These centres had no target coordination. Counting S, N, Cl or H as anions in
+  the charge balance gave Li+5 in Li2SO4, Ca+10 in CaSO4, Na+9 in NaNO3 and Mg+6 in
+  Mg(OH)2, which put sulfates, nitrates and hydroxides in the high-valent-oxide class and
+  perchlorates and iodates in the oxyhalide class. Charge balance now decides which
+  nonmetals are cations (`radii.cation_nonmetals`). They are the ones the
+  `anion_elements` rule promotes, plus C and P. C and P count only when an anion more
+  electronegative than them is present and they balance the charge better as cations
+  than as C4- or P3-. That test keeps the carbide C of SiOC and SiCN, carbides,
+  phosphides and a-C:H as they were. A nonmetal cation bonds to its anions at its
+  Shannon cation radius (P-O 1.26, S-O 1.22, C-O 1.06, N-O 1.04, O-H 0.82 Å, P-S 1.61 Å
+  in Li3PS4). It targets the ligand count of its oxoanion: 4 in PO4, SO4 and ClO4, 3 in
+  CO3, NO3, IO3 and a sulfite, 1 for H. It is solved for its oxidation state, and sized
+  as that cation in the density estimate. Sulfate, carbonate, nitrate, perchlorate and
+  hydroxide estimates go from 52-72 % to 79-88 % of the crystal density.
+  **Behaviour change:** `infer_oxidation_state` now returns the state of a nonmetal
+  cation (P +5 in Li3PO4) instead of `None`.
+- **Borates and K/Ba silicates placed cations on top of each other.** A metal-metalloid
+  pair with Δχ ≥ 1 was classed as an ionic bond even when both are cations of an oxide.
+  So Na-B was kept only 0.90 Å apart (Li-B 0.70, K-Si 1.31, Ba-Si 1.29 Å), and the
+  coordination-aware placement counted the pair as a bond. `classify_bond(a, b,
+  composition)` now applies the compound's roles, and two cations of a compound with
+  anions are never an ionic bond. Na-B is 2.16 Å, as Na-Si already was. A nonmetal cation
+  and another cation get the right-angle contact across the anion that M-M pairs use.
+  Two of the same element (P-P, S-S, C-C) get their two bonds end to end, which is above
+  their homonuclear bond, so `--check-dimers` still flags a P-P or S-S bond. None of the
+  100 class-benchmark systems changes. The placement still has no seed for a centre (O
+  carries no target CN), so a centre starts with about as many O as Si does in an alkali
+  silicate (P 2.75 of 4, C 2.05 of 3 on average), and it relies on the relaxation to
+  complete the polyhedron.

@@ -31,6 +31,7 @@ from ..utils.radii import (
     NONMETALS, METALLOIDS, ELEMENTAL_DENSITIES, SCALE_FACTORS,
     # Functions (aliased with underscore for internal use)
     classify_bond as _classify_bond,
+    cation_nonmetals as _cation_nonmetals,
     get_ionic_radius as _get_ionic_radius,
     get_metallic_radius as _get_metallic_radius,
     get_effective_radius as _get_effective_radius,
@@ -194,7 +195,8 @@ def _get_dmax(s1: str, s2: str, dmax: dict) -> float:
     return dmax.get(key1, dmax.get(key2, 0.0))
 
 
-def _auto_dmax(minsep: dict, target_cn: dict, factor: float = 1.5) -> dict:
+def _auto_dmax(minsep: dict, target_cn: dict, factor: float = 1.5,
+               composition: dict | None = None) -> dict:
     """
     Auto-generate dmax from minsep for bonding pairs.
 
@@ -207,6 +209,10 @@ def _auto_dmax(minsep: dict, target_cn: dict, factor: float = 1.5) -> dict:
     - Metallic bonds (M-M): dmax = minsep * 1.3 (only when M-M is
       the primary bond, i.e. alloys/pure metals with no anions)
     - Pure elements (Si, Ge, Sn, etc.): dmax = minsep * 1.2
+
+    With ``composition`` the pairs are classified in the compound
+    (``classify_bond``), so the P-O of a phosphate is a bond and a pair of
+    cations (Li-P, Na-B, K-Si) is not.
     """
     dmax = {}
     cn_elements = set(target_cn.keys())
@@ -234,7 +240,8 @@ def _auto_dmax(minsep: dict, target_cn: dict, factor: float = 1.5) -> dict:
         if s1 not in cn_elements and s2 not in cn_elements:
             continue
 
-        bond_type = _classify_bond(s1, s2)
+        # "cation-cation" (a nonmetal cation and another cation) is never a bond
+        bond_type = _classify_bond(s1, s2, composition)
         if bond_type == "ionic":
             # Primary ionic bonding (M-O, M-N, M-Cl)
             dmax[pair] = dist * factor
@@ -739,7 +746,8 @@ def generate_random(
     # separate relax / melt-quench stage). Auto-generate dmax from minsep here.
     use_sc = target_cn is not None
     if use_sc and dmax is None:
-        dmax = _auto_dmax(minsep, target_cn, factor=dmax_factor)
+        dmax = _auto_dmax(minsep, target_cn, factor=dmax_factor,
+                          composition=composition)
         logger.info("Auto-generated dmax from minsep * 1.5: %s", dmax)
 
     # CN tracking array (only used in coordination-aware mode)
@@ -782,6 +790,7 @@ def generate_random(
     # Auto: anions -> 2, cations -> 3; each capped at the element's target CN.
     _min_cn_arr = np.zeros(_n_types, dtype=int)
     if use_sc:
+        centres = _cation_nonmetals(composition)    # P, S, C, H... as cations
         for s in unique_syms:
             idx = _sym_to_idx[s]
             if isinstance(min_cn, dict):
@@ -789,7 +798,7 @@ def generate_random(
             elif min_cn is not None:
                 floor = int(min_cn)
             else:                                   # auto default
-                floor = 2 if s in NONMETALS else 3
+                floor = 2 if s in NONMETALS and s not in centres else 3
             # never demand more than the target CN (e.g. CN-2 cations)
             tgt = _target_cn_arr[idx]
             if tgt < 999:
@@ -1329,7 +1338,8 @@ def batch_random(
     use_sc = target_cn is not None and target_cn != {}
     dmax_fac = kwargs.get("dmax_factor", 1.5)
     if use_sc and dmax_user is None:
-        dmax_log = _auto_dmax(minsep_log, target_cn, factor=dmax_fac)
+        dmax_log = _auto_dmax(minsep_log, target_cn, factor=dmax_fac,
+                              composition=composition)
     else:
         dmax_log = dmax_user
 

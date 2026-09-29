@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import itertools
 import logging
+from collections import Counter
 from functools import lru_cache
 
 import numpy as np
@@ -35,6 +36,12 @@ logger = logging.getLogger(__name__)
 # Keyed as {symbol: {oxidation_state: {CN: radius}}}.
 # CN=6 is the default; CN=4 used when target_cn is specified.
 # Source: Shannon, R.D. Acta Cryst. A32, 751-767 (1976).
+# The anion-formers also carry the cation states in which they centre an
+# oxoanion (C in CO3 2-, N in NO3 -, S in SO4 2-, Cl in ClO4 -, I in IO3 -) or
+# bond as the H+ of a hydroxide. At the oxoanion's own coordination these
+# reproduce its bond: C4+ CN3 -0.08 + O2- 1.40 = 1.32 A against 1.29 A in a
+# carbonate, S6+ CN4 0.12 + 1.40 = 1.52 against 1.47. The negative radii are
+# Shannon's (a bond shorter than r(O2-) on his r(O2-) = 1.40 scale).
 SHANNON_IONIC_RADII = {
     # Cations
     "Li": {1: {4: 0.59, 6: 0.76}},
@@ -118,16 +125,16 @@ SHANNON_IONIC_RADII = {
     "As": {5: {4: 0.335, 6: 0.460}},
     # Anions (CN-independent)
     "O":  {-2: {6: 1.400}},
-    "S":  {-2: {6: 1.840}},
-    "Se": {-2: {6: 1.980}},
+    "S":  {-2: {6: 1.840}, 4: {6: 0.37}, 6: {4: 0.12, 6: 0.29}},
+    "Se": {-2: {6: 1.980}, 4: {6: 0.50}, 6: {4: 0.28, 6: 0.42}},
     "Te": {-2: {6: 2.210}, 4: {6: 0.970}, 6: {6: 0.560}},
     "F":  {-1: {6: 1.330}},
-    "Cl": {-1: {6: 1.810}},
-    "Br": {-1: {6: 1.960}},
-    "I":  {-1: {6: 2.200}},
-    "N":  {-3: {6: 1.460}},
-    "H":  {-1: {6: 1.400}},
-    "C":  {-4: {6: 1.400}},  # Approximate; Shannon does not list C4-
+    "Cl": {-1: {6: 1.810}, 5: {3: 0.12}, 7: {4: 0.08, 6: 0.27}},
+    "Br": {-1: {6: 1.960}, 5: {3: 0.31}, 7: {4: 0.25, 6: 0.39}},
+    "I":  {-1: {6: 2.200}, 5: {3: 0.44, 6: 0.95}, 7: {4: 0.42, 6: 0.53}},
+    "N":  {-3: {6: 1.460}, 3: {6: 0.16}, 5: {3: -0.104, 6: 0.13}},
+    "H":  {-1: {6: 1.400}, 1: {1: -0.38, 2: -0.18}},
+    "C":  {-4: {6: 1.400}, 4: {3: -0.08, 4: 0.15, 6: 0.16}},  # C4- approximate; Shannon does not list it
     "P":  {-3: {6: 2.120}, 5: {4: 0.17, 6: 0.380}},
 }
 
@@ -221,20 +228,23 @@ def _solve_oxidation_states(comp_items: tuple) -> dict | None:
     uniquely determined.
 
     Works for arbitrary cation/anion mixtures: the anion charge is summed over
-    *all* anion-formers (so oxynitrides, oxyfluorides, oxysulfides balance the
-    same way as simple oxides). Cation states are enumerated from the Shannon
-    table; at most one cation may be absent from Shannon (it becomes the single
-    free variable solved by the remaining balance). When several assignments
-    balance, the one with the fewest :data:`_DOMINANT_OS` violations wins; if
-    that is still tied the system is genuinely ambiguous and None is returned.
+    *all* the anions of :func:`anion_elements` (so oxynitrides, oxyfluorides,
+    oxysulfides balance the same way as simple oxides, and the S of a sulfate
+    or the N of a nitrate is solved as a cation). Cation states are enumerated
+    from the Shannon table; at most one cation may be absent from Shannon (it
+    becomes the single free variable solved by the remaining balance). When
+    several assignments balance, the one with the fewest :data:`_DOMINANT_OS`
+    violations wins; if that is still tied the system is genuinely ambiguous
+    and None is returned.
     """
     composition = dict(comp_items)
+    anions = anion_elements(composition)
     total_neg = sum(n * ANION_CHARGES[s] for s, n in composition.items()
-                    if s in ANION_CHARGES)
+                    if s in anions)
     if total_neg == 0:
         return None
     cation_charge = -total_neg  # total positive charge the cations must supply
-    cations = {s: n for s, n in composition.items() if s not in ANION_CHARGES}
+    cations = {s: n for s, n in composition.items() if s not in anions}
     if not cations:
         return None
 
@@ -288,27 +298,31 @@ def _solve_oxidation_states(comp_items: tuple) -> dict | None:
 def infer_oxidation_state(sym: str, composition: dict) -> int | None:
     """Infer the oxidation state of *sym* in *composition* by charge balance.
 
-    Sums anion charge from :data:`ANION_CHARGES` and assigns the
-    remaining positive charge equally across cations of the queried
-    element when only one cation type is present, or for any element
-    that appears as the only non-anion type. Returns ``None`` when the
-    inference is ambiguous (multiple cation species, non-integer
-    oxidation state, or no anions at all), letting the caller fall back
-    to a default Shannon entry.
+    Sums the charge of the anions (:func:`anion_elements`, charges from
+    :data:`ANION_CHARGES`) and assigns the remaining positive charge
+    equally across cations of the queried element when only one cation
+    type is present, or for any element that appears as the only
+    non-anion type. A nonmetal that acts as a cation here
+    (:func:`cation_nonmetals`: P in Li3PO4, S in Li2SO4) is solved like
+    any other; the Li of Li2SO4 is +1, not the +5 that counting S as an
+    anion gave. Returns ``None`` for an anion, for Te (a metalloid on the
+    anion table, left to the highest-state default whether it is the
+    anion or the cation), and when the inference is ambiguous (multiple
+    cation species, non-integer oxidation state, or no anions at all),
+    letting the caller fall back to a default Shannon entry.
     """
-    if sym in ANION_CHARGES or sym in NONMETALS:
+    if ((sym in ANION_CHARGES or sym in NONMETALS)
+            and sym not in cation_nonmetals(composition)):
         return None  # not a cation we resolve here
 
-    total_neg = 0
-    for s, n in composition.items():
-        q = ANION_CHARGES.get(s)
-        if q is not None and s != sym:
-            total_neg += n * q
+    anions = anion_elements(composition)
+
+    total_neg = sum(n * ANION_CHARGES[s] for s, n in composition.items()
+                    if s in anions)
     if total_neg == 0:
         return None  # no anions -> can't balance
 
-    # Identify cations (everything that isn't a known anion-former).
-    cations = {s: n for s, n in composition.items() if s not in ANION_CHARGES}
+    cations = {s: n for s, n in composition.items() if s not in anions}
     if sym not in cations:
         return None
 
@@ -329,6 +343,48 @@ def infer_oxidation_state(sym: str, composition: dict) -> int | None:
     if solution is None:
         return None
     return solution.get(sym)
+
+
+def cation_nonmetals(composition) -> frozenset:
+    """Nonmetals that act as CATIONS in this compound.
+
+    The centre of an oxoanion (C in a carbonate, N in a nitrate, P in a
+    phosphate, S in a sulfate, Se in a selenate, Cl, Br or I in a halate)
+    and the H of a hydroxide or an acid salt bond to the anions like any
+    other cation, although :data:`NONMETALS` puts them with the anions.
+    Charge balance picks them out: the elements :func:`anion_elements`
+    promotes, plus C and P, which that rule never makes anions. They count
+    as cations only where an anion more electronegative than them is
+    present and they balance the charge better as cations than as C4- or
+    P3-: the P of Li3PO4 or Li3PS4 is a cation, the carbide C of an
+    oxycarbide (SiOC) or a carbonitride stays an anion, and so do the C and
+    P of carbides, phosphides and a-C:H. Only elements with a tabulated
+    cation radius qualify.
+
+    ``composition`` may be a mapping of counts (preferred) or a bare set of
+    symbols, in which case one of each is assumed.
+    """
+    counts = (dict(composition) if hasattr(composition, "items")
+              else {e: 1 for e in composition})
+    anions = anion_elements(counts)
+    if not anions:
+        return frozenset()
+    cations = {e for e in counts if e in NONMETALS and e not in anions
+               and any(k > 0 for k in SHANNON_IONIC_RADII.get(e, {}))}
+    demand = sum(-ANION_CHARGES[a] * counts[a] for a in anions)
+    for e, charge in (("C", -4), ("P", -3)):
+        if e not in cations:
+            continue
+        if max(PAULING_EN.get(a, 0.0) for a in anions) <= PAULING_EN[e]:
+            cations.discard(e)          # no anion to be the cation of
+            continue
+        supply = sum(_max_positive_os(x) * n for x, n in counts.items()
+                     if x not in anions and x != e)
+        as_cation = supply + _max_positive_os(e) * counts[e] - demand
+        as_anion = supply - demand + charge * counts[e]
+        if abs(as_cation) >= abs(as_anion):
+            cations.discard(e)
+    return frozenset(cations)
 
 
 # ==============================================================================
@@ -470,11 +526,15 @@ def auto_target_cn(composition: dict) -> tuple[dict | None, int]:
     Returns (target_cn, cn_tolerance) tuple.
 
     Rules:
+
     - Metalloids (Si, Ge, B): CN=4, tolerance=0 (strict tetrahedral)
     - Pure Si/Ge: CN=4, tolerance=0
     - Metals in nitrides: CN=4, tolerance=0 (wurtzite tetrahedral)
     - Metals in halides/sulfides: CN=6, tolerance=0 (strict octahedral)
     - Metals in oxides: CN=5, tolerance=1 (flexible 4-6 range)
+    - Nonmetal cations (:func:`cation_nonmetals`): the ligand count of their
+      oxoanion, 4 in PO4 3-, SO4 2- and ClO4 -, 3 in CO3 2-, NO3 - and IO3 -,
+      and 1 for the H of a hydroxide
 
     Parameters
     ----------
@@ -487,7 +547,38 @@ def auto_target_cn(composition: dict) -> tuple[dict | None, int]:
         target_cn: dict or None
         cn_tolerance: int (0=strict, 1=flexible)
     """
-    elems = set(composition.keys())
+    centres = cation_nonmetals(composition)
+    target_cn, tol = _class_target_cn(composition, centres)
+    if centres:
+        target_cn = dict(target_cn or {})
+        for s in centres:
+            target_cn[s] = _nonmetal_cation_cn(s, composition)
+    return target_cn, tol
+
+
+# Ligand count of a nonmetal cation in its highest oxidation state: the O of
+# its oxoanion (trigonal CO3 2- and NO3 -; tetrahedral PO4 3-, SO4 2-,
+# SeO4 2-, ClO4 -, BrO4 -, IO4 -) or the one O-H bond of a hydroxide. Each
+# lone pair of a lower state takes a ligand's place (pyramidal SO3 2-,
+# SeO3 2-, ClO3 -, BrO3 -, IO3 -; bent NO2 -).
+_NONMETAL_CATION_CN = {"H": 1, "C": 3, "N": 3, "P": 4, "S": 4, "Se": 4,
+                       "Cl": 4, "Br": 4, "I": 4}
+
+
+def _nonmetal_cation_cn(sym: str, composition: dict) -> int:
+    """Target CN of a nonmetal cation (see :data:`_NONMETAL_CATION_CN`)."""
+    top = _max_positive_os(sym)
+    # an off-stoichiometry cell can balance to more than the top state (S8O28)
+    ox = min(infer_oxidation_state(sym, composition) or top, top)
+    return max(1, _NONMETAL_CATION_CN.get(sym, 4) - (top - ox) // 2)
+
+
+def _class_target_cn(composition: dict,
+                     centres: frozenset) -> tuple[dict | None, int]:
+    """The per-class rules of :func:`auto_target_cn`, for every element but
+    the nonmetal cations ``centres``, which are neither anions nor metal
+    cations."""
+    elems = set(composition) - centres
     anions = elems & NONMETALS
     cations = elems - anions
 
@@ -687,7 +778,7 @@ _MAX_ANION_MINSEP = 3.00          # X-X anion packing
 # Bonding classification
 # ==============================================================================
 
-def classify_bond(sym_a: str, sym_b: str) -> str:
+def classify_bond(sym_a: str, sym_b: str, composition=None) -> str:
     """
     Classify a pair of elements by bonding type.
 
@@ -700,7 +791,26 @@ def classify_bond(sym_a: str, sym_b: str) -> str:
     ionic radii give unrealistically small inter-atomic distances.
 
     Returns one of: "ionic", "covalent", "metallic".
+
+    With ``composition`` (a {symbol: count} mapping), the roles charge
+    balance gives the two elements in that compound come first. A nonmetal
+    cation (:func:`cation_nonmetals`: P in a phosphate, S in a sulfate, H in
+    a hydroxide) bonds to the anions like any other cation, so the pair is
+    "ionic". Two cations of a compound with anions only meet across an
+    anion: "cation-cation" when one is a nonmetal cation, and never "ionic"
+    otherwise, since the Δχ rule is for bonded pairs (Na-B in a borate and
+    K-Si in a silicate are then "covalent", as Na-Si already is).
     """
+    if composition is not None:
+        centres = cation_nonmetals(composition)
+        anions = {s for s in composition if s in NONMETALS and s not in centres}
+        if anions and sym_a not in anions and sym_b not in anions:
+            if sym_a in centres or sym_b in centres:
+                return "cation-cation"
+            bond_type = classify_bond(sym_a, sym_b)
+            return "covalent" if bond_type == "ionic" else bond_type
+        if sym_a in centres or sym_b in centres:
+            return "ionic"
     a_is_nonmetal = sym_a in NONMETALS
     b_is_nonmetal = sym_b in NONMETALS
     a_is_metalloid = sym_a in METALLOIDS
@@ -835,9 +945,16 @@ def default_minsep(symbols: list[str], scale: float = 0.85,
     Uses bonding-type-aware radii. When target_cn is provided, uses
     CN-specific Shannon radii (e.g. CN=4 for Si in SiO2).
 
+    Pairs are classified in the compound (``classify_bond`` with the
+    composition), so a nonmetal that charge balance makes a cation, the P of
+    a phosphate or the C of a carbonate, is kept at bonding distance from
+    its anions (P-O 1.26 A, C-O 1.06 A) and away from the other cations.
+
     Parameters
     ----------
     symbols : list of str
+        One symbol per atom, or a ``{symbol: count}`` mapping; the counts
+        decide which nonmetals act as cations.
     scale : float
         Fallback scale factor (default 0.85).
     target_cn : dict, optional
@@ -851,8 +968,19 @@ def default_minsep(symbols: list[str], scale: float = 0.85,
     unique = sorted(set(symbols))
     minsep = {}
     cn_map = target_cn or {}
+    counts = Counter(symbols)
+    centres = cation_nonmetals(counts)
+    anion_syms = [s for s in unique if s in NONMETALS and s not in centres]
+    has_anion = bool(anion_syms)
 
     def _cn_radius(sym):
+        if sym in centres:
+            # its shortest bond: the highest cation state at the lowest
+            # tabulated coordination (P5+ CN4, S6+ CN4, C4+ CN3, H+ CN1).
+            # Lower states bond longer (sulfite, chlorate), so this is a
+            # floor for them too, whatever target CN the placement uses.
+            states = SHANNON_IONIC_RADII[sym]
+            return min(states[max(k for k in states if k > 0)].values())
         cn = cn_map.get(sym)
         return get_ionic_radius(sym, cn=cn)
 
@@ -860,8 +988,32 @@ def default_minsep(symbols: list[str], scale: float = 0.85,
         for s2 in unique[i:]:
             key = f"{s1}-{s2}" if s1 <= s2 else f"{s2}-{s1}"
 
-            bond_type = classify_bond(s1, s2)
+            bond_type = classify_bond(s1, s2, counts)
             sf = SCALE_FACTORS.get(bond_type, scale)
+
+            if bond_type == "cation-cation":
+                # A nonmetal cation meets the other cations only across an
+                # anion. With another cation it can share a polyhedron edge
+                # (LiO4-PO4), so the floor is the right-angle contact used for
+                # M-M below. Two of the same element never share an anion at
+                # a narrow angle, so theirs is the two bonds end to end:
+                # P-P 2.67, S-S 2.58, C-C 2.24 A, above the X-X bond, so the
+                # placement cannot make one and compute_dimers still flags it.
+                sf = SCALE_FACTORS["metallic"]
+                r_anion = max((_cn_radius(a) or 0.0) for a in anion_syms)
+                if s1 == s2:
+                    d_cc = 2 * (_cn_radius(s1) + r_anion) * sf
+                else:
+                    d_geom = [2**0.5 * (r + r_anion) * sf
+                              for r in (_cn_radius(s1), _cn_radius(s2))
+                              if r is not None]
+                    d_cc = sum(d_geom) / len(d_geom)
+                minsep[key] = min(d_cc, _MAX_SAME_ELEMENT_MINSEP)
+                logger.info(
+                    "  minsep %s = %.2f A  (cation-cation across the anion, "
+                    "r_anion=%.3f, scale=%.2f)", key, minsep[key], r_anion, sf
+                )
+                continue
 
             if bond_type == "ionic":
                 r1 = _cn_radius(s1)
@@ -881,11 +1033,9 @@ def default_minsep(symbols: list[str], scale: float = 0.85,
                 if r1 is not None and r2 is not None:
                     d_metallic = (r1 + r2) * sf
 
-                    has_anion = any(s in NONMETALS for s in unique)
                     if has_anion:
                         ri1 = _cn_radius(s1)
                         ri2 = _cn_radius(s2)
-                        anion_syms = [s for s in unique if s in NONMETALS]
                         r_anion = max(
                             (_cn_radius(a) or 0.0) for a in anion_syms
                         ) if anion_syms else None
@@ -940,10 +1090,8 @@ def default_minsep(symbols: list[str], scale: float = 0.85,
                     # In anion context (oxide, nitride, etc.), metalloid-metalloid
                     # distances are much larger due to bridging anions (Si-O-Si).
                     # Use geometric estimate: sqrt(2) * d(X-anion)
-                    has_anion = any(s in NONMETALS for s in unique)
                     if has_anion and s1 == s2:
                         ri = _cn_radius(s1)
-                        anion_syms = [s for s in unique if s in NONMETALS]
                         r_anion = max(
                             (_cn_radius(a) or 0.0) for a in anion_syms
                         ) if anion_syms else None
@@ -1152,8 +1300,11 @@ def _classify_compound(composition: dict) -> str:
     has_metal = any(s not in NONMETALS and s not in METALLOIDS for s in elems)
     has_metalloid = any(s in METALLOIDS for s in elems)
 
-    anions = elems & NONMETALS
-    chalcogens = elems & {"S", "Se", "Te"}
+    # a nonmetal that charge balance makes a cation (S of a sulfate, Cl of a
+    # perchlorate, H of a hydroxide) is not an anion of the class tests below
+    centres = cation_nonmetals(composition)
+    anions = (elems & NONMETALS) - centres
+    chalcogens = (elems - centres) & {"S", "Se", "Te"}
     pnictogens = elems & {"P", "As", "Sb"}
 
     # Group IV: pure Si, Ge, SiGe (all metalloid, no chalcogen/pnictogen)
@@ -1245,10 +1396,12 @@ def _classify_compound(composition: dict) -> str:
         # Ta2O5, Sb2O5, MoO3, WO3, ... Small, highly-charged cations form short
         # M-O bonds and pack denser than the generic oxide factor predicts, so
         # they get a higher packing factor. Restricted to metal/metalloid
-        # cations (excludes molecular P2O5 / SO3 etc.).
-        if cations and all(c not in NONMETALS for c in cations):
-            os_list = [infer_oxidation_state(c, composition) for c in cations]
-            if os_list and all(o is not None and o >= 5 for o in os_list):
+        # cations (excludes molecular P2O5 / SO3 etc., and the oxoanion
+        # centres of a salt: NbOPO4 is high-valent through its Nb).
+        mm_cations = [c for c in cations if c not in NONMETALS]
+        if mm_cations:
+            os_list = [infer_oxidation_state(c, composition) for c in mm_cations]
+            if all(o is not None and o >= 5 for o in os_list):
                 return "high_valent_oxide"
         # Rutile-type dioxides (MO2) pack much denser than light oxides; route
         # them to a higher packing factor. Identified by the radius-ratio rule:
@@ -1275,10 +1428,11 @@ def _classify_compound(composition: dict) -> str:
                     return "fluorite_dioxide"
         if has_metal:
             return "metal_oxide"
-        elif has_metalloid or (not cations and len(elems) > 1):
+        elif has_metalloid or (len(elems) > 1
+                               and all(c in NONMETALS for c in cations)):
             # metalloid oxides (SiO2, GeO2, B2O3) and non-metal oxides, where
-            # every element is a NONMETAL so no "cation" is left (P2O5, SO3),
-            # are covalent networks / molecular glasses, not "default".
+            # every cation is a NONMETAL (P2O5, SO3), are covalent networks /
+            # molecular glasses, not "default".
             # Pure oxygen (one element) still falls through to "default".
             return "covalent_oxide"
 
@@ -1396,6 +1550,74 @@ def get_packing_factor(cls: str, composition: dict | None = None) -> float:
     return PACKING_FACTORS.get(cls, PACKING_FACTORS["default"])
 
 
+_MAX_POSITIVE_OS = {"H": 1, "C": 4, "N": 5, "O": 2, "F": 1, "P": 5, "S": 6,
+                    "Cl": 7, "Se": 6, "Br": 7, "Te": 6, "I": 7,
+                    "Sb": 5}   # Sb(V); Sb has no Shannon entry to read it from
+
+
+def _max_positive_os(sym: str) -> int:
+    if sym in _MAX_POSITIVE_OS:
+        return _MAX_POSITIVE_OS[sym]
+    states = [k for k in SHANNON_IONIC_RADII.get(sym, {}) if k > 0]
+    return max(states) if states else 4
+
+
+def anion_elements(composition) -> set:
+    """Which elements act as ANIONS in this compound, decided by charge balance.
+
+    Membership of the anion table is not enough on its own: tellurium is the
+    anion in CdTe and the cation in TeO2, sulfur the anion in ZnS and the
+    cation in a sulfate, hydrogen the anion in LiH and the cation in a
+    hydroxide. So every element on the anion table starts as a candidate
+    anion, and while the cations present cannot supply the positive charge the
+    candidates demand, the least electronegative candidate is promoted to
+    cation. This reproduces the chemistry without a lookup table of exceptions:
+    La2O2S balances with sulfur as an anion and keeps it, H2SO4 does not and
+    promotes first hydrogen then sulfur, leaving the sulfate O as the anion.
+
+    A promotion happens only when it brings the compound CLOSER to charge
+    balance, which is what keeps real cells intact without any tolerance
+    setting. In a chalcogen-rich glass or a doped cell, promoting the major
+    anion would overshoot far past neutrality (Ge20S10Se70: a gap of 80 before,
+    480 after; F-doped silica: 2 before, 254 after), so every anion is kept:
+    the mixed chalcogen glasses keep Ge-Se and Ge-Te, F-doped silica keeps
+    Si-O, an O impurity in NaCl keeps Na-Cl and LiPON keeps P-N. Where a
+    promotion really is the chemistry, it improves the balance and happens:
+    TeO2, a tellurite, a sulfate, a nitrate, a hydroxide.
+
+    Known limitation: an element that is a cation in one site of a polyatomic
+    group and an anion in another cannot be both. In a thiosulfate the central
+    sulfur is cation-like and the terminal sulfur is an anion; the rule keeps
+    both as anions, so the S-O bonds are not counted. Rare in amorphous work.
+
+    ``composition`` may be a mapping of counts (preferred) or a bare set of
+    symbols, in which case one of each is assumed.
+    """
+    counts = (dict(composition) if hasattr(composition, "items")
+              else {e: 1 for e in composition})
+    anions = {e for e in counts if e in ANION_CHARGES}
+    if not anions:
+        return set()
+
+    def imbalance(anion_set):
+        """Positive charge the cations can supply minus what the anions demand."""
+        cations = set(counts) - anion_set
+        return (sum(_max_positive_os(e) * counts[e] for e in cations)
+                - sum(-ANION_CHARGES[e] * counts[e] for e in anion_set))
+
+    # The most electronegative element is always an anion, so it is never a
+    # candidate: an off-stoichiometry cell (a random Ga16Zn16O48 composition, a
+    # defective model) must not end up with no anion at all.
+    for candidate in sorted(anions, key=lambda e: PAULING_EN.get(e, 2.0))[:-1]:
+        before = imbalance(anions)
+        if before >= 0:
+            break                       # the cations already cover the anions
+        trial = anions - {candidate}
+        if abs(imbalance(trial)) < abs(before):
+            anions = trial
+    return anions
+
+
 def _radius_for_density(sym: str, cls: str,
                         composition: dict | None = None) -> float:
     """Pick the radius type appropriate for the composition's bonding character.
@@ -1423,14 +1645,22 @@ def _radius_for_density(sym: str, cls: str,
     # supplied; falls back to "highest positive" inside get_ionic_radius
     # if inference returns None.
     ox = infer_oxidation_state(sym, composition) if composition else None
-    # A non-metal acting as the CATION of an oxide (P in P2O5, S in SO3,
-    # Te in TeO2) must take its highest positive Shannon state; the anion
+    # A non-metal acting as the CATION of an oxide (P in P2O5, S in SO3, Se in
+    # SeO2, Te in TeO2) must take its highest positive Shannon state; the anion
     # default would hand back P3- (2.12 A) and shrink the density threefold.
+    # Gated on the element actually being a cation here, which charge balance
+    # decides (cation_nonmetals): the Cl of an oxychloride, the N of an
+    # oxynitride and the carbide C of an oxycarbide (SiOC) are anions and keep
+    # their anion radii.
     if (ox is None and composition and "O" in composition and sym != "O"
-            and sym in NONMETALS):
+            and sym in NONMETALS and sym in cation_nonmetals(composition)):
         positive = [k for k in SHANNON_IONIC_RADII.get(sym, {}) if k > 0]
         if positive:
             ox = max(positive)
+        else:
+            # promoted but no positive state tabulated: the anion radius would
+            # be ~4x too large, so use the covalent radius instead
+            return covalent_radii[atomic_numbers[sym]]
     # Antimony is oxidation-state split: Sb(V) is d0 and octahedral with no lone
     # pair, so it uses its small ionic radius like Nb(V)/Ta(V) (dense oxides such
     # as Sb2O5). Sb(III) has a stereochemically active lone pair giving open
@@ -1511,7 +1741,9 @@ def estimate_cell_length(composition: dict, target_density: float | None = None,
 
         total_sphere_vol = 0.0
         for sym, count in composition.items():
-            r = _radius_for_density(sym, cls, composition=composition)
+            # a cation with a negative Shannon radius (H+) sits inside its
+            # anion's sphere and adds no volume
+            r = max(_radius_for_density(sym, cls, composition=composition), 0.0)
             total_sphere_vol += count * (4.0 / 3.0) * np.pi * r ** 3
         vol_A3 = total_sphere_vol / (packing_factor * density_scale)
 
@@ -1569,14 +1801,17 @@ def format_auto_derive_summary(
 
     # Per-pair: minsep + bond class label (+ Δχ for ionic)
     pair_parts = []
+    centres = cation_nonmetals(composition)
     for pair in sorted(minsep):
         a, b = pair.split("-")
         d = minsep[pair]
-        if a == b and a in NONMETALS:
+        if a == b and a in NONMETALS and a not in centres:
             label = "anion-pack"
         else:
-            pair_cls = classify_bond(a, b)
-            if pair_cls == "ionic":
+            # the classification default_minsep used; Δχ only where it is
+            # the reason (not for the bond of a nonmetal cation, e.g. N-O)
+            pair_cls = classify_bond(a, b, composition)
+            if pair_cls == "ionic" and classify_bond(a, b) == "ionic":
                 dchi = abs(PAULING_EN.get(a, 0.0) - PAULING_EN.get(b, 0.0))
                 label = f"ionic Δχ={dchi:.2f}"
             elif pair_cls == "metallic":

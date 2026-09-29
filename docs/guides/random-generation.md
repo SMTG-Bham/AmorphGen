@@ -18,6 +18,8 @@ For each element pair, the bond type is classified and the appropriate radii are
 | Metalloid (Si-Si) in oxide | max(metallic, sqrt(2)*d(Si-O)*0.85) | cap 2.80 | Si-Si: max(1.99, 2.12) = 2.12 |
 | Small anion (O-O) | Shannon ionic | 0.80 | O-O: (1.40+1.40)*0.80 = 2.24 |
 | Large anion (Cl-Cl) | Shannon ionic | 0.70 | Cl-Cl: (1.81+1.81)*0.70 = 2.53 |
+| Nonmetal cation to anion (P-O, S-O, C-O) | Shannon cation radius (top state, lowest CN) | 0.80 | P-O: (0.17+1.40)*0.80 = 1.26 |
+| Nonmetal cation to cation | sqrt(2)*d(X-O), or 2*d(X-O) for the same element | 0.85, cap 2.80 | P-P: 2*(0.17+1.40)*0.85 = 2.67 |
 
 When `--target-cn` is provided, CN-specific Shannon radii are used (e.g. Si CN=4: 0.26 A vs CN=6: 0.40 A), giving tighter minsep values.
 
@@ -56,6 +58,16 @@ The Δχ = 1.0 threshold sits exactly where chemistry genuinely gets ambiguous: 
 | BN   | B–N  | 1.00 | ionic (nitride) | ionic (stays, strict `<`) | Sits exactly on cutoff |
 
 These disagreements are **benign**: the bond classifier governs which radii produce the per-pair `minsep`, while the material classifier governs which radii produce the density estimate. The two answer different questions, and any modest inconsistency at the boundary is absorbed by the subsequent MLIP relaxation. If you generate one of these systems and the auto-derived density looks off (typically ±15–20% from experiment), set `--target-density` explicitly to bypass the auto path for that composition.
+
+#### Nonmetal cations: oxoanions and hydroxides
+
+In a phosphate, a sulfate or a carbonate, the P, S or C is a nonmetal but it is the cation of its oxoanion, and in a hydroxide the H is. Which nonmetals are cations is decided by charge balance (`radii.cation_nonmetals`): an element of the anion table is promoted to cation when that brings the compound closer to neutrality, and C and P are cations when an anion more electronegative than them is present and they balance the charge better as cations than as C⁴⁻ / P³⁻. So the P of Li₃PO₄ and Li₃PS₄, the S of Li₂SO₄, the C of CaCO₃ and the H of Mg(OH)₂ are cations, while the carbide C of SiOC, the P of InP and the S of La₂O₂S stay anions. A nonmetal cation:
+
+- bonds to its anions at its Shannon cation radius (P-O 1.26, S-O 1.22, C-O 1.06, O-H 0.82 Å, about 0.8 of the bond, as for Si-O);
+- targets the ligand count of its oxoanion: 4 in PO₄³⁻, SO₄²⁻ and ClO₄⁻, 3 in CO₃²⁻, NO₃⁻, IO₃⁻ and a sulfite, 1 for H;
+- takes its oxidation state from the same charge balance (S⁶⁺ in Li₂SO₄, which leaves Li⁺), and is sized as that cation in the density estimate.
+
+With a composition, `classify_bond(sym_a, sym_b, composition)` applies these roles: a nonmetal cation and an anion are `ionic`, a nonmetal cation and another cation are `cation-cation` (a second-shell contact across the anion, never a bond), and two cations of a compound with anions are never `ionic`. That last rule is why Na-B in a borate and K-Si in a silicate are placed 2.16 and 2.75 Å apart, like Na-Si, rather than as the ionic bond their Δχ ≥ 1 would suggest.
 
 ### Automated density
 
@@ -128,7 +140,7 @@ Each field:
 | `minsep{pair:value class [Δχ=val]}` | Per-pair: bond class + Pauling Δχ (shown only when the ionic classification is at stake) + minsep value in Å |
 | `ρ=… g/cm³  L=… Å` | Auto-estimated mass density and cubic cell length |
 
-The line is grep-friendly: `grep "auto-derive" random_gen.log` retrieves it as a single line per generation run. Bond classes shown are `ionic`, `covalent`, `metallic`, and `anion-pack` (same-element nonmetal pairs use a separate anion-packing scale factor, see "Bond-type classifier" above).
+The line is grep-friendly: `grep "auto-derive" random_gen.log` retrieves it as a single line per generation run. Bond classes shown are `ionic`, `covalent`, `metallic`, `cation-cation` (a nonmetal cation and another cation, see "Nonmetal cations" above), and `anion-pack` (same-element anion pairs use a separate anion-packing scale factor, see "Bond-type classifier" above).
 
 ## CLI examples
 
