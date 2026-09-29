@@ -404,6 +404,13 @@ orphan: true
   coordination number a diffraction paper would quote. This is NOT the unweighted
   `--total-rdf` curve: for a multi-element system the scattering weights matter, and
   in IGZO the indium correlations dominate the X-ray weighted one.
+- **`--tr-scan`**: sweeps the T(r) transform choices, qmax and the window, and reports how
+  far the first peak and its integrated count move (`rdf.scan_Tr_qmax()`,
+  `rdf.format_Tr_scan()`). Those two are properties of the measurement, not of the model,
+  so a comparison should carry that spread rather than imply a precision the transform
+  does not have. On a-IGZO the first peak sits at 2.08-2.13 A across qmax 12-25 with a
+  Lorch window; without one the truncation ripple splits it above qmax 20 and the count
+  collapses from 2.9 to 0.7, which the table makes obvious.
 - **A relaxation no longer reports a false placement stall.** The density line added
   with the warning above was printed after `--relax` had moved the cell, so it compared
   the relaxed density with the placement target and claimed "placement stalled and the

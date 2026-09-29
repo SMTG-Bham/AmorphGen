@@ -322,6 +322,7 @@ analysis:
   tr: true                # total correlation function T(r) = 4 pi r rho g(r)
   tr_qrange: [0.3, 20.0]  # integration limits (1/A); match the experiment
   tr_window: lorch        # lorch | none
+  tr_scan: true           # sweep qmax / window and report the spread
   rings: true             # or a nodes-bridge pair such as Ge-O
   voronoi: Ge             # or true for all atoms
   connectivity: true      # corner/edge/face sharing of cation polyhedra

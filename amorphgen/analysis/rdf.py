@@ -900,6 +900,67 @@ def coordination_from_Tr(result, r_lo, r_hi):
     return float(_trapezoid(r[m] * T[m], r[m]))
 
 
+def scan_Tr_qmax(atoms_list, qmax_values=(12.0, 15.0, 18.0, 20.0, 22.0, 25.0),
+                 windows=("lorch", None), weighting="xray", qmin=0.3, **kw):
+    """How much do the transform choices move T(r)?
+
+    ``qmax`` and the window are not properties of the model: they belong to the
+    measurement being compared with, and both change the curve. This sweeps them
+    and reports, for each combination, the first peak position and the weighted
+    count under it, so a comparison can state its sensitivity instead of
+    implying a precision the transform does not have.
+
+    Returns a list of dicts with ``qmax``, ``window``, ``r_peak``, ``r_lo``,
+    ``r_hi``, ``count`` and the full ``result``, plus ``None`` entries where the
+    transform had too little of S(Q) to work with.
+    """
+    atoms_list = list(atoms_list)
+    rows = []
+    for w in windows:
+        for qm in qmax_values:
+            try:
+                res = compute_total_correlation(atoms_list, weighting=weighting,
+                                                qmin=qmin, qmax=qm, window=w, **kw)
+            except ValueError as exc:
+                rows.append({"qmax": float(qm), "window": w, "error": str(exc)})
+                continue
+            pk, lo, hi = first_Tr_peak(res)
+            rows.append({"qmax": float(qm), "window": w, "r_peak": pk,
+                         "r_lo": lo, "r_hi": hi,
+                         "count": (coordination_from_Tr(res, lo, hi)
+                                   if pk is not None else None),
+                         "result": res})
+    return rows
+
+
+def format_Tr_scan(rows) -> str:
+    """Readable table of :func:`scan_Tr_qmax`, with the spread over the sweep."""
+    out = ["", "  T(r) transform sensitivity (first peak and the weighted count under it)",
+           f"  {'window':<8}{'qmax':>7}{'r_peak':>9}{'window r':>14}{'count':>9}",
+           "  " + "-" * 48]
+    ok = [r for r in rows if r.get("r_peak") is not None]
+    for r in rows:
+        w = r["window"] or "none"
+        if "error" in r:
+            out.append(f"  {w:<8}{r['qmax']:7.1f}   {r['error'][:36]}")
+        elif r["r_peak"] is None:
+            out.append(f"  {w:<8}{r['qmax']:7.1f}      no resolved first peak")
+        else:
+            out.append(f"  {w:<8}{r['qmax']:7.1f}{r['r_peak']:9.2f}"
+                       f"{r['r_lo']:7.2f}-{r['r_hi']:<6.2f}{r['count']:9.2f}")
+    if ok:
+        out.append("  " + "-" * 48)
+        for w in dict.fromkeys(r["window"] for r in ok):          # keep the order
+            grp = [r for r in ok if r["window"] == w]
+            pk = [r["r_peak"] for r in grp]; ct = [r["count"] for r in grp]
+            out.append(f"  {w or 'none':<8} spread: r_peak {min(pk):.2f}-{max(pk):.2f} A "
+                       f"({max(pk) - min(pk):.2f} A), count {min(ct):.2f}-{max(ct):.2f}")
+        out += ["  Quote a result with the spread of the window you used, not to more",
+                "  digits than it. A count that collapses as qmax grows is the",
+                "  termination ripple splitting the first peak: use the Lorch window."]
+    return "\n".join(out)
+
+
 def compute_averaged_rdf(atoms_list, pair=None, rmax=None, nbins=200):
     """Compute RDF per structure with mean and std."""
     if rmax is None:

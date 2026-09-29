@@ -875,3 +875,38 @@ class TestTotalCorrelationFunction:
         i = int(np.argmin(np.abs(r - pk)))
         assert T[i] >= T[i - 1] and T[i] >= T[i + 1]
         assert pk <= r[int(np.argmax(T))]
+
+    def test_qmax_window_sensitivity_scan(self):
+        """The q range and the window belong to the measurement, not the model,
+        and both move T(r). The scan reports that spread; with a Lorch window
+        the first peak is stable, without one the truncation ripple eventually
+        splits it and the integrated count collapses."""
+        from ase import Atoms
+        import numpy as np
+        from amorphgen.analysis.rdf import scan_Tr_qmax, format_Tr_scan
+        rng = np.random.default_rng(5)
+        a = Atoms("In8Ga8Zn8O32", positions=rng.uniform(0, 12, (56, 3)),
+                  cell=[12] * 3, pbc=True)
+        rows = scan_Tr_qmax([a], qmax_values=(14.0, 18.0, 22.0), qmin=0.6)
+        assert len(rows) == 6                       # two windows x three qmax
+        lorch = [r for r in rows if r["window"] == "lorch" and r.get("r_peak")]
+        assert len(lorch) == 3
+        pk = [r["r_peak"] for r in lorch]
+        assert max(pk) - min(pk) < 0.25             # stable under the window
+        txt = format_Tr_scan(rows)
+        assert "sensitivity" in txt and "lorch" in txt and "spread" in txt
+        # a range with nothing in it is reported, not raised
+        bad = scan_Tr_qmax([a], qmax_values=(5.0,), qmin=30.0, windows=("lorch",))
+        assert "error" in bad[0] and "usable S(Q)" in bad[0]["error"]
+
+    def test_cli_tr_scan_flag(self, tmp_path, monkeypatch, capsys):
+        import sys
+        from ase.io import write
+        from amorphgen.cli import main
+        src = tmp_path / "cu.xyz"
+        write(str(src), self._fcc_cu(), format="extxyz")
+        monkeypatch.setattr(sys, "argv", ["amorphgen", "--analyse", str(src),
+                                          "--tr", "--tr-scan", "--tr-qrange", "0.5", "25"])
+        main()
+        out = capsys.readouterr().out
+        assert "T(r) transform sensitivity" in out and "spread:" in out

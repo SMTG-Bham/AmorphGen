@@ -422,6 +422,12 @@ def _add_arguments(p):
                       help="Window for the --tr transform: 'lorch' damps the "
                            "qmax truncation ripple (default), 'none' leaves it. "
                            "Match whichever the paper used.")
+    g_an.add_argument("--tr-scan", action="store_true",
+                      help="With --tr: sweep the transform choices (qmax and the "
+                           "window) and print how far the first T(r) peak and its "
+                           "integrated count move. The q range belongs to the "
+                           "measurement, not the model, so this is the honest "
+                           "error bar on a comparison.")
     g_an.add_argument("--pair-panels", action="store_true",
                       help="Also plot each element pair in its own panel: "
                            "analysis_rdf_panels.png for g(r) and, with "
@@ -1465,6 +1471,12 @@ def main():
                     print(f"  first T(r) peak at r = {pk:.2f} A "
                           f"({r_lo:.2f}-{r_hi:.2f} A, weighted count {n_first:.2f}); "
                           f"rho = {tr['rho']:.4f} atoms/A^3")
+                if args.tr_scan or an_cfg.get("tr_scan", False):
+                    from .analysis.rdf import scan_Tr_qmax, format_Tr_scan
+                    rows = scan_Tr_qmax(sa.atoms_list, weighting=tr_w, qmin=qlo)
+                    scan_text = format_Tr_scan(rows)
+                    print(scan_text)
+                    text += "\n" + scan_text
                 if plot_dir:
                     from .analysis.plotting import plot_tr
                     plot_tr(tr, output_dir=plot_dir,
