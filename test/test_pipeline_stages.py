@@ -259,29 +259,31 @@ class TestGlobalSeedReproducibility:
 
 
 def test_run_seed_index_priority(tmp_path, monkeypatch):
-    """Review round 5: the index that seeds each run's velocities and thermostat
+    """Review round 6: the index that seeds each run's velocities and thermostat
     noise. Explicit --run-index first, then the snapshot_NNNN identity, then the
-    SLURM array task, then the loop position; and no two runs of any two jobs
-    may share one index."""
-    from amorphgen.pipeline.batch_quench import _run_seed_index as idx
+    SLURM array task, then the loop position -- and no two runs of any two jobs
+    may share an index. The snapshot numbers here are deliberately NOT equal to
+    the loop positions, so a rule that ignored the filename would fail."""
+    from amorphgen.pipeline.batch_quench import _run_seed_index as idx, _ARRAY_STRIDE
     monkeypatch.delenv("SLURM_ARRAY_TASK_ID", raising=False)
-    # the snapshot's own number wins over the loop position and survives resumes
+    # the snapshot's own number, not the loop position
     assert idx("snapshot_0007_frame01.xyz", 0, None, True) == 7
-    assert idx("snapshot_0007_frame01.xyz", 3, None, False) == 7
-    # plain filenames outside SLURM still differ from each other
+    assert idx("snapshot_0003_frame88.xyz", 1, None, False) == 3
+    assert [idx(f"snapshot_{n:04d}.xyz", i, None, False)
+            for i, n in enumerate((7, 3, 11))] == [7, 3, 11]
+    # plain filenames outside SLURM fall back to the loop position
     assert [idx(f"s{k}.xyz", k, None, False) for k in range(3)] == [0, 1, 2]
-    # array tasks that each take ONE structure and share a --seed must not collide
-    monkeypatch.setenv("SLURM_ARRAY_TASK_ID", "4")
-    assert idx("s.xyz", 0, None, True) == 4 * 100000
-    monkeypatch.setenv("SLURM_ARRAY_TASK_ID", "5")
-    assert idx("s.xyz", 0, None, True) == 5 * 100000
+    # a single-snapshot run under SLURM takes the array task, scoped
+    for task in ("4", "5"):
+        monkeypatch.setenv("SLURM_ARRAY_TASK_ID", task)
+        assert idx("s.xyz", 0, None, True) == int(task) * _ARRAY_STRIDE
     monkeypatch.delenv("SLURM_ARRAY_TASK_ID")
-    # an explicit index is honoured, and two jobs with different indices and
-    # several snapshots each produce disjoint sets
-    assert idx("s.xyz", 0, 3, True) == 3
-    job0 = {idx(f"s{k}.xyz", k, 0, False) for k in range(4)}
-    job1 = {idx(f"s{k}.xyz", k, 1, False) for k in range(4)}
-    assert not (job0 & job1)
+    # an explicit index is scoped too, single run or not, so no two jobs overlap
+    jobs = [{idx(f"s{k}.xyz", k, base, n == 1) for k in range(n)}
+            for base, n in ((0, 3), (1, 1), (2, 5))]
+    for a in range(len(jobs)):
+        for c in range(a + 1, len(jobs)):
+            assert not (jobs[a] & jobs[c]), (a, c, jobs[a] & jobs[c])
 
 
 def test_batch_quench_assigns_distinct_seed_indices(tmp_path, monkeypatch):
@@ -292,8 +294,10 @@ def test_batch_quench_assigns_distinct_seed_indices(tmp_path, monkeypatch):
     from ase.io import write
     from amorphgen.pipeline import batch_quench as bq
     src = tmp_path / "in"; src.mkdir()
-    for k in range(3):
-        write(str(src / f"snapshot_{k:04d}_f.xyz"), bulk("Cu", cubic=True), format="extxyz")
+    # numbered out of order on purpose: the index must come from the FILENAME,
+    # not from the position in the sorted loop
+    for n in (7, 3, 11):
+        write(str(src / f"snapshot_{n:04d}_f.xyz"), bulk("Cu", cubic=True), format="extxyz")
     seen = []
 
     def fake_eq(atoms, cfg_override=None, **kw):
@@ -306,4 +310,4 @@ def test_batch_quench_assigns_distinct_seed_indices(tmp_path, monkeypatch):
         bq.run([str(p) for p in sorted(src.glob("*.xyz"))],
                cfg_override={"model": "lennard-jones"}, work_dir=str(tmp_path / "w"),
                stages=[4])
-    assert seen == [0, 1, 2], seen            # the snapshot numbers, not all zero
+    assert seen == [3, 7, 11], seen          # the snapshot numbers, not the loop positions

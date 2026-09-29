@@ -50,6 +50,20 @@ def build_neighbour_dict(atoms, cutoff, get_cutoff_fn):
 # a same-element metal pair is a first-shell bond above this metal fraction
 _METAL_RICH_BOND_FRACTION = 0.70
 
+# Slack on the charge-balance test below. Real cells are doped, off
+# stoichiometry or defective (F-doped silica, an O impurity in NaCl, LiPON),
+# and a formal-charge balance that has to close exactly would turn the major
+# anion of such a cell into a cation.
+_CHARGE_BALANCE_TOLERANCE = 0.15
+
+# Only oxygen and fluorine are electronegative enough to drive a chalcogen or
+# pnictogen into a positive oxidation state (tellurites, selenites, sulfates,
+# nitrates). Without one of them present, S, Se, Te, N and the halogens stay
+# anions however the formal charges add up, which is what keeps the mixed
+# chalcogen glasses (Ge-S-Se, Ge-Se-Te) right. Hydrogen is the exception: it
+# is the cation in anything but a hydride.
+_OXIDISERS = frozenset({"O", "F"})
+
 _MAX_POSITIVE_OS = {"H": 1, "C": 4, "N": 5, "O": 2, "F": 1, "P": 5, "S": 6,
                     "Cl": 7, "Se": 6, "Br": 7, "Te": 6, "I": 7}
 
@@ -78,6 +92,13 @@ def anion_elements(composition) -> set:
     La2O2S balances with sulfur as an anion and keeps it, H2SO4 does not and
     promotes first hydrogen then sulfur, leaving the sulfate O as the anion.
 
+    Two guards keep real cells intact. The balance test has a tolerance
+    (:data:`_CHARGE_BALANCE_TOLERANCE`), so a dopant or a defect cannot flip
+    the major anion: F-doped silica keeps Si-O, an O impurity in NaCl keeps
+    Na-Cl, LiPON keeps P-N. And a chalcogen or pnictogen is only ever promoted
+    when oxygen or fluorine is present to oxidise it, so the mixed chalcogen
+    glasses (Ge-S-Se, Ge-Se-Te, Ge-Sb-Te) keep every chalcogen as an anion.
+
     ``composition`` may be a mapping of counts (preferred) or a bare set of
     symbols, in which case one of each is assumed.
     """
@@ -95,10 +116,13 @@ def anion_elements(composition) -> set:
     # demotion candidate: an off-stoichiometry cell (a random Ga16Zn16O48 test
     # composition, a defective model) must not end up with no anion at all.
     least_first = sorted(anions, key=lambda e: PAULING_EN.get(e, 2.0))[:-1]
+    has_oxidiser = bool(anions & _OXIDISERS)
     for candidate in least_first:
+        if candidate != "H" and not has_oxidiser:
+            continue                     # nothing here can oxidise it
         positive = sum(_max_positive_os(e) * counts[e] for e in cations)
         negative = sum(-ANION_CHARGES[e] * counts[e] for e in anions)
-        if positive >= negative:
+        if positive >= negative * (1.0 - _CHARGE_BALANCE_TOLERANCE):
             break
         anions.discard(candidate)
         cations.add(candidate)

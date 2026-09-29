@@ -334,6 +334,21 @@ orphan: true
 
 ### Fixed after the rc4 upload (on GitHub main; not in the rc4 wheel on PyPI)
 
+- **Review round 6 (2026-09-29): two guards on the charge-balance rule, and the last
+  seed collision.** The bare balance test of round 5 was too literal in two ways.
+  *Mixed-chalcogen glasses*: with S and Se, or Se and Te, present and no oxidiser, the
+  less electronegative chalcogen was promoted to cation, so Ge-S-Se lost Ge-Se and
+  gained S-Se, and Ge-Se-Te lost Ge-Te. A chalcogen or pnictogen is now only ever
+  promoted when oxygen or fluorine is present to oxidise it, which is what makes a
+  tellurite a tellurite and leaves every chalcogenide glass alone. *Doped and defect
+  cells*: one extra atom was enough to flip the major anion, so F-doped silica lost
+  Si-O, an O impurity in NaCl lost Na-Cl and LiPON lost P-N. The balance test now has a
+  15 % tolerance. Checked on 25 compositions covering both failure modes plus the cases
+  round 5 fixed. *Seed collision*: an explicit `--run-index` was scoped by position for
+  a multi-snapshot job but used bare for a single-snapshot one, so job B at index 1
+  collided with job A's second run; the stride now applies in both cases. The run-index
+  tests were also rewritten, since their snapshot numbers had equalled the loop
+  positions and would have passed with the filename rule removed.
 - **Review round 5 (2026-09-29): which elements are anions is now decided by charge
   balance.** Round 4 replaced a fixed anion list with a set of special cases, and the
   special cases were wrong in turn: tellurium and selenium went back to being anions as

@@ -717,3 +717,29 @@ class TestBondingPairRules:
         assert ae({"Si": 30, "O": 40}) == {"O"}
         assert self._b("Ga", "O", {"Ga": 16, "Zn": 16, "O": 48})
         assert not self._b("Ga", "Zn", {"Ga": 16, "Zn": 16, "O": 48})
+
+    def test_mixed_chalcogen_glasses_keep_every_chalcogen_as_an_anion(self):
+        """Review round 6: with two chalcogens and no oxidiser present, neither
+        may be promoted to cation (Ge-S-Se, Ge-Se-Te, Ge-Sb-Te)."""
+        from amorphgen.analysis.structure import anion_elements as ae
+        assert ae({"Ge": 20, "S": 10, "Se": 70}) == {"S", "Se"}
+        assert ae({"Ge": 20, "Se": 40, "Te": 40}) == {"Se", "Te"}
+        assert ae({"Ge": 2, "Sb": 2, "Te": 5}) == {"Te"}
+        assert self._b("Ge", "Se", {"Ge": 20, "S": 10, "Se": 70})
+        assert self._b("Ge", "Te", {"Ge": 20, "Se": 40, "Te": 40})
+        assert not self._b("S", "Se", {"Ge": 20, "S": 10, "Se": 70})
+        assert not self._b("Se", "Te", {"Ge": 20, "Se": 40, "Te": 40})
+
+    def test_dopants_and_defects_do_not_flip_the_major_anion(self):
+        """A single dopant or defect atom must not turn the major anion into a
+        cation: the charge-balance test has a tolerance."""
+        from amorphgen.analysis.structure import anion_elements as ae
+        assert ae({"Si": 32, "O": 64, "F": 2}) == {"O", "F"}      # F-doped silica
+        assert ae({"Na": 32, "Cl": 32, "O": 1}) == {"Cl", "O"}    # O impurity in NaCl
+        assert ae({"Li": 29, "P": 10, "O": 33, "N": 5}) == {"O", "N"}   # LiPON
+        assert self._b("Si", "O", {"Si": 32, "O": 64, "F": 2})
+        assert self._b("Na", "Cl", {"Na": 32, "Cl": 32, "O": 1})
+        assert self._b("P", "N", {"Li": 29, "P": 10, "O": 33, "N": 5})
+        assert not self._b("N", "O", {"Li": 29, "P": 10, "O": 33, "N": 5})
+        # ... while a real tellurite still promotes Te, oxidiser present
+        assert ae({"Na": 2, "Te": 1, "O": 4}) == {"O"}

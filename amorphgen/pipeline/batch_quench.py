@@ -44,7 +44,10 @@ def _run_seed_index(snap_file: str, loop_idx: int, explicit, single_run: bool) -
       4. the position in the loop.
     """
     if explicit is not None:
-        return int(explicit) if single_run else int(explicit) * _ARRAY_STRIDE + loop_idx
+        # the stride applies to a single-snapshot run too: without it, job B
+        # with --run-index 1 and one snapshot would land on the same index as
+        # job A's second run with --run-index 0
+        return int(explicit) * _ARRAY_STRIDE + loop_idx
     m = re.match(r"snapshot[_-]?(\d+)",
                  os.path.splitext(os.path.basename(snap_file))[0])
     if m:
