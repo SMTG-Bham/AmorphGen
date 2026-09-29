@@ -61,7 +61,7 @@ request to `main` and `dev`:
 | `test` | the torch-free suite on Python 3.10 to 3.14 on Linux, and on 3.14 on macOS and Windows |
 | `backends` | the full suite with CPU-only PyTorch, the torch-sim engine and CHGNet, with a coverage report |
 | `min-deps` | the suite on Python 3.10 with every dependency at the lowest version `pyproject.toml` allows |
-| `package` | the sdist and wheel build, and the suite run against the installed wheel |
+| `package` | the sdist and wheel build, the README links as PyPI renders them, and the sdist's tests run against the installed wheel |
 | `light-install` | a bare `pip install` (no extras) stays torch-free |
 
 The documentation builds with Sphinx warnings as errors (`docs.yml`), the
@@ -74,7 +74,8 @@ run outside CI, before releases.
 To run the `backends` or `min-deps` job locally:
 
 ```bash
-# backends
+# backends; the torch-sim tests need a C/C++ compiler on PATH (the conda
+# development environment installs one)
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -e ".[torchsim,chgnet,dev]"
 pytest test/

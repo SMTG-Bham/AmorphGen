@@ -498,3 +498,21 @@ orphan: true
   figures on the caller's backend, so a notebook shows them inline, including those of
   `convergence_report()` without `output_dir`. Without a display, as on a compute node,
   matplotlib picks Agg by itself.
+- **The sdist's tests could not run.** setuptools puts only `test/test*.py` in the sdist,
+  so `test/conftest.py` was missing: from an unpacked sdist 45 tests errored for want of
+  their fixtures, and the MACE tests, which it skips unless `--run-mace` is given, ran
+  and failed. `MANIFEST.in` now adds every module under `test/`. The `package` CI job,
+  which ran the checkout's copy of the suite, now runs the sdist's.
+- **The torch-sim engine's compiler requirement was undocumented.** torch-sim's
+  neighbour list goes through `torch.compile`, which builds kernels with the system C/C++
+  compiler, so without one the first relaxation stops with `InvalidCxxCompiler`. The
+  installation page, the quickstart, the backends and HPC guides, the README and
+  `build_tools/README.md` now say so, and the installation page gives the commands that
+  install a compiler.
+- **README links that 404 on PyPI.** The links to the licence, `build_tools/` and the
+  tutorials were relative, and PyPI resolves them against pypi.org. They now point at
+  GitHub, and the `package` job renders the README as PyPI does and fails on a relative
+  link (`twine check` does not render Markdown, so it passed them).
+- **`draft-pdf.yml` removed.** It built the JOSS draft from `paper/`, which was deleted
+  in June, so it could no longer run. The README's package layout no longer lists
+  `paper/`.

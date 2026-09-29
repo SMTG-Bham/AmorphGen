@@ -151,7 +151,7 @@ batched MLIP call with automatic GPU memory management. AmorphGen can hand the
 ensemble modes to it:
 
 ```bash
-pip install "amorphgen[torchsim]"          # Python >= 3.12; CUDA GPU or CPU (no Apple MPS)
+pip install "amorphgen[torchsim]"          # Python >= 3.12 and a C/C++ compiler; CUDA GPU or CPU (no Apple MPS)
 
 amorphgen --batch-opt --input-dir random_structures/random_initial/ \
     -m mace-mpa-0 --engine torchsim -o relaxed/
@@ -164,6 +164,12 @@ use it: all structures are relaxed together with torch-sim's FIRE optimiser
 instead of one after another through ASE. Output files, names and logs are the
 same as with the ASE engine, so `--analyse` and everything downstream is
 unchanged.
+
+The engine needs a C/C++ compiler wherever it runs, and pip does not install one:
+torch-sim's neighbour list goes through `torch.compile`, and without a compiler
+the first relaxation stops with `InvalidCxxCompiler`. See
+[the installation page](../getting-started/installation.md#the-torch-sim-engine)
+for how to get one.
 
 What carries over: `-f/--fmax`, `--opt-steps`, `-O` (LBFGS by default, or FIRE, BFGS,
 gradient descent) and the cell filter (`cubic` maps

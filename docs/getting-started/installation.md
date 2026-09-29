@@ -7,6 +7,8 @@
 - ASE (Atomic Simulation Environment)
 - An MLIP backend **only** for MLIP relaxation / melt-quench MD; the base
   install is deliberately torch-free
+- A C/C++ compiler **only** for the torch-sim engine
+  ([see below](#the-torch-sim-engine))
 
 ## Pick the install for your task
 
@@ -15,7 +17,7 @@
 | generate random structures, analyse trajectories (RDF, CN, S(q), plots), classical LJ/Buckingham pipelines | `pip install amorphgen` (~80 MB, no PyTorch) |
 | MLIP relaxation & melt-quench MD | `pip install "amorphgen[mace]"` or `"amorphgen[chgnet]"` |
 | everything (MACE + CHGNet) | `pip install "amorphgen[all]"` |
-| batched GPU relaxation and MD of ensembles (`--engine torchsim`) | `pip install "amorphgen[mace,torchsim]"` (Python 3.12+) |
+| batched GPU relaxation and MD of ensembles (`--engine torchsim`) | `pip install "amorphgen[mace,torchsim]"` (Python 3.12+, and a C/C++ compiler) |
 
 On a torch-free install, `--device auto` resolves to CPU and any
 calculator-requiring command fails fast with the exact install line to copy.
@@ -54,12 +56,6 @@ pip install "amorphgen[all,dev]"
 pip install "amorphgen[mace,torchsim]"
 ```
 
-The `[torchsim]` extra adds a second execution engine (`--engine torchsim`)
-that relaxes, anneals and quenches all structures of an ensemble in one
-batched call. It needs Python 3.12 and a CUDA GPU or CPU (Apple MPS is not
-supported) and works with MACE, SevenNet and Lennard-Jones. Everything else
-runs unchanged on the default ASE engine. See {doc}`../guides/backends`.
-
 :::{warning}
 Do not install MACE and SevenNet in the same environment: SevenNet
 depends on `e3nn>=0.5`, while pre-trained MACE foundation models
@@ -86,6 +82,30 @@ pip install "amorphgen[sevennet,chgnet]"
 CHGNet has no `e3nn` dependency and is safe alongside either backend.
 See {doc}`../guides/backends` for the full explanation of the conflict.
 :::
+
+### The torch-sim engine
+
+The `[torchsim]` extra adds a second execution engine (`--engine torchsim`)
+that relaxes, anneals and quenches all structures of an ensemble in one
+batched call. It needs Python 3.12 and a CUDA GPU or CPU (Apple MPS is not
+supported) and works with MACE, SevenNet and Lennard-Jones. Everything else
+runs unchanged on the default ASE engine. See {doc}`../guides/backends`.
+
+It also needs a C/C++ compiler wherever it runs, and pip cannot install one:
+torch-sim's neighbour list goes through `torch.compile`, which builds its
+kernels with the system compiler the first time it runs. Without one, the first
+relaxation stops with `InvalidCxxCompiler: No working C++ compiler found`. Most
+Linux machines and clusters have gcc already (`g++ --version` prints its
+version); otherwise install one:
+
+```bash
+sudo apt install build-essential                       # Ubuntu, Debian, WSL
+conda install -c conda-forge c-compiler cxx-compiler   # Linux, into the active conda environment, no root
+xcode-select --install && brew install libomp          # macOS: clang, and the OpenMP Apple's clang lacks
+```
+
+On a cluster whose compute nodes have no compiler, load one in the job script
+(`module load GCC`; the name varies by site).
 
 ## Install from source
 
@@ -157,6 +177,7 @@ conda activate amorphgen
 pip install "amorphgen[mace,chgnet]"
 
 # For batched ensembles on the GPU, use Python 3.12 and add the torch-sim extra
+# (the jobs then need a C/C++ compiler too, see "The torch-sim engine" above)
 conda create -n amorphgen-ts python=3.12
 conda activate amorphgen-ts
 pip install "amorphgen[mace,torchsim]"

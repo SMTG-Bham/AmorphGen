@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://github.com/SMTG-Bham/AmorphGen/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/SMTG-Bham/AmorphGen/test.yml?branch=main&label=CI" alt="CI"></a>
   <a href="https://smtg-bham.github.io/AmorphGen/"><img src="https://img.shields.io/badge/docs-online-blue" alt="Docs"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://github.com/SMTG-Bham/AmorphGen/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="https://pypi.org/project/amorphgen/"><img src="https://img.shields.io/pypi/v/amorphgen?label=PyPI" alt="PyPI"></a>
 </p>
 
@@ -135,7 +135,7 @@ AmorphGen supports multiple calculator backends:
 
 Only install the backend(s) you need. Classical potentials (Lennard-Jones, Buckingham+Coulomb) are built-in and require no GPU. Use `amorphgen --list-models` to see all available models.
 
-For ensembles on a GPU there is a second execution engine, [torch-sim](https://github.com/torchsim/torch-sim), selected with `--engine torchsim`. It relaxes, and in the hybrid workflow anneals and quenches, all structures of an ensemble in one batched call instead of one after another. It works with MACE, SevenNet and Lennard-Jones (CHGNet and Buckingham stay on the ASE engine), needs Python 3.12 and the `[torchsim]` extra, and writes the same files as the ASE engine. See the [backends guide](https://smtg-bham.github.io/AmorphGen/guides/backends.html) for details.
+For ensembles on a GPU there is a second execution engine, [torch-sim](https://github.com/torchsim/torch-sim), selected with `--engine torchsim`. It relaxes, and in the hybrid workflow anneals and quenches, all structures of an ensemble in one batched call instead of one after another. It works with MACE, SevenNet and Lennard-Jones (CHGNet and Buckingham stay on the ASE engine), needs Python 3.12, the `[torchsim]` extra and a C/C++ compiler (it compiles kernels while it runs), and writes the same files as the ASE engine. See the [backends guide](https://smtg-bham.github.io/AmorphGen/guides/backends.html) for details.
 
 > **ASE pass-through.** AmorphGen wraps each backend's upstream ASE calculator without modifying unit conventions, stress signs, or PBC handling; this energies (eV), forces (eV/Å), stress (eV/Å³), and `atoms.pbc` are inherited directly from the upstream MLIP package. See [docs/guides/backends](https://smtg-bham.github.io/AmorphGen/guides/backends.html) for details.
 
@@ -148,7 +148,7 @@ For ensembles on a GPU there is a second execution engine, [torch-sim](https://g
 | generate random structures, analyse trajectories (RDF, CN, S(q), plots), run classical LJ/Buckingham pipelines | `pip install -e .` | ~80 MB, **no PyTorch** |
 | + MLIP relaxation & melt-quench MD | `pip install -e ".[mace]"` or `".[chgnet]"` | + PyTorch |
 | + everything (MACE + CHGNet) | `pip install -e ".[all]"` | + PyTorch |
-| + batched GPU relaxation and MD of ensembles (`--engine torchsim`) | `pip install -e ".[mace,torchsim]"` (Python 3.12+, CUDA or CPU, no Apple MPS) | + torch-sim |
+| + batched GPU relaxation and MD of ensembles (`--engine torchsim`) | `pip install -e ".[mace,torchsim]"` (Python 3.12+ and a C/C++ compiler; CUDA or CPU, no Apple MPS) | + torch-sim |
 
 With pip, from source (once AmorphGen is on PyPI, `pip install "amorphgen[mace,chgnet]"` replaces the clone):
 
@@ -159,7 +159,7 @@ pip install -e ".[mace,chgnet]"      # example: MACE + CHGNet
 pip install -e ".[all,dev]"          # everything + pytest
 ```
 
-With conda, which keeps the install isolated and on HPC provides the CUDA toolchain. The environment files in [`build_tools/`](build_tools/README.md) create the environment and install the clone into it in editable mode in one step, with MACE + CHGNet (`environment.yml`) or, for development, with the torch-sim engine, pytest and the docs toolchain as well (`environment_dev.yml`):
+With conda, which keeps the install isolated and on HPC provides the CUDA toolchain. The environment files in [`build_tools/`](https://github.com/SMTG-Bham/AmorphGen/tree/main/build_tools) create the environment and install the clone into it in editable mode in one step, with MACE + CHGNet (`environment.yml`) or, for development, with the torch-sim engine, pytest and the docs toolchain as well (`environment_dev.yml`):
 
 ```bash
 git clone https://github.com/SMTG-Bham/AmorphGen.git
@@ -862,23 +862,23 @@ pipe = MeltQuenchPipeline(
 
 | Tutorial | Description |
 |----------|-------------|
-| [Tutorial 1](Tutorials/T1_5min_intro/tutorial_1_5min_intro.ipynb) | Quick-start tutorial: orientation: what it does, the three workflows, decision tree, one live demo (random + CHGNet relax on a-SiO₂) |
+| [Tutorial 1](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T1_5min_intro/tutorial_1_5min_intro.ipynb) | Quick-start tutorial: orientation: what it does, the three workflows, decision tree, one live demo (random + CHGNet relax on a-SiO₂) |
 
 Workflow tutorials (each reports the wall time measured on the CPU it was validated on):
 
 | Tutorial | Description |
 |----------|-------------|
-| [Tutorial 2](Tutorials/T2_automated_random_gen/tutorial_2_automated_random_gen.ipynb) | Zero-config random gen: composition is the only input; auto-derive minsep, density, target CN, oxidation state across 8 material classes (Si, SiO₂, In₂O₃, CdTe, AlN, LiCl, TiO₂, Cu). Each structure is CHGNet-relaxed and saved to `output_T2/` |
-| [Tutorial 3](Tutorials/T3_random_gen/tutorial_3_random_generation.ipynb) | Explicit control + ensemble analysis: the opposite end of T2: hand-picked minsep (from crystalline bond lengths) and target density (from cited amorphous-thin-film references), 5-structure ensembles per system, quantitative RDF / energy / CN / bond-angle analysis vs the crystalline reference (In₂O₃, TiO₂, Al₂O₃, Ga₂O₃; MACE-MPA-0) |
-| [Tutorial 4](Tutorials/T4_MQ_via_7_steps/tutorial_4_melt_quench.ipynb) | Full 7-stage melt-quench from crystalline SiO₂ (CHGNet on CPU; flip the backend toggle for MACE on GPU) |
-| [Tutorial 5](Tutorials/T5_mix_random_MQ/tutorial_5_batch_quench.ipynb) | Hybrid workflow: random gen → high-T equilibration → batch quench (TiO₂) |
-| [Tutorial 6](Tutorials/T6_classical_potential/tutorial_6_classical_potential.ipynb) | Classical potential (Buckingham+Coulomb) relaxation, no GPU needed (SiO₂, Al₂O₃, TiO₂) |
+| [Tutorial 2](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T2_automated_random_gen/tutorial_2_automated_random_gen.ipynb) | Zero-config random gen: composition is the only input; auto-derive minsep, density, target CN, oxidation state across 8 material classes (Si, SiO₂, In₂O₃, CdTe, AlN, LiCl, TiO₂, Cu). Each structure is CHGNet-relaxed and saved to `output_T2/` |
+| [Tutorial 3](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T3_random_gen/tutorial_3_random_generation.ipynb) | Explicit control + ensemble analysis: the opposite end of T2: hand-picked minsep (from crystalline bond lengths) and target density (from cited amorphous-thin-film references), 5-structure ensembles per system, quantitative RDF / energy / CN / bond-angle analysis vs the crystalline reference (In₂O₃, TiO₂, Al₂O₃, Ga₂O₃; MACE-MPA-0) |
+| [Tutorial 4](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T4_MQ_via_7_steps/tutorial_4_melt_quench.ipynb) | Full 7-stage melt-quench from crystalline SiO₂ (CHGNet on CPU; flip the backend toggle for MACE on GPU) |
+| [Tutorial 5](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T5_mix_random_MQ/tutorial_5_batch_quench.ipynb) | Hybrid workflow: random gen → high-T equilibration → batch quench (TiO₂) |
+| [Tutorial 6](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T6_classical_potential/tutorial_6_classical_potential.ipynb) | Classical potential (Buckingham+Coulomb) relaxation, no GPU needed (SiO₂, Al₂O₃, TiO₂) |
 
 Application case studies (these assume you have done the workflow tutorials):
 
 | Tutorial | Description |
 |----------|-------------|
-| [Tutorial 7](Tutorials/T7_application_dimer_dissociation/tutorial_7_dimer_dissociation.ipynb) | Defect chemistry: O–O peroxide dimer dissociation kinetics in amorphous In₂O₃, with Arrhenius temperature scan |
+| [Tutorial 7](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T7_application_dimer_dissociation/tutorial_7_dimer_dissociation.ipynb) | Defect chemistry: O–O peroxide dimer dissociation kinetics in amorphous In₂O₃, with Arrhenius temperature scan |
 
 ---
 
@@ -909,9 +909,6 @@ AmorphGen/
 │       ├── radii.py                ← Shannon/metallic radii, minsep, density estimation
 │       └── common.py               ← dynamics builder, logger, trajectory writer
 ├── build_tools/                    ← conda environment files (user + dev)
-├── paper/
-│   ├── paper.md                    ← JOSS draft
-│   └── paper.bib
 ├── test/                           ← 114 tests (4 skipped without --run-mace)
 ├── pyproject.toml
 ├── LICENSE                         ← MIT

@@ -29,9 +29,13 @@ conda activate amorphgen
 amorphgen --list-models
 ```
 
-For batched ensembles on a GPU, add the torch-sim engine (`--engine torchsim`):
+For batched ensembles on a GPU, add the torch-sim engine (`--engine torchsim`).
+It compiles kernels while it runs, so it also needs a C/C++ compiler, which
+`environment.yml` does not install (`environment_dev.yml` does). Skip the first
+line if `g++ --version` already works:
 
 ```bash
+conda install -c conda-forge c-compiler cxx-compiler
 pip install -e ".[torchsim]"
 ```
 
