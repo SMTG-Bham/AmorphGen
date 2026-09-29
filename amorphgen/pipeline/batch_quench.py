@@ -147,6 +147,12 @@ def run(snapshot_files: list[str],
     single_run = len(selected) == 1
 
     results = []
+    # fail fast: an out-of-range snapshot number must stop the batch before any
+    # run starts, not when its turn comes after hours of MD
+    for i, snap_file in enumerate(selected):
+        _run_seed_index(snap_file, i,
+                        cfg_override.get("run_index") if cfg_override else None)
+
     for i, snap_file in enumerate(selected):
         run_name = _run_dir_name(snap_file, fallback_idx=i)
         run_dir = work_dir if single_run else os.path.join(work_dir, run_name)

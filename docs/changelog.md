@@ -376,10 +376,14 @@ orphan: true
   explicit `--run-index` on an ensemble, a `SLURM_ARRAY_TASK_ID` on an ensemble, the same
   two on the single-structure pipeline, and no scope at all. Two runs therefore share a
   seed stream only when they come from the same source with the same scope and the same
-  local identity. The banded value travels under its own config key, so a stage cannot
-  mistake a local index for an explicit one and band it twice. Out-of-range values are
-  refused rather than wrapped, since folding `snapshot_100003` onto `snapshot_0003` would
-  silently merge two streams. **Behaviour change:** these indices are seed labels, and they have
+  local identity. That includes a pipeline run started inside a `run_NNNN/` directory,
+  the usual SLURM pattern `cd run_$SLURM_ARRAY_TASK_ID && amorphgen ...`, and the
+  directory name now has to match exactly, so a folder called `myrun_2` is not mistaken
+  for one. The banded value travels under its own config key, which a config file may not
+  set, so a stage cannot mistake a local index for an explicit one and band it twice.
+  Out-of-range values are refused rather than wrapped, since folding `snapshot_100003`
+  onto `snapshot_0003` would silently merge two streams, and every snapshot filename is
+  checked before the first run starts rather than when its turn comes. **Behaviour change:** these indices are seed labels, and they have
   moved, so a run resumed across this change draws different velocities and thermostat
   noise from that point on. Finish a running ensemble before updating, or regenerate it.
 

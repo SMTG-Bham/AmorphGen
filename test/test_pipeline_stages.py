@@ -392,3 +392,55 @@ def test_scoped_run_index_refuses_out_of_range_values():
     with pytest.raises(ValueError, match="unknown run-index source"):
         scoped_run_index(0, 1, "nonsense")
     assert scoped_run_index(_INDEX_STRIDE - 1) == _INDEX_STRIDE - 1
+
+
+def test_pipeline_run_directory_is_banded_and_matched_exactly(tmp_path, monkeypatch):
+    """Review round 10: `cd run_3 && amorphgen ...` is a common SLURM pattern.
+    Its index must not land in the plain batch range, and a directory that
+    merely contains 'run_N' must not be mistaken for a run directory."""
+    from amorphgen.utils.common import run_index_from_cwd, scoped_run_index
+    from amorphgen.pipeline.batch_quench import _run_seed_index as idx
+    (tmp_path / "run_0003").mkdir(); (tmp_path / "myrun_2").mkdir()
+    (tmp_path / "run_2_old").mkdir()
+    monkeypatch.delenv("SLURM_ARRAY_TASK_ID", raising=False)
+    monkeypatch.chdir(tmp_path / "run_0003")
+    assert run_index_from_cwd() == scoped_run_index(0, 3, "pipeline")
+    assert run_index_from_cwd() != idx("snapshot_0003.xyz", 0)   # not the batch range
+    for odd in ("myrun_2", "run_2_old"):
+        monkeypatch.chdir(tmp_path / odd)
+        assert run_index_from_cwd() == 0
+
+
+def test_batch_quench_rejects_an_out_of_range_snapshot_before_running(tmp_path, monkeypatch):
+    """A snapshot number past the band limit must stop the batch before the
+    first run, not hours in when its turn comes."""
+    import pytest
+    from unittest.mock import patch
+    from ase.build import bulk
+    from ase.io import write
+    from amorphgen.pipeline import batch_quench as bq
+    src = tmp_path / "in"; src.mkdir()
+    for name in ("snapshot_0000_f.xyz", "snapshot_100000_f.xyz"):
+        write(str(src / name), bulk("Cu", cubic=True), format="extxyz")
+    started = []
+    with patch.object(bq.equilibrate, "run",
+                      lambda atoms, **kw: started.append(1) or atoms), \
+         patch.object(bq, "get_calculator", lambda **kw: None):
+        with pytest.raises(ValueError, match="outside"):
+            bq.run([str(p) for p in sorted(src.glob("*.xyz"))],
+                   cfg_override={"model": "lennard-jones"},
+                   work_dir=str(tmp_path / "w"), stages=[4])
+    assert started == [], "the batch started a run before validating the filenames"
+
+
+def test_seed_index_cannot_be_set_from_a_config_file(tmp_path, capsys):
+    """seed_index carries an already-banded value; a user file must not set it."""
+    import pytest
+    from amorphgen.configs.yaml_config import load_yaml_config
+    p = tmp_path / "c.yaml"
+    p.write_text("model: chgnet\nseed_index: 5\n")
+    with pytest.raises(ValueError, match="Invalid YAML config"):
+        load_yaml_config(str(p))
+    assert "set internally by AmorphGen" in capsys.readouterr().out
+    p.write_text("model: chgnet\nrun_index: 5\n")
+    assert load_yaml_config(str(p))["run_index"] == 5

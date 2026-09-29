@@ -416,7 +416,10 @@ def test_run_index_sources(tmp_path, monkeypatch):
     import os
     from amorphgen.utils.common import run_index_from_cwd, run_index_for, stage_rng
     d = tmp_path / "run_0007"; d.mkdir(); monkeypatch.chdir(d)
-    assert run_index_from_cwd() == 7
+    # a pipeline run inside run_NNNN is banded, so it cannot be mistaken for a
+    # batch run of snapshot_0007 (which keeps the plain local index 7)
+    from amorphgen.utils.common import scoped_run_index as _s
+    assert run_index_from_cwd() == _s(0, 7, "pipeline") != 7
     e = tmp_path / "quench_runs"; e.mkdir(); monkeypatch.chdir(e)
     monkeypatch.delenv("SLURM_ARRAY_TASK_ID", raising=False)
     assert run_index_from_cwd() == 0

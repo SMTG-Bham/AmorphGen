@@ -417,9 +417,12 @@ def run_index_from_cwd() -> int:
     sharing one ``--seed`` still draw different velocities and noise; else 0.
     """
     import re
-    m = re.search(r"run_(\d+)", os.path.basename(os.getcwd()))
+    # fullmatch, so a directory called "myrun_2" or "run_2_old" is not mistaken
+    # for a run directory; banded as "pipeline" because only the single-structure
+    # path reaches here (batch_quench hands its index over under seed_index)
+    m = re.fullmatch(r"run_(\d+)", os.path.basename(os.getcwd()))
     if m:
-        return int(m.group(1))
+        return scoped_run_index(0, int(m.group(1)), "pipeline")
     task = os.environ.get("SLURM_ARRAY_TASK_ID")
     return (scoped_run_index(0, int(task), "pipeline-slurm")
             if task and task.isdigit() else 0)
