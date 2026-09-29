@@ -334,81 +334,49 @@ orphan: true
 
 ### Fixed after the rc4 upload (on GitHub main; not in the rc4 wheel on PyPI)
 
-- **Review round 7 (2026-09-29): the charge-balance rule simplified.** Round 6 protected
-  doped cells and mixed-chalcogen glasses with two settings, a 15 % tolerance and a gate
-  that only let oxygen or fluorine oxidise a chalcogen. Both are gone: an element is
-  promoted to cation only when that brings the compound CLOSER to charge balance. In a
-  chalcogen-rich glass or a doped cell the promotion would overshoot far past neutrality
-  (Ge20S10Se70: a gap of 80 before, 480 after; F-doped silica: 2 before, 254 after), so
-  every anion is kept, while a real tellurite, sulfate, nitrate or hydroxide improves and
-  promotes. Identical results on 40 of 41 compositions tested against the previous rule,
-  with two tuned constants removed; the one difference is a thiosulfate, where the two
-  options tie exactly and neither rule describes a central-plus-terminal sulfur. The
-  `single_run` argument of `_run_seed_index` is gone, since the stride now applies in
-  every case, and a test drives the single-snapshot SLURM path through `batch_quench.run`
-  rather than the helper.
-- **Review round 6 (2026-09-29): two guards on the charge-balance rule, and the last
-  seed collision.** The bare balance test of round 5 was too literal in two ways.
-  *Mixed-chalcogen glasses*: with S and Se, or Se and Te, present and no oxidiser, the
-  less electronegative chalcogen was promoted to cation, so Ge-S-Se lost Ge-Se and
-  gained S-Se, and Ge-Se-Te lost Ge-Te. A chalcogen or pnictogen is now only ever
-  promoted when oxygen or fluorine is present to oxidise it, which is what makes a
-  tellurite a tellurite and leaves every chalcogenide glass alone. *Doped and defect
-  cells*: one extra atom was enough to flip the major anion, so F-doped silica lost
-  Si-O, an O impurity in NaCl lost Na-Cl and LiPON lost P-N. The balance test now has a
-  15 % tolerance. Checked on 25 compositions covering both failure modes plus the cases
-  round 5 fixed. *Seed collision*: an explicit `--run-index` was scoped by position for
-  a multi-snapshot job but used bare for a single-snapshot one, so job B at index 1
-  collided with job A's second run; the stride now applies in both cases. The run-index
-  tests were also rewritten, since their snapshot numbers had equalled the loop
-  positions and would have passed with the filename rule removed.
-- **Review round 5 (2026-09-29): which elements are anions is now decided by charge
-  balance.** Round 4 replaced a fixed anion list with a set of special cases, and the
-  special cases were wrong in turn: tellurium and selenium went back to being anions as
-  soon as a real cation was present (so Te-O was not a bond in a sodium or zinc
-  tellurite, while Na-Te was), and taking hydrogen off the list early stopped the
-  all-anion rule from ever firing for H2SO4 or HNO3. `anion_elements()` now starts every
-  element of the anion table as a candidate and promotes the least electronegative one
-  to cation while the cations present cannot supply the charge the candidates demand,
-  never demoting the most electronegative element. That reproduces the chemistry from
-  the composition alone: Te is the anion in CdTe and the cation in TeO2 and in a
-  tellurite, S the anion in ZnS and in La2O2S but the cation in a sulfate, H the anion
-  in LiH and the cation in a hydroxide, and nitrates and sulfates keep their N-O and
-  S-O bonds. Checked on 35 compositions.
-- **Metal-metal bonds in metal-metalloid glasses.** Requiring every element to be a
-  metal dropped Ni-Ni in Ni80P20, Fe-Fe in Fe80B20 and Pd-Pd in Pd80Si20, which the
-  classifier calls alloys. A same-element metal pair now bonds above a 70 % metal atom
-  fraction, which keeps Ga-Ga in GaAs, Ti-Ti in TiC and Be-Be in Be2C out. The analysis
-  call sites pass element counts instead of a bare set so the fraction can be computed.
-- **Run-index priority.** An explicit `--run-index` first (scoped by position, so two
-  jobs with different indices cannot overlap), then the `snapshot_NNNN` number from the
-  filename, which is the snapshot's stable identity across jobs and resumes, then
-  `SLURM_ARRAY_TASK_ID` (likewise scoped), then the position in the loop. Round 4 had
-  dropped the filename number for single-snapshot runs, so outside SLURM every such run
-  shared index 0, and its `--run-index` base overlapped between jobs. The test now
-  drives the batch loop instead of asserting arithmetic.
-- **Review round 4 (2026-09-29), all five findings confirmed and fixed.**
-  - *Compounds made only of anion-list elements had no bonds at all.* `is_bonding_pair`
-    treated O, S, Se, Te, N, H and the halogens as anions unconditionally, so in TeO2 and
-    SO3 every pair was anion-anion: the coordination table fell back to Te-Te, and the
-    angles and CN plot came out empty (visible as a blank CN column for TeO2 in the class
-    benchmark). Anions are now decided per compound: hydrogen is an anion only in a
-    hydride and a cation once a stronger anion is present (O-H in a hydroxide), and a
-    compound whose elements are all potential anions takes its least electronegative
-    member as the cation (Te in TeO2, S in SO3). Oxyhalides are unaffected: Bi-O and
-    Bi-Cl still bond, O-Cl still does not.
-  - *Same-element metallic pairs counted as bonds outside metals.* Ga-Ga in GaAs, In-In
-    in InP and Ti-Ti in TiC were reported as first-shell bonds, inflating the metal's
-    coordination. Restricted to single-element systems and pure-metal alloys, as the
-    docstring always said.
-  - *SLURM array tasks still shared one MD seed stream.* `batch_quench` set an explicit
-    run index of 0 for a single-snapshot run, so the `SLURM_ARRAY_TASK_ID` fallback added
-    the day before was never reached. A single-snapshot run now leaves the index unset.
-  - *An explicit `--run-index` collapsed a whole batch onto one seed stream.* It is now
-    the base, and each run adds its own index.
-  - *The metal-rich glass rule reached the s-block.* Li3P, Na3Sb, Cs3Sb and the like were
-    reclassified as alloys and given metallic radii; the rule is now restricted to
-    transition and noble metals, as its comment stated.
+- **Which contacts count as first-shell bonds, and which run gets which MD seed
+  (2026-09-29).** Two rules that several parts of the package share were rebuilt after a
+  sequence of code reviews.
+
+  *Bonding pairs.* The coordination report, the total coordination, the bond angles and
+  the CN plot all ask one question: is an A-B contact a bond? The answer used to come
+  from a fixed anion list, which failed whenever an element on it was acting as the
+  cation. TeO2 and SO3 had no bonds at all (every pair was anion-anion, so the
+  coordination table fell back to Te-Te and the angles came out empty, visible as a blank
+  CN column for TeO2 in the class benchmark); sulfates, nitrates and hydroxides lost their
+  S-O, N-O and O-H bonds the same way. Which elements are anions is now derived from the
+  composition by charge balance: every element of the anion table starts as a candidate,
+  and one is promoted to cation only when that brings the compound closer to neutrality.
+  The most electronegative element is never promoted, so an off-stoichiometry or
+  defective cell always keeps an anion. That single criterion reproduces the chemistry
+  without a table of exceptions: tellurium is the anion in CdTe and the cation in TeO2 and
+  in a tellurite, sulfur the anion in ZnS and in La2O2S but the cation in a sulfate,
+  hydrogen the anion in LiH and the cation in a hydroxide. It also leaves real cells
+  intact, because promoting their major anion would overshoot far past neutrality: the
+  mixed-chalcogen glasses (Ge-S-Se, Ge-Se-Te) keep Ge-Se and Ge-Te, F-doped silica keeps
+  Si-O, an oxygen impurity in NaCl keeps Na-Cl and LiPON keeps P-N. Verified on about 40
+  compositions.
+
+  Two further corrections to the same rule. Cation-cation contacts are no longer bonds
+  even when the radii table calls them covalent, which used to inflate the total
+  coordination in aluminosilicate and soda-lime glasses (Si-(Al+O) = 5) and add spurious
+  angles. And a same-element pair is a bond only in a single-element system or a
+  composition that is at least 70 % metal atoms, which keeps Ni-Ni in Ni80P20, Fe-Fe in
+  Fe80B20 and Cu-Cu in CuZr while dropping Ga-Ga in GaAs, Ti-Ti in TiC and Be-Be in Be2C.
+  The analysis call sites pass element counts rather than a bare set so that fraction can
+  be computed.
+
+  *MD seed streams.* Runs that shared a `--seed` could share their velocities and
+  thermostat noise. The index that separates them now follows one priority: an explicit
+  `--run-index`, then the `snapshot_NNNN` number in the filename, which is the snapshot's
+  stable identity across jobs and resumes, then `SLURM_ARRAY_TASK_ID`, then the position
+  in the loop. The explicit index and the array task are scoped by a stride, so no two
+  runs of any two jobs can collide.
+
+  *Classification.* The metal-rich metalloid-glass rule no longer reaches the s-block:
+  Li3P, Na3Sb and Cs3Sb are Zintl phases and keep their pnictide treatment, while
+  Ni80P20, Fe80B20 and Pd80Si20 remain alloys.
+
 - **Placement no longer changes the density silently.** The auto-expand and
   auto-retry:minsep messages were `logger.info`, and the package configures no logging
   handler, so a 20-40 % density loss was invisible on the CLI. They are now warnings
