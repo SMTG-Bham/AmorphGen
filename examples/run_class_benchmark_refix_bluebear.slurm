@@ -6,6 +6,9 @@
 # classes_v2/ so the before (classes/) and after tables can be compared.
 # Also retries any first-pass system that has no relaxed structures.
 #SBATCH --job-name=cls_refix
+# Defaults are the Birmingham BlueBEAR project this was developed on. To run it
+# elsewhere set AMORPHGEN_ROOT and AMORPHGEN_VENV, and give your own project with
+#   sbatch --account=<your-project> <this script>
 #SBATCH --account=scanlodo-amorphous-oxides
 #SBATCH --qos=bbgpu
 #SBATCH --time=02:00:00
@@ -20,8 +23,8 @@ mkdir -p logs classes_v2
 module purge
 module load bear-apps/2024a/live
 module load Python/3.12.3-GCCcore-13.3.0
-source /rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312/bin/activate
-PKG=/rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/AmorphGen
+source "${AMORPHGEN_VENV:-/rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312}/bin/activate"
+PKG=${AMORPHGEN_ROOT:-/rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/AmorphGen}
 SYS=$PKG/examples/class_benchmark_systems.txt
 # EMPTY after the revert of 2026-09-29: no density rule has changed since the
 # last pass, so classes/ + classes_v2/ are current. Put system names here (space

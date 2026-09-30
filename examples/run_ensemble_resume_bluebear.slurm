@@ -15,6 +15,9 @@
 # ----------------------------------------------------------------------------
 
 #SBATCH --job-name=amg_ens100
+# Defaults are the Birmingham BlueBEAR project this was developed on. To run it
+# elsewhere set AMORPHGEN_ROOT and AMORPHGEN_VENV, and give your own project with
+#   sbatch --account=<your-project> <this script>
 #SBATCH --account=scanlodo-amorphous-oxides
 #SBATCH --qos=bbgpu
 #SBATCH --time=01:00:00
@@ -30,7 +33,7 @@ mkdir -p logs
 module purge
 module load bear-apps/2024a/live
 module load Python/3.12.3-GCCcore-13.3.0
-source /rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312/bin/activate
+source "${AMORPHGEN_VENV:-/rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312}/bin/activate"
 
 COMP="InGaZnO4*50"      # 350 atoms
 N=100

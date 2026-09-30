@@ -11,6 +11,9 @@
 # the walltime just needs `sbatch --array=<task> ...` again. Each slice rewrites
 # the summary table when it ends; the table is complete once all three are.
 #SBATCH --job-name=cls_relax
+# Defaults are the Birmingham BlueBEAR project this was developed on. To run it
+# elsewhere set AMORPHGEN_ROOT and AMORPHGEN_VENV, and give your own project with
+#   sbatch --account=<your-project> <this script>
 #SBATCH --account=scanlodo-amorphous-oxides
 #SBATCH --qos=bbgpu
 #SBATCH --time=02:00:00
@@ -26,8 +29,8 @@ mkdir -p logs
 module purge
 module load bear-apps/2024a/live
 module load Python/3.12.3-GCCcore-13.3.0
-source /rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312/bin/activate
-PKG=/rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/AmorphGen
+source "${AMORPHGEN_VENV:-/rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312}/bin/activate"
+PKG=${AMORPHGEN_ROOT:-/rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/AmorphGen}
 SLICE=${SLURM_ARRAY_TASK_ID:-0}; NSLICE=3
 i=-1
 grep -v "^#" $PKG/examples/class_benchmark_systems.txt | while read CLASS NAME COMP RHO KIND; do

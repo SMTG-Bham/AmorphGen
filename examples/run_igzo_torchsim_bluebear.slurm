@@ -13,6 +13,9 @@
 # ----------------------------------------------------------------------------
 
 #SBATCH --job-name=igzo_tsim
+# Defaults are the Birmingham BlueBEAR project this was developed on. To run it
+# elsewhere set AMORPHGEN_ROOT and AMORPHGEN_VENV, and give your own project with
+#   sbatch --account=<your-project> <this script>
 #SBATCH --account=scanlodo-amorphous-oxides
 #SBATCH --qos=bbshort
 #SBATCH --time=00:10:00
@@ -30,7 +33,7 @@ mkdir -p logs
 module purge
 module load bear-apps/2024a/live
 module load Python/3.12.3-GCCcore-13.3.0
-source /rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312/bin/activate
+source "${AMORPHGEN_VENV:-/rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312}/bin/activate"
 
 python -c "import torch, torch_sim; print('torch', torch.__version__, '| cuda', torch.cuda.is_available(), '| torch-sim', torch_sim.__version__)"
 python -c "from amorphgen.utils.radii import estimate_cell_length as e; print('radii check', e({'Ir':40,'O':80}))"

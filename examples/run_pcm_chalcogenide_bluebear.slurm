@@ -11,6 +11,9 @@
 # placement cannot. ~2 h per task; both commands carry --resume, so resubmit
 # after a walltime kill.
 #SBATCH --job-name=pcm
+# Defaults are the Birmingham BlueBEAR project this was developed on. To run it
+# elsewhere set AMORPHGEN_ROOT and AMORPHGEN_VENV, and give your own project with
+#   sbatch --account=<your-project> <this script>
 #SBATCH --account=scanlodo-amorphous-oxides
 #SBATCH --qos=bbgpu
 #SBATCH --time=03:00:00
@@ -26,8 +29,8 @@ mkdir -p logs
 module purge
 module load bear-apps/2024a/live
 module load Python/3.12.3-GCCcore-13.3.0
-source /rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312/bin/activate
-PKG=/rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/AmorphGen
+source "${AMORPHGEN_VENV:-/rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312}/bin/activate"
+PKG=${AMORPHGEN_ROOT:-/rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/AmorphGen}
 
 case ${SLURM_ARRAY_TASK_ID:-0} in
   0) SYS=gete;   COMP="GeTe*108";  CN="Ge=4,Te=3"; T_ANNEAL=800; RHO=5.7

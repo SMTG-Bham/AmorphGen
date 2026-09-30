@@ -4,6 +4,9 @@
 #      NVT 2000 K 40 000 steps (0.5 fs = 20 ps) -> quench to 300 K -> 2 ps at
 #      300 K -> cubic relax, MACE-MPA-0. Resumable per run (--resume).
 #SBATCH --job-name=sio2_anneal
+# Defaults are the Birmingham BlueBEAR project this was developed on. To run it
+# elsewhere set AMORPHGEN_ROOT and AMORPHGEN_VENV, and give your own project with
+#   sbatch --account=<your-project> <this script>
 #SBATCH --account=scanlodo-amorphous-oxides
 #SBATCH --qos=bbgpu
 #SBATCH --time=12:00:00
@@ -18,7 +21,7 @@ mkdir -p logs
 module purge
 module load bear-apps/2024a/live
 module load Python/3.12.3-GCCcore-13.3.0
-source /rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312/bin/activate
+source "${AMORPHGEN_VENV:-/rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312}/bin/activate"
 OUT=sio2_100
 mkdir -p $OUT/subset10
 for i in 0 1 2 3 4 5 6 7 8 9; do cp $OUT/random_opt/random_000${i}_opt.xyz $OUT/subset10/; done
