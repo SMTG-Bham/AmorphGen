@@ -5,8 +5,8 @@
 - Linux or macOS. Windows is not supported natively; use
   [WSL](https://learn.microsoft.com/windows/wsl/) instead.
 - Python 3.10+ for the base package. Optional backends may impose additional
-  Python-version or build requirements; the supplied conda environments use
-  Python 3.10–3.12. Use Python 3.12 for torch-sim.
+  Python-version or build requirements. The supplied standard conda environment
+  allows Python 3.10–3.12; the development environment requires 3.12 for torch-sim.
 - Core dependencies, including ASE, are installed automatically by pip
 - An MLIP backend **only** for MLIP relaxation / melt-quench MD; the base
   install is deliberately torch-free

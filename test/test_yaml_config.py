@@ -5,6 +5,7 @@ Tests for YAML configuration loading and validation.
 """
 
 import os
+from importlib.resources import as_file, files
 import pytest
 import tempfile
 
@@ -13,6 +14,13 @@ from amorphgen.configs.yaml_config import _validate_config
 
 
 class TestLoadYamlConfig:
+
+    @pytest.mark.parametrize("name", ["example_config.yaml", "example_classical.yaml"])
+    def test_bundled_examples(self, name):
+        # CI also runs this suite outside the checkout against the built wheel.
+        with as_file(files("amorphgen.configs").joinpath(name)) as path:
+            cfg = load_yaml_config(str(path))
+        assert "model" in cfg
 
     def test_basic_load(self, tmp_path):
         cfg_file = tmp_path / "config.yaml"

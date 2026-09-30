@@ -11,9 +11,9 @@ channels:
   - nodefaults
 
 dependencies:
-  # conda picks 3.12: the newest Python CHGNet publishes wheels for and the
-  # oldest the torch-sim engine runs on, so its tests run instead of skipping.
-  - python>=3.10,<3.13
+  # 3.12 is the newest Python CHGNet publishes wheels for and the oldest the
+  # torch-sim engine runs on. Require it so torch-sim is always installed.
+  - python>=3.12,<3.13
   # The torch-sim engine runs through torch.compile, which builds its kernels
   # with a C/C++ compiler; without one on PATH (WSL, a bare workstation) its
   # tests fail with InvalidCxxCompiler. These put gcc and g++ in the env.

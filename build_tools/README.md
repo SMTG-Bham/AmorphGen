@@ -8,10 +8,11 @@
 Both take Python from conda-forge and install this checkout with pip in editable
 mode, so a `git pull` or a local edit takes effect without reinstalling. The
 Python dependencies come from the extras in the root
-[pyproject.toml](../pyproject.toml). Both files allow Python 3.10–3.12, and conda
-normally selects 3.12. The torch-sim engine requires Python 3.12+: verify
-`python --version` before using it, since its pip dependency is skipped on
-older Python versions.
+[pyproject.toml](../pyproject.toml). The standard environment allows Python
+3.10–3.12, and conda normally selects 3.12. The development environment requires
+Python 3.12 so that the torch-sim engine is always installed. When adding
+torch-sim to the standard environment, verify `python --version` first: its pip
+dependency is skipped on Python below 3.12.
 
 On Linux, pip's PyTorch wheel bundles the CUDA libraries it was built with, so a
 GPU node needs an NVIDIA driver recent enough for that CUDA release: compare

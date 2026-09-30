@@ -87,12 +87,12 @@ mace = [
 chgnet = [
     "chgnet>=0.3",
 ]
-# SevenNet pulls in e3nn>=0.5, which conflicts with the MACE pin above.
-# Install SevenNet in its own environment, or with `[full]` if you accept
-# that MACE foundation-model loading may then break.
 torchsim = [
     "torch-sim-atomistic>=0.6; python_version >= '3.12'",
 ]
+# SevenNet pulls in e3nn>=0.5, which conflicts with the MACE pin above.
+# Install SevenNet in its own environment, or with `[full]` if you accept
+# that MACE foundation-model loading may then break.
 sevennet = [
     "sevenn>=0.10",
 ]
@@ -139,10 +139,11 @@ Issues = "https://github.com/SMTG-Bham/AmorphGen/issues"
 amorphgen = "amorphgen.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["amorphgen*"]
+include = ["amorphgen", "amorphgen.*"]
+namespaces = false
 
 [tool.setuptools.package-data]
-amorphgen = ["configs/*.yaml"]
+"amorphgen.configs" = ["*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["test"]
