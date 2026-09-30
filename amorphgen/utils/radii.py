@@ -1834,26 +1834,16 @@ def _radius_for_density(sym: str, cls: str,
     ox = infer_oxidation_state(sym, composition) if composition else None
     # A non-metal acting as the CATION of an oxide (P in P2O5, S in SO3, Se in
     # SeO2, Te in TeO2) must take its highest positive Shannon state; the anion
-    # A non-metal acting as the CATION of an oxide (P in P2O5, S in SO3, Se in
-    # SeO2, Te in TeO2) must take its highest positive Shannon state; the anion
     # default would hand back P3- (2.12 A) and shrink the density threefold.
-    # Gated on the element actually being a cation here, which charge balance
-    # decides: the Cl of an oxychloride, the N of an oxynitride and the H of a
-    # hydroxide are anions and keep their ionic radii.
     # Gated on the element actually being a cation here, which charge balance
     # decides (cation_nonmetals): the Cl of an oxychloride, the N of an
     # oxynitride and the carbide C of an oxycarbide (SiOC) are anions and keep
     # their anion radii.
     if (ox is None and composition and "O" in composition and sym != "O"
-            and sym in NONMETALS and sym not in anion_elements(composition)):
             and sym in NONMETALS and sym in cation_nonmetals(composition)):
         positive = [k for k in SHANNON_IONIC_RADII.get(sym, {}) if k > 0]
         if positive:
             ox = max(positive)
-        else:
-            # promoted but no positive state tabulated: the anion radius would
-            # be ~4x too large, so use the covalent radius instead
-            return covalent_radii[atomic_numbers[sym]]
         else:
             # promoted but no positive state tabulated: the anion radius would
             # be ~4x too large, so use the covalent radius instead
