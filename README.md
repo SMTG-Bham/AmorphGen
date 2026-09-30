@@ -19,7 +19,8 @@
 
 ---
 
-## Pipeline overview
+<details>
+<summary><h2>Pipeline overview</h2></summary>
 
 AmorphGen exposes three workflows. Pick the one that matches your starting point:
 
@@ -120,9 +121,12 @@ Directory of disordered structures  (e.g. --random-gen outputs)
 
 > Hybrid is cheaper than full MQ: it skips the slow heat ramp (Stage 3) by starting from a disordered structure.
 
+</details>
+
 ---
 
-## Supported backends
+<details>
+<summary><h2>Supported backends</h2></summary>
 
 AmorphGen supports multiple calculator backends:
 
@@ -139,9 +143,12 @@ For ensembles on a GPU there is a second execution engine, [torch-sim](https://g
 
 > **ASE pass-through.** AmorphGen wraps each backend's upstream ASE calculator without modifying unit conventions, stress signs, or PBC handling; energies (eV), forces (eV/Å), stress (eV/Å³), and `atoms.pbc` are inherited directly from the upstream MLIP package. See [docs/guides/backends](https://smtg-bham.github.io/AmorphGen/guides/backends.html) for details.
 
+</details>
+
 ---
 
-## Installation
+<details>
+<summary><h2>Installation</h2></summary>
 
 AmorphGen requires Python 3.10+ and supports Linux and macOS. Windows is not supported natively; use [WSL](https://learn.microsoft.com/windows/wsl/) instead.
 
@@ -195,9 +202,12 @@ For PyPI installation, separate backend environments and compiler setup, see the
 > **GPU recommended for MLIP MD.** Use `--device cuda` or `"device": "auto"`.
 > Device auto-detection only runs when a job starts. On a login node with no GPU, no device message will appear until a stage is launched.
 
+</details>
+
 ---
 
-## Quick start
+<details>
+<summary><h2>Quick start</h2></summary>
 
 ### Command line
 
@@ -274,9 +284,12 @@ pipe = MeltQuenchPipeline(
 pipe.run(stages=[5, 6, 7], input_file="stage4_eq.xyz")
 ```
 
+</details>
+
 ---
 
-## YAML configuration
+<details>
+<summary><h2>YAML configuration</h2></summary>
 
 Add `seed: 42` at the top level (or `--seed 42` on the command line) to make a
 run reproducible: it seeds the random placement and the velocity initialisation
@@ -362,9 +375,12 @@ amorphgen --batch-opt --input-dir SiO2_sc/random_initial --work-dir SiO2_sc_opt 
 See [example_config.yaml](https://github.com/SMTG-Bham/AmorphGen/blob/main/amorphgen/configs/example_config.yaml) for annotated
 configuration options.
 
+</details>
+
 ---
 
-## Random structure generation
+<details>
+<summary><h2>Random structure generation</h2></summary>
 
 Generate random amorphous starting structures:
 
@@ -500,9 +516,12 @@ atoms = generate_random(
 
 Coordination-aware placement biases the initial structure toward the requested coordination; it does not guarantee every atom reaches its target CN. Check the generated and relaxed structures with `--analyse`. Disable coordination-aware placement with `--no-sc` (legacy flag name; the placement is enabled by default whenever `--target-cn` is set or auto-detected).
 
+</details>
+
 ---
 
-## Structure analysis
+<details>
+<summary><h2>Structure analysis</h2></summary>
 
 `--analyse` takes a directory of structures (xyz, extxyz, cif, vasp) and reports
 density, bond lengths, coordination numbers, bond angles and partial RDFs. The
@@ -617,9 +636,12 @@ sa.plot(output_dir="plots/")
 The analysis guide in the documentation covers the S(q) conventions and the
 reference-YAML format.
 
+</details>
+
 ---
 
-## Generating multiple independent structures (batch quench)
+<details>
+<summary><h2>Generating multiple independent structures (batch quench)</h2></summary>
 
 ### Step 1: Run stages 1–4 and save the high-temperature trajectory
 
@@ -734,9 +756,12 @@ batch_quench.run(
 See [Tutorial 5](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T5_mix_random_MQ/tutorial_5_batch_quench.ipynb)
 for a complete working example.
 
+</details>
+
 ---
 
-## Ensemble choice
+<details>
+<summary><h2>Ensemble choice</h2></summary>
 
 | Stage | Default | Override flag |
 |-------|---------|--------------|
@@ -746,9 +771,12 @@ for a complete working example.
 | Stage 5 quench | NVT | `--quench-ensemble NPT` |
 | Stage 6 low-T eq | NVT | `--eq-low-ensemble NPT` |
 
+</details>
+
 ---
 
-## Heating / cooling rate
+<details>
+<summary><h2>Heating / cooling rate</h2></summary>
 
 ```bash
 # At a 0.5 fs timestep: 100 K/ps heating and 25 K/ps cooling
@@ -766,9 +794,12 @@ For `--quench-T-step -100` and `--timestep 0.5`, common cooling rates are:
 | 10 K/ps | 20000 | 270 ps |
 | 1 K/ps | 200000 | 2700 ps |
 
+</details>
+
 ---
 
-## Trajectory format
+<details>
+<summary><h2>Trajectory format</h2></summary>
 
 | Format | Extension | Notes |
 |--------|-----------|-------|
@@ -777,9 +808,12 @@ For `--quench-T-step -100` and `--timestep 0.5`, common cooling rates are:
 | `traj` | `.traj` | ASE binary |
 | `lammps-dump` | `.dump` | LAMMPS text dump |
 
+</details>
+
 ---
 
-## Available models
+<details>
+<summary><h2>Available models</h2></summary>
 
 | Name | Backend | Notes |
 |------|---------|-------|
@@ -795,9 +829,12 @@ For `--quench-T-step -100` and `--timestep 0.5`, common cooling rates are:
 amorphgen --list-models   # full table of all models grouped by backend
 ```
 
+</details>
+
 ---
 
-## Full configuration reference
+<details>
+<summary><h2>Full configuration reference</h2></summary>
 
 Use [example_config.yaml](https://github.com/SMTG-Bham/AmorphGen/blob/main/amorphgen/configs/example_config.yaml) for the annotated
 YAML reference and [the configuration guide](https://github.com/SMTG-Bham/AmorphGen/blob/main/docs/guides/yaml-config.md) for
@@ -822,9 +859,12 @@ pipe = MeltQuenchPipeline(
 )
 ```
 
+</details>
+
 ---
 
-## Output files
+<details>
+<summary><h2>Output files</h2></summary>
 
 | Stage | Trajectory | Final structure | Log |
 |-------|-----------|-----------------|-----|
@@ -836,9 +876,12 @@ pipe = MeltQuenchPipeline(
 | 6 | `stage6_eq_traj.xyz` | `stage6_eq.xyz` | `stage6_eq.log` |
 | **7** | `stage7_opt.traj` | **`stage7_opt.cif`** + `stage7_opt.xyz` | `stage7_opt.log` |
 
+</details>
+
 ---
 
-## Tutorials
+<details>
+<summary><h2>Tutorials</h2></summary>
 
 **Start here**:
 
@@ -862,9 +905,12 @@ Application case studies (these assume you have done the workflow tutorials):
 |----------|-------------|
 | [Tutorial 7](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T7_application_dimer_dissociation/tutorial_7_dimer_dissociation.ipynb) | Defect chemistry: O–O peroxide dimer dissociation kinetics in amorphous In₂O₃, with Arrhenius temperature scan |
 
+</details>
+
 ---
 
-## Package layout
+<details>
+<summary><h2>Package layout</h2></summary>
 
 ```
 AmorphGen/
@@ -897,9 +943,12 @@ AmorphGen/
 └── README.md
 ```
 
+</details>
+
 ---
 
-## HPC (SLURM) example
+<details>
+<summary><h2>HPC (SLURM) example</h2></summary>
 
 ```bash
 #!/bin/bash
@@ -950,9 +999,12 @@ account with `sbatch --account=your-project`, and create `logs/` before submitti
 See the [HPC guide](https://github.com/SMTG-Bham/AmorphGen/blob/main/docs/guides/hpc.md#configuring-the-bundled-examples) for
 repository paths and cluster-specific setup.
 
+</details>
+
 ---
 
-## Dependencies
+<details>
+<summary><h2>Dependencies</h2></summary>
 
 | Package | Purpose |
 |---------|---------|
@@ -967,9 +1019,12 @@ repository paths and cluster-specific setup.
 | `sevenn` | SevenNet calculator (optional) |
 | `torch-sim-atomistic` | Batched GPU engine for ensembles, `--engine torchsim` (optional, Python 3.12+) |
 
+</details>
+
 ---
 
-## Citation
+<details>
+<summary><h2>Citation</h2></summary>
 
 If you use AmorphGen in your research, please cite the package
 and the foundation model(s) you used.
@@ -1020,13 +1075,19 @@ A Zenodo DOI for tagged releases will be added on first stable release.
 }
 ```
 
+</details>
+
 ---
 
-## License
+<details>
+<summary><h2>License</h2></summary>
 
 MIT
 
-## Development notes
+</details>
+
+<details>
+<summary><h2>Development notes</h2></summary>
 
 Parts of this codebase were developed with assistance from an AI tool,
 Anthropic's Claude (Opus 4.8), for code drafting, refactoring, and
@@ -1034,4 +1095,4 @@ documentation. All AI-assisted code was reviewed, tested, and validated
 by the authors, who take full responsibility for the contents of this
 repository.
 
-
+</details>
