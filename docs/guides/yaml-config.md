@@ -65,7 +65,7 @@ opt:
 eq_premelt:
   ensemble: NVT
   T: 300
-  steps: 10000        # 10 ps at 1 fs
+  steps: 10000        # 5 ps at 0.5 fs
   timestep: 0.5
 
 melt:
@@ -78,10 +78,10 @@ melt:
   timestep: 0.5
 
 eq_high:
-  ensemble: NPT       # NEW default - was NVT
+  ensemble: NPT       # default high-temperature ensemble
   npt_method: mtk     # Nose-Hoover-chain canonical fluctuations
   T: 3000
-  steps: 50000        # 50 ps
+  steps: 50000        # 25 ps at 0.5 fs
   timestep: 0.5
 
 quench:
@@ -94,7 +94,7 @@ quench:
 eq_low:
   ensemble: NVT
   T: 300
-  steps: 10000        # 10 ps
+  steps: 10000        # 5 ps at 0.5 fs
   timestep: 0.5
 ```
 
@@ -116,7 +116,7 @@ device: cuda
 eq_high:
   ensemble: NVT
   T: 3000
-  steps: 20000        # 20 ps anneal
+  steps: 20000        # 10 ps anneal at 0.5 fs
   timestep: 0.5
   friction: 0.01
 
@@ -211,8 +211,8 @@ classical_params:
     O-O:  {A: 1388.77,  rho: 0.3623, C: 175.0}
   charges: {Si: 2.4, O: -1.2}
   cutoff: 10.0
-  alpha: 0.2          # Wolf-summation damping (1/A)
   coulomb: true
+  coulomb_method: ewald  # default; use wolf for the approximate alternative
 
 opt:
   fmax: 0.05
@@ -255,7 +255,8 @@ final_opt:
 
 Stage 7 inherits `opt:` and applies the individual keys in `final_opt:` on top.
 Partial overrides, including a CLI flag such as `--format`, preserve all other
-optimisation settings from `opt:`.
+optimisation settings from `opt:`. In 1.0.0rc4, the YAML validator warns that
+`final_opt` is an unknown top-level key; the pipeline still applies this block.
 
 ## Selecting an NPT integrator
 
@@ -276,7 +277,7 @@ If the melt ramp produces volume excursions that are too large, two knobs tighte
 | Key | Default | Effect |
 |---|---|---|
 | `taup_factor` | `10.0` | Ratio `taup / ttime`. Larger → slower, more stable barostat. Also applied to MTK `pdamp`. |
-| `compressibility_GPa` | `100.0` | Reference compressibility for Berendsen (`1/(compressibility_GPa × GPa)`). Default is liquid-like; oxides with bulk modulus 150–300 GPa benefit from 200 GPa. |
+| `compressibility_GPa` | `100.0` | Reference bulk modulus in GPa; the Berendsen compressibility is its inverse, `1/(compressibility_GPa × GPa)`. A larger value reduces the volume response. |
 
 **Example: oxide-tuned melt ramp**
 
@@ -292,7 +293,7 @@ On a Cu/EMT benchmark at 1500 K over 300 fs, these settings reduce the maximum v
 
 **Example: restore the legacy NVT plateau**
 
-The new default for `eq_high` is NPT/MTK. To revert to constant-volume behaviour:
+The default for `eq_high` is NPT/MTK. To revert to constant-volume behaviour:
 
 ```yaml
 eq_high:
@@ -346,11 +347,11 @@ seed: 42
 
 What this does and does not guarantee:
 
-- Same seed, same CPU, same package versions: bit-identical structures and
-  trajectories. This holds for the classical potentials and for MLIPs on CPU.
-- On a GPU, MLIP forces are not bit-reproducible, so two runs with the same seed
-  start identically and diverge after a few thousand steps. Averages agree;
-  individual frames do not.
+- The seed controls random-number streams. Identical structures and trajectories
+  also require the same inputs, configuration, numerical backend and deterministic
+  operations; a seed alone does not guarantee bit-identical MLIP results.
+- CPU or GPU numerical differences can grow during MD. Compare ensemble statistics
+  across environments rather than expecting individual frames to match.
 - A frame-level `--resume` restarts the thermostat noise from a fresh stream, so
   a resumed run matches a fresh one statistically, not step for step.
 - NPT stages (Berendsen, MTK) contain no randomness beyond the initial

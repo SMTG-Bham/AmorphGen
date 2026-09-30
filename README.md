@@ -128,40 +128,40 @@ AmorphGen supports multiple calculator backends:
 
 | Backend | Install | Model name(s) |
 |---------|---------|----------------|
-| **MACE** | `pip install amorphgen[mace]` | `mace-mpa-0`, `mace-mpa-0-medium`, `mace-omat-0-medium`, ... (20+ variants) |
-| **CHGNet** | `pip install amorphgen[chgnet]` | `chgnet` |
-| **SevenNet** | `pip install amorphgen[sevennet]` | `sevennet`, `7net-mf-ompa`, `7net-l3i5`, `7net-omat`, `7net-0`, ... |
+| **MACE** | `pip install "amorphgen[mace]"` | `mace-mpa-0`, `mace-mpa-0-medium`, `mace-omat-0-medium`, ... (20+ variants) |
+| **CHGNet** | `pip install "amorphgen[chgnet]"` | `chgnet` |
+| **SevenNet** | `pip install "amorphgen[sevennet]"` | `sevennet`, `7net-mf-ompa`, `7net-l3i5`, `7net-omat`, `7net-0`, ... |
 | **Classical** | built-in (no extra install) | `lennard-jones`, `buckingham` |
 
 Only install the backend(s) you need. Classical potentials (Lennard-Jones, Buckingham+Coulomb) are built-in and require no GPU. Use `amorphgen --list-models` to see all available models.
 
-For ensembles on a GPU there is a second execution engine, [torch-sim](https://github.com/torchsim/torch-sim), selected with `--engine torchsim`. It relaxes, and in the hybrid workflow anneals and quenches, all structures of an ensemble in one batched call instead of one after another. It works with MACE, SevenNet and Lennard-Jones (CHGNet and Buckingham stay on the ASE engine), needs Python 3.12, the `[torchsim]` extra and a C/C++ compiler (it compiles kernels while it runs), and writes the same files as the ASE engine. See the [backends guide](https://smtg-bham.github.io/AmorphGen/guides/backends.html) for details.
+For ensembles on a GPU there is a second execution engine, [torch-sim](https://github.com/torchsim/torch-sim), selected with `--engine torchsim`. It relaxes structures in batches and supports NVT annealing and quenching in the hybrid workflow. Batch sizes adapt to available memory. It works with MACE, SevenNet and Lennard-Jones (CHGNet and Buckingham stay on the ASE engine), needs Python 3.12+, the `[torchsim]` extra and a C/C++ compiler (it compiles kernels while it runs), and writes the same files as the ASE engine. See the [backends guide](https://smtg-bham.github.io/AmorphGen/guides/backends.html) for details.
 
-> **ASE pass-through.** AmorphGen wraps each backend's upstream ASE calculator without modifying unit conventions, stress signs, or PBC handling; this energies (eV), forces (eV/Å), stress (eV/Å³), and `atoms.pbc` are inherited directly from the upstream MLIP package. See [docs/guides/backends](https://smtg-bham.github.io/AmorphGen/guides/backends.html) for details.
+> **ASE pass-through.** AmorphGen wraps each backend's upstream ASE calculator without modifying unit conventions, stress signs, or PBC handling; energies (eV), forces (eV/Å), stress (eV/Å³), and `atoms.pbc` are inherited directly from the upstream MLIP package. See [docs/guides/backends](https://smtg-bham.github.io/AmorphGen/guides/backends.html) for details.
 
 ---
 
 ## Installation
 
-AmorphGen supports Linux and macOS. Windows is not supported natively; use [WSL](https://learn.microsoft.com/windows/wsl/) instead.
+AmorphGen requires Python 3.10+ and supports Linux and macOS. Windows is not supported natively; use [WSL](https://learn.microsoft.com/windows/wsl/) instead.
 
-| Tasks | Install | Size |
-|---|---|---|
-| generate random structures, analyse trajectories (RDF, CN, S(q), plots), run classical LJ/Buckingham pipelines | `pip install -e .` | ~80 MB, **no PyTorch** |
-| + MLIP relaxation & melt-quench MD | `pip install -e ".[mace]"` or `".[chgnet]"` | + PyTorch |
-| + everything (MACE + CHGNet) | `pip install -e ".[all]"` | + PyTorch |
-| + batched GPU relaxation and MD of ensembles (`--engine torchsim`) | `pip install -e ".[mace,torchsim]"` (Python 3.12+ and a C/C++ compiler; CUDA or CPU, no Apple MPS) | + torch-sim |
+| Task | Install from a checkout |
+|---|---|
+| Random generation, structure analysis and classical LJ/Buckingham pipelines | `pip install -e .` (no PyTorch) |
+| MLIP relaxation and melt-quench MD | `pip install -e ".[mace]"` or `pip install -e ".[chgnet]"` |
+| MACE + CHGNet | `pip install -e ".[all]"` |
+| Batched relaxation and hybrid MD (`--engine torchsim`) | `pip install -e ".[mace,torchsim]"` (Python 3.12+, a C/C++ compiler, CUDA or CPU; no Apple MPS) |
 
-With pip, from source (once AmorphGen is on PyPI, `pip install "amorphgen[mace,chgnet]"` replaces the clone):
+Install from source:
 
 ```bash
 git clone https://github.com/SMTG-Bham/AmorphGen.git
 cd AmorphGen
 pip install -e ".[mace,chgnet]"      # example: MACE + CHGNet
-pip install -e ".[all,dev]"          # everything + pytest
+# For development instead: pip install -e ".[all,dev,docs]"
 ```
 
-With conda, which keeps the install isolated and on HPC provides the CUDA toolchain. The environment files in [`build_tools/`](https://github.com/SMTG-Bham/AmorphGen/tree/main/build_tools) create the environment and install the clone into it in editable mode in one step, with MACE + CHGNet (`environment.yml`) or, for development, with the torch-sim engine, pytest and the docs toolchain as well (`environment_dev.yml`):
+Conda can keep the installation isolated. The environment files in [`build_tools/`](https://github.com/SMTG-Bham/AmorphGen/tree/main/build_tools) create the environment and install the clone into it in editable mode in one step, with MACE + CHGNet (`environment.yml`) or, for development, with the torch-sim engine, pytest and the docs toolchain as well (`environment_dev.yml`):
 
 ```bash
 git clone https://github.com/SMTG-Bham/AmorphGen.git
@@ -170,25 +170,13 @@ conda env create -f build_tools/environment.yml       # or build_tools/environme
 conda activate amorphgen                               # or amorphgen-dev
 ```
 
-Or create the environment with conda, then install into it with pip:
-
-```bash
-conda create -n amorphgen python=3.11
-conda activate amorphgen
-
-# from source (current):
-git clone https://github.com/SMTG-Bham/AmorphGen.git
-cd AmorphGen
-pip install -e ".[mace,chgnet]"
-
-# or, once released on PyPI:
-pip install "amorphgen[mace,chgnet]"
-```
+For PyPI installation, separate backend environments and compiler setup, see the
+[installation guide](https://smtg-bham.github.io/AmorphGen/getting-started/installation.html).
 
 > **MLIPs are optional.** The base package is deliberately torch-free.
 > Install an MLIP extra only when you need MACE/CHGNet/SevenNet relaxation
 > or melt-quench MD; with no torch present, `--device auto` resolves to CPU,
-> and calculator-requiring commands fail fast with the exact install line.
+> and commands requesting an unavailable MLIP backend show its install command.
 > `amorphgen --list-models` shows every model with installed/missing markers.
 
 > **SevenNet needs its own environment.** SevenNet depends on `e3nn>=0.5`,
@@ -202,10 +190,9 @@ pip install "amorphgen[mace,chgnet]"
 > pip install -e ".[sevennet,chgnet]"
 > ```
 > The `[full]` extra installs MACE+CHGNet+SevenNet in one env but loading
-> MACE foundation models will then fail unless you upgrade `mace-torch` to
-> a release that supports e3nn 0.5+.
+> MACE foundation models may fail. Prefer separate environments for these backends.
 
-> **GPU strongly recommended.** Use `--device cuda` or `"device": "auto"`.
+> **GPU recommended for MLIP MD.** Use `--device cuda` or `"device": "auto"`.
 > Device auto-detection only runs when a job starts. On a login node with no GPU, no device message will appear until a stage is launched.
 
 ---
@@ -217,10 +204,10 @@ pip install "amorphgen[mace,chgnet]"
 ```bash
 # -- Random generation (no crystal input needed) --
 # Generate 10 random In2O3 structures (80 atoms each) and relax with MACE
-amorphgen --random-gen --composition "In2O3*16" --relax --device cpu
+amorphgen --random-gen --composition "In2O3*16" -n 10 --relax --device cpu
 
 # Same thing with explicit atom counts
-amorphgen --random-gen --composition In=32,O=48 --relax --device cpu
+amorphgen --random-gen --composition In=32,O=48 -n 10 --relax --device cpu
 
 # -- Melt-quench pipeline (from crystalline input) --
 # Full 7-stage pipeline with MACE (default)
@@ -233,13 +220,13 @@ amorphgen POSCAR --model chgnet --device cpu
 amorphgen --list-models
 
 # -- Ensembles on a GPU with the torch-sim engine (pip install -e ".[mace,torchsim]") --
-# Generate 50 structures and relax them all in one batched call
+# Generate 50 structures and relax them in batches
 amorphgen --random-gen --composition "GeO2*192" -n 50 --relax \
     --model mace-mpa-0 --device cuda --engine torchsim -o geo2_seeds/
 
 # Anneal, quench and relax the whole ensemble together (stages 4-7, NVT)
 amorphgen --hybrid-ensemble --input-dir geo2_seeds/random_opt/ \
-    --config hybrid.yaml --model mace-mpa-0 --device cuda --engine torchsim \
+    --model mace-mpa-0 --device cuda --engine torchsim \
     -o geo2_hybrid/ --resume
 ```
 
@@ -284,7 +271,7 @@ pipe = MeltQuenchPipeline(
 )
 
 # Run specific stages
-pipe.run(stages=[5, 6, 7], input_file="stage4_eq_high.xyz")
+pipe.run(stages=[5, 6, 7], input_file="stage4_eq.xyz")
 ```
 
 ---
@@ -293,10 +280,10 @@ pipe.run(stages=[5, 6, 7], input_file="stage4_eq_high.xyz")
 
 Add `seed: 42` at the top level (or `--seed 42` on the command line) to make a
 run reproducible: it seeds the random placement and the velocity initialisation
-and thermostat noise of every MD stage. Same seed, same CPU and same package
-versions give bit-identical output; on a GPU, MLIP forces are not
-bit-reproducible and trajectories diverge after a few thousand steps.
-
+and thermostat noise of every MD stage. Reproducibility also depends on the
+backend, hardware and package versions.
+GPU calculations and interrupted/resumed MD runs need not reproduce the exact
+trajectory of an uninterrupted run.
 
 Instead of passing many CLI flags, you can define settings in a YAML file:
 
@@ -372,7 +359,8 @@ amorphgen --random-gen --config random_gen_config.yaml --work-dir SiO2_sc
 amorphgen --batch-opt --input-dir SiO2_sc/random_initial --work-dir SiO2_sc_opt --config random_gen_config.yaml
 ```
 
-See `amorphgen/configs/example_config.yaml` for all available options.
+See [example_config.yaml](https://github.com/SMTG-Bham/AmorphGen/blob/main/amorphgen/configs/example_config.yaml) for annotated
+configuration options.
 
 ---
 
@@ -475,11 +463,13 @@ batch_optimize(
 
 The `--batch-opt` mode uses the full `opt_cell.run()` under the hood, giving
 you proper logging, trajectory files, configurable optimizer/cell filter,
-and float64 precision.
+and configurable precision (`auto` by default).
 
 ### Coordination-aware placement
 
-For better short-range order, enable coordination-aware placement with `--target-cn`. New atoms are biased toward existing under-coordinated sites, and placements that would push any neighbour over its target CN are rejected:
+Set `--target-cn` to choose the coordination targets used during placement. New
+atoms are biased toward existing under-coordinated sites, and placements that
+exceed the allowed coordination (target plus tolerance) are rejected:
 
 ```bash
 # Coordination-aware placement: atoms placed near under-coordinated sites
@@ -508,7 +498,7 @@ atoms = generate_random(
 )
 ```
 
-Coordination-aware placement produces structures with correct coordination from the start, requiring less relaxation to reach the correct topology. Disable it with `--no-sc` (legacy flag name; the placement is enabled by default whenever `--target-cn` is set or auto-detected).
+Coordination-aware placement biases the initial structure toward the requested coordination; it does not guarantee every atom reaches its target CN. Check the generated and relaxed structures with `--analyse`. Disable coordination-aware placement with `--no-sc` (legacy flag name; the placement is enabled by default whenever `--target-cn` is set or auto-detected).
 
 ---
 
@@ -564,11 +554,13 @@ Notes on the options:
   other pairs. For elements bonded to several partner types (O in IGZO) the
   report adds the total coordination over all bonded partners.
 
-Files written by `--save-plot DIR`: `analysis_rdf`, `analysis_cn`,
-`analysis_angles`, `analysis_density`, and with the matching flag `analysis_sq`,
-`analysis_sq_partials`, `analysis_rdf_panels`, `analysis_cn_total`,
-`analysis_rings`, `analysis_connectivity`, `analysis_voronoi`, each as PNG (and
-PDF with `--save-pdf`) plus CSV.
+`--save-plot DIR` writes RDF and coordination PNGs and CSVs, plus angle
+outputs when valid triplets exist and density outputs for ensembles with
+at least two structures. `--save-pdf` adds PDF copies. Optional flags add S(q),
+ring and total-coordination plots and data; partial/pair-panel plots reuse
+the corresponding total CSV. Connectivity and Voronoi outputs are CSV files.
+See the [analysis output reference](https://smtg-bham.github.io/AmorphGen/guides/analysis.html#outputs-explained)
+for filenames.
 
 ### Worked example: a multi-cation oxide (a-IGZO)
 
@@ -629,7 +621,7 @@ reference-YAML format.
 
 ## Generating multiple independent structures (batch quench)
 
-### Step 1: Run Stages 1–4 with snapshot sampling
+### Step 1: Run stages 1–4 and save the high-temperature trajectory
 
 ```bash
 amorphgen POSCAR \
@@ -638,19 +630,28 @@ amorphgen POSCAR \
     --work-dir melt_run/
 ```
 
-### Step 2: Batch quench N independent runs from snapshots
+### Step 2: Batch quench N runs from snapshots
+
+`--snapshot-dir` accepts a directory of structures or a trajectory file. The
+command below extracts 20 evenly spaced frames from the saved trajectory. Use
+`--burn-in-frames` to exclude an initial unequilibrated portion; choose snapshot
+spacing long enough for the structural correlations relevant to your system.
 
 ```bash
 amorphgen --batch-quench \
-    --snapshot-dir snapshots/ \
+    --snapshot-dir melt_run/stage4_eq_traj.xyz \
     --n-runs 20 --select uniform \
     --batch-stages 5 6 7 \
     --work-dir batch_run/
 ```
 
 ```python
+from amorphgen import extract_snapshots
 from amorphgen.pipeline import batch_quench
 
+snapshot_paths = extract_snapshots(
+    "melt_run/stage4_eq_traj.xyz", n_snapshots=20, output_dir="snapshots",
+)
 results = batch_quench.run(
     snapshot_files=snapshot_paths,
     n_runs=20,
@@ -667,7 +668,7 @@ If a batch job times out, resubmit with `--resume`; already-completed runs are s
 
 ```bash
 amorphgen --batch-quench \
-    --snapshot-dir snapshots/ \
+    --snapshot-dir melt_run/stage4_eq_traj.xyz \
     --n-runs 20 --select uniform \
     --resume \
     --work-dir batch_run/
@@ -696,7 +697,9 @@ Equilibrate at T_melt (NVT, 20+ ps)
 from amorphgen.pipeline.random_gen import generate_random
 from amorphgen.pipeline.opt_cell import run as opt_run
 from amorphgen.pipeline.equilibrate import run as eq_run
-from amorphgen import MeltQuenchPipeline
+from amorphgen import extract_snapshots
+from amorphgen.pipeline import batch_quench
+from amorphgen.utils import get_calculator
 
 # Step 1: Generate random structure (auto minsep from Shannon radii)
 atoms = generate_random(
@@ -707,21 +710,29 @@ atoms = generate_random(
 
 # Step 2: Optimise (positions only)
 calc = get_calculator(model="chgnet", device="cpu")
-optimised = opt_run(atoms, cfg_override={"opt": {"fmax": 0.1}}, calc=calc)
+optimised = opt_run(
+    atoms, cfg_override={"opt": {"fmax": 0.1, "cell_filter": "none"}},
+    calc=calc, work_dir="hybrid_seed",
+)
 
 # Step 3: Equilibrate at 2000 K
 liquid = eq_run(optimised, cfg_override={
-    "eq_high": {"ensemble": "NVT", "T": 2000, "steps": 10000, "timestep": 0.5},
-}, calc=calc, stage="high")
+    "eq_high": {"ensemble": "NVT", "T": 2000, "steps": 40000, "timestep": 0.5},
+}, calc=calc, stage="high", work_dir="hybrid_liquid")
 
 # Step 4: Extract snapshots and batch quench (Stages 5 → 6 → 7)
-for snap_file in snapshot_files:
-    pipe = MeltQuenchPipeline(input_file=snap_file, work_dir=run_dir,
-        cfg_override={"model": "chgnet", "device": "cpu"})
-    pipe.run(stages=[5, 6, 7])
+snapshot_files = extract_snapshots(
+    "hybrid_liquid/stage4_eq_traj.xyz", n_snapshots=5,
+    output_dir="hybrid_snapshots", burn_in_frames=100,
+)
+batch_quench.run(
+    snapshot_files, work_dir="hybrid_quenches", calc=calc,
+    cfg_override={"quench": {"T_start": 2000}},
+)
 ```
 
-See **Tutorial 5** for a complete working example.
+See [Tutorial 5](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T5_mix_random_MQ/tutorial_5_batch_quench.ipynb)
+for a complete working example.
 
 ---
 
@@ -731,7 +742,7 @@ See **Tutorial 5** for a complete working example.
 |-------|---------|--------------|
 | Stage 2 pre-melt eq | NVT | `--eq-premelt-ensemble NPT` |
 | Stage 3 melt | NPT | `--melt-ensemble NVT` |
-| Stage 4 high-T eq | NVT | `--eq-high-ensemble NPT` |
+| Stage 4 high-T eq | NPT (MTK) | `--eq-high-ensemble NVT` |
 | Stage 5 quench | NVT | `--quench-ensemble NPT` |
 | Stage 6 low-T eq | NVT | `--eq-low-ensemble NPT` |
 
@@ -740,19 +751,20 @@ See **Tutorial 5** for a complete working example.
 ## Heating / cooling rate
 
 ```bash
-amorphgen POSCAR \
-    --melt-T-step 100 --melt-steps-per-T 1000     # 100 K/ps heating
-    --quench-T-step -50 --quench-steps-per-T 2000  # 25 K/ps cooling
+# At a 0.5 fs timestep: 100 K/ps heating and 25 K/ps cooling
+amorphgen POSCAR --timestep 0.5 \
+    --melt-T-step 100 --melt-steps-per-T 2000 \
+    --quench-T-step -50 --quench-steps-per-T 4000
 ```
 
-Common cooling rates:
+For `--quench-T-step -100` and `--timestep 0.5`, common cooling rates are:
 
 | Rate | `--quench-steps-per-T` | Time (3000 → 300 K) |
 |------|------------------------|----------------------|
-| 200 K/ps | 500 | ~13 ps |
-| 100 K/ps (default) | 1000 | ~27 ps |
-| 10 K/ps | 10000 | ~270 ps |
-| 1 K/ps | 100000 | ~2700 ps |
+| 200 K/ps | 1000 | 13.5 ps |
+| 100 K/ps (default) | 2000 | 27 ps |
+| 10 K/ps | 20000 | 270 ps |
+| 1 K/ps | 200000 | 2700 ps |
 
 ---
 
@@ -787,57 +799,25 @@ amorphgen --list-models   # full table of all models grouped by backend
 
 ## Full configuration reference
 
-All defaults are in `amorphgen/configs/default_config.py`. Override any value via `cfg_override`:
+Use [example_config.yaml](https://github.com/SMTG-Bham/AmorphGen/blob/main/amorphgen/configs/example_config.yaml) for the annotated
+YAML reference and [the configuration guide](https://github.com/SMTG-Bham/AmorphGen/blob/main/docs/guides/yaml-config.md) for
+precedence and stage options. Shared pipeline defaults live in
+[default_config.py](https://github.com/SMTG-Bham/AmorphGen/blob/main/amorphgen/configs/default_config.py); individual stage
+functions supply additional defaults. `amorphgen --help` lists CLI options.
+
+Python callers can pass the same configuration mapping as `cfg_override`:
 
 ```python
+from amorphgen import MeltQuenchPipeline
+
 pipe = MeltQuenchPipeline(
     input_file="POSCAR",
     work_dir="my_run",
     cfg_override={
-        "model":       "mace-mpa-0",  # or "chgnet", "7net-mf-ompa", "buckingham", etc.
-        "model_path":  None,           # path to local .model file (overrides model)
-        "device":      "auto",         # "cuda", "cpu", or "auto"
-        "traj_format": "extxyz",       # "extxyz", "xyz", "traj", "lammps-dump"
-
-        "opt": {
-            "fmax": 0.01,
-            "max_steps": 1000,
-        },
-        "eq_premelt": {
-            "ensemble": "NVT",
-            "T": 300,
-            "steps": 100000,       # 50 ps at 0.5 fs timestep
-            "timestep": 0.5,
-            "friction": 0.01,
-        },
-        "melt": {
-            "ensemble": "NPT",
-            "T_start": 300, "T_end": 3000,
-            "T_step": 100, "steps_per_T": 1000,
-            "timestep": 0.5,
-            "friction": 0.01, "ttime": 25.0,
-        },
-        "eq_high": {
-            "ensemble": "NVT",
-            "T": 3000,
-            "steps": 10000,
-            "timestep": 0.5,
-            "friction": 0.01,
-        },
-        "quench": {
-            "ensemble": "NVT",
-            "T_start": 3000, "T_end": 300,
-            "T_step": -100, "steps_per_T": 1000,
-            "timestep": 0.5,
-            "friction": 0.01, "ttime": 25.0,
-        },
-        "eq_low": {
-            "ensemble": "NVT",
-            "T": 300,
-            "steps": 10000,
-            "timestep": 0.5,
-            "friction": 0.01,
-        },
+        "model": "mace-mpa-0",
+        "device": "auto",
+        "opt": {"fmax": 0.02},
+        "quench": {"rate": 10},  # K/ps; overrides steps_per_T
     },
 )
 ```
@@ -891,12 +871,13 @@ AmorphGen/
 ├── .github/workflows/
 │   └── test.yml                    ← CI (Linux/macOS, backends, min deps, wheel)
 ├── amorphgen/
-│   ├── __init__.py                 ← v1.0.0rc4
+│   ├── __init__.py                 ← public API and package version
 │   ├── cli.py                      ← CLI entry point (amorphgen command)
 │   ├── configs/
 │   │   ├── default_config.py       ← all default parameters
 │   │   ├── yaml_config.py          ← YAML config loader
 │   │   └── example_config.yaml     ← example YAML with all options
+│   ├── analysis/                  ← StructureAnalyser, RDF, CN, S(q), validation
 │   ├── pipeline/
 │   │   ├── run_pipeline.py         ← MeltQuenchPipeline orchestrator
 │   │   ├── opt_cell.py             ← Stages 1 & 7 (optimisation) + batch_optimize()
@@ -906,12 +887,11 @@ AmorphGen/
 │   │   ├── batch_quench.py         ← batch runner: Stages 5 → 6 → 7 on N snapshots
 │   │   └── random_gen.py           ← random + coordination-aware placement
 │   └── utils/
-│       ├── analysis.py             ← StructureAnalyser (density, CN, RDF, angles)
 │       ├── calculators.py          ← multi-backend calculator factory
 │       ├── radii.py                ← Shannon/metallic radii, minsep, density estimation
 │       └── common.py               ← dynamics builder, logger, trajectory writer
 ├── build_tools/                    ← conda environment files (user + dev)
-├── test/                           ← 114 tests (4 skipped without --run-mace)
+├── test/                           ← unit and optional backend integration tests
 ├── pyproject.toml
 ├── LICENSE                         ← MIT
 └── README.md
@@ -936,11 +916,11 @@ amorphgen /abs/path/to/In2O3_POSCAR \
     --model mace-mpa-0 \
     --device cuda \
     --work-dir /scratch/InO_amorphous \
-    --melt-T-end 2500 \
+    --melt-T-end 2500 --eq-high-T 2500 \
     --quench-T-start 2500
 ```
 
-An ensemble of many structures on one GPU is quicker with the torch-sim
+An ensemble of structures on one GPU can use the torch-sim
 engine, which batches the structures and, together with `--resume`, can be
 resubmitted into a short queue until it finishes. Outputs are written after
 every chunk and MD trajectories every 100 steps, so a walltime kill costs at
@@ -959,7 +939,7 @@ export PYTHONUNBUFFERED=1            # progress in the log while the job runs
 source /path/to/venv/bin/activate    # Python 3.12 with amorphgen[mace,torchsim]
 
 amorphgen --hybrid-ensemble --input-dir /scratch/geo2_seeds/random_opt/ \
-    --config hybrid.yaml --model mace-mpa-0 --device cuda \
+    --model mace-mpa-0 --device cuda \
     --engine torchsim --batch-size auto \
     --work-dir /scratch/geo2_hybrid --resume
 ```
@@ -967,7 +947,7 @@ amorphgen --hybrid-ensemble --input-dir /scratch/geo2_seeds/random_opt/ \
 Ready-made BlueBEAR scripts for generation arrays, batched relaxation, batched
 MD and the GPU test suite are in `examples/`. Set `AMORPHGEN_VENV`, select your
 account with `sbatch --account=your-project`, and create `logs/` before submitting.
-See the [HPC guide](docs/guides/hpc.md#configuring-the-bundled-examples) for
+See the [HPC guide](https://github.com/SMTG-Bham/AmorphGen/blob/main/docs/guides/hpc.md#configuring-the-bundled-examples) for
 repository paths and cluster-specific setup.
 
 ---
@@ -979,7 +959,9 @@ repository paths and cluster-specific setup.
 | `ase` | MD engine, optimisers, I/O |
 | `numpy` | Array operations |
 | `scipy` | Vectorized erfc for Coulomb (classical) |
-| `torch` | GPU backend (MLIP + optional classical GPU) |
+| `pyyaml` | YAML configuration |
+| `matplotlib` | Analysis plots |
+| `torch` | Tensor runtime installed by optional MLIP / torch-sim dependencies |
 | `mace-torch` | MACE calculator (optional) |
 | `chgnet` | CHGNet calculator (optional) |
 | `sevenn` | SevenNet calculator (optional) |

@@ -1,6 +1,9 @@
 # Quickstart
 
-This page shows the three main workflows in AmorphGen.
+This page covers melt-quench, random generation and hybrid ensembles, followed
+by batch quenching and GPU batching. Install the backend used by each example
+first (see {doc}`installation`). Unrelaxed random generation needs only the base
+package.
 
 ## 1. Melt-and-quench pipeline
 
@@ -13,11 +16,11 @@ Run the full 7-stage pipeline on a crystalline input structure:
 # Full pipeline
 amorphgen POSCAR --model mace-mpa-0 --device cuda
 
-# With YAML config
+# With a YAML configuration you have saved
 amorphgen POSCAR --config pipeline.yaml
 
-# Hybrid (skip heating, resume from checkpoint)
-amorphgen structure.xyz --stages 1 4 5 6 7 --config config.yaml --resume
+# Resume an interrupted run in the same work directory
+amorphgen POSCAR --model mace-mpa-0 --device cuda --resume
 ```
 :::
 
@@ -32,8 +35,8 @@ pipe = MeltQuenchPipeline(
 )
 atoms = pipe.run()
 
-# Hybrid with resume
-atoms = pipe.run(stages=[1, 4, 5, 6, 7], resume=True)
+# On a later invocation, resume completed stages / saved MD frames
+atoms = pipe.run(resume=True)
 ```
 :::
 
@@ -46,14 +49,15 @@ atoms = pipe.run(stages=[1, 4, 5, 6, 7], resume=True)
 | 1 | Optimise | Relax positions (+ cell with FrechetCellFilter) |
 | 2 | Pre-melt equilibration | NVT at 300 K |
 | 3 | Melt | Heat ramp to high temperature (configurable rate in K/ps) |
-| 4 | High-T equilibration | Equilibrate at melt temperature |
+| 4 | High-T equilibration | NPT (MTK) at melt temperature by default |
 | 5 | Quench | Cool to target temperature (configurable rate in K/ps) |
 | 6 | Low-T equilibration | Equilibrate at low temperature |
 | 7 | Final optimisation | Final relaxation |
 
 ## 2. Random structure generation
 
-Generate an ensemble of random amorphous structures with automated minimum separations from Shannon ionic radii:
+Generate an ensemble of random amorphous structures with minimum separations
+derived from ionic, covalent or metallic radii according to the composition:
 
 ::::{tab-set}
 
@@ -79,7 +83,7 @@ amorphgen --random-gen --composition "In2O3*8" \
 ```python
 from amorphgen.pipeline.random_gen import generate_random, batch_random
 
-# Single structure (auto minsep from Shannon radii)
+# Single structure (automatic minimum separations)
 atoms = generate_random(
     composition={"In": 16, "O": 24},
     target_density=5.0,
@@ -98,7 +102,21 @@ paths = batch_random(
 
 ::::
 
-## 3. Batch quench
+## 3. Hybrid ensemble
+
+Start from disordered structures and run stages 4–7 on each, skipping the
+crystalline optimisation and heating stages:
+
+```bash
+amorphgen --random-gen --composition "SiO2*16" -n 5 --work-dir sio2_seeds
+amorphgen --hybrid-ensemble --input-dir sio2_seeds/random_initial \
+    --model mace-mpa-0 --device cuda --work-dir sio2_hybrid --resume
+```
+
+Final structures are collected in `sio2_hybrid/final/`. To hold the initial
+volume during MD, set `--eq-high-ensemble NVT`; the default ASE stage 4 uses NPT.
+
+## Batch quench
 
 Quench multiple snapshot structures through the final pipeline stages:
 
@@ -110,22 +128,23 @@ amorphgen --batch-quench \
     --resume
 ```
 
-## 4. Ensembles on a GPU with the torch-sim engine
+## Ensembles on a GPU with the torch-sim engine
 
 With `pip install "amorphgen[mace,torchsim]"` (Python 3.12+, and a
-[C/C++ compiler](installation.md#the-torch-sim-engine)) the ensemble
-modes can batch all structures into one GPU call instead of running them one
-after another. Add `--engine torchsim` to the command; the output files are
-the same as with the ASE engine.
+[C/C++ compiler](installation.md#the-torch-sim-engine)), the
+`--random-gen --relax`, `--batch-opt` and `--hybrid-ensemble` modes process
+structures in batches. Add `--engine torchsim` to the command; the output files
+are the same as with the ASE engine. Hybrid MD uses NVT; an explicit NPT
+configuration is rejected.
 
 ```bash
-# Generate 50 seeds and relax them all in one batched call
+# Generate 50 seeds and relax them in batches
 amorphgen --random-gen --composition "GeO2*192" -n 50 --relax \
     --model mace-mpa-0 --device cuda --engine torchsim -o geo2_seeds/
 
 # Anneal, quench and relax the whole ensemble together (stages 4-7, NVT only)
 amorphgen --hybrid-ensemble --input-dir geo2_seeds/random_opt/ \
-    --config hybrid.yaml --model mace-mpa-0 --device cuda --engine torchsim \
+    --model mace-mpa-0 --device cuda --engine torchsim \
     -o geo2_hybrid/ --resume
 ```
 
@@ -166,5 +185,5 @@ from amorphgen.utils import get_ionic_radius, classify_bond, default_minsep
 
 get_ionic_radius("In", cn=6)   # 0.80 A
 classify_bond("In", "O")       # "ionic"
-default_minsep(["In", "O"])    # {"In-In": 3.11, "In-O": 1.87, "O-O": 2.24}
+default_minsep({"In": 2, "O": 3})  # pair minimum separations in Å
 ```

@@ -29,7 +29,7 @@ calc = get_calculator(model="mace-mpa-0", device="auto")
 
 results = batch_quench.run(
     snapshot_files=["snap_0.xyz", "snap_1.xyz", "snap_2.xyz"],
-    n_runs=20,
+    n_runs=3,
     select="uniform",
     cfg_override={"model": "mace-mpa-0", "device": "auto"},
     work_dir="batch_run",
@@ -38,3 +38,8 @@ results = batch_quench.run(
     resume=True,
 )
 ```
+
+`n_runs` selects at most that many available snapshots; it does not create repeated
+runs from one snapshot. With the ASE engine, one selected input writes directly
+to `work_dir`; multiple inputs get separate `run_NNNN/` directories. Use a separate
+work directory for each single-input job in a SLURM array.

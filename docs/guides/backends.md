@@ -16,9 +16,13 @@ The default backend. Provides 20+ pre-trained foundation models including `mace-
 calc = get_calculator(model="mace-mpa-0", device="auto")
 ```
 
-`device="auto"` picks CUDA → MPS → CPU automatically; pass `"cpu"` / `"cuda"` / `"mps"` explicitly to override.
+`device="auto"` picks CUDA → MPS → CPU automatically. On Apple Silicon,
+MACE and SevenNet default to float64, which MPS cannot represent; use
+`device="cpu"` (CLI: `--device cpu`) with those defaults. CHGNet uses float32
+and has an MPS loading path. See the
+[installation guide](../getting-started/installation.md#backend-compatibility).
 
-Install: `pip install amorphgen[mace]`
+Install: `pip install "amorphgen[mace]"`
 
 ### CHGNet
 
@@ -28,7 +32,7 @@ Crystal Hamiltonian Graph Neural Network. Good balance of speed and accuracy, es
 calc = get_calculator(model="chgnet")
 ```
 
-Install: `pip install amorphgen[chgnet]`
+Install: `pip install "amorphgen[chgnet]"`
 
 Precision: CHGNet is trained and benchmarked at `float32`. AmorphGen's CHGNet loader enforces this, passing `default_dtype="float64"` raises `NotImplementedError` with a clear message pointing the user to MACE, because CHGNet's `composition_model` submodule builds its input feature vectors via a path that bypasses `torch.get_default_dtype()` and crashes at forward time when the rest of the model is upcast. The CLI refuses `model: chgnet` with `default_dtype: float64` before any work starts. Keeping `float32` (the default) is the recommended path for MD; switch to MACE if you genuinely need `float64` for static-energy precision.
 
@@ -36,7 +40,7 @@ A note on MD speed: CHGNet's `CHGNetCalculator.calculate()` rebuilds the atomic 
 
 ### SevenNet
 
-Equivariant graph neural network from KAIST (MDIL-SNU). Foundation models pre-trained on Materials Project / OMat / Alexandria. Multi-fidelity (`mf`) variants combine multiple DFT datasets.
+Equivariant graph neural network. Foundation models pre-trained on Materials Project / OMat / Alexandria. Multi-fidelity (`mf`) variants combine multiple DFT datasets.
 
 ```python
 calc = get_calculator(model="7net-mf-ompa", device="auto")  # ★ recommended default
@@ -47,7 +51,7 @@ calc = get_calculator(model="7net-omat")                    # OMat-trained
 
 For multi-fidelity models (`7net-mf-*`), AmorphGen defaults `modal='mpa'` (MPtrj+Alexandria, PBE). Override with the `modal` kwarg if you want `'omat24'` (PBE+U).
 
-Install: `pip install amorphgen[sevennet]` (no DGL dep, works on Mac/Linux)
+Install: `pip install "amorphgen[sevennet]"` (no DGL dep, works on Mac/Linux)
 
 :::{warning}
 Use a separate environment for SevenNet: it depends on `e3nn>=0.5`,
@@ -68,9 +72,10 @@ conda activate amorphgen-sevennet
 pip install -e ".[sevennet,chgnet]"
 ```
 
-The `[full]` extra installs everything in one env, but loading MACE
-foundation models will then fail unless you use a `mace-torch` release
-that supports e3nn 0.5+. CHGNet is unaffected (no e3nn dependency).
+The `[full]` extra installs the three MLIP backends in one environment;
+it does not include the optional torch-sim engine. Loading MACE foundation
+models can then fail unless the installed `mace-torch` release supports
+e3nn 0.5+. CHGNet is unaffected (no e3nn dependency).
 :::
 
 ### Custom / fine-tuned models
@@ -159,11 +164,11 @@ amorphgen --random-gen --composition "GeO2*192" -n 20 --relax \
     -m mace-mpa-0 --engine torchsim -o geo2_ensemble/
 ```
 
-or `engine: torchsim` in the YAML. Only `--batch-opt` and `--random-gen --relax`
-use it: all structures are relaxed together with torch-sim's FIRE optimiser
-instead of one after another through ASE. Output files, names and logs are the
-same as with the ASE engine, so `--analyse` and everything downstream is
-unchanged.
+or `engine: torchsim` in the YAML. In `--batch-opt` and `--random-gen --relax`,
+structures are relaxed in batches. Select the optimiser with `-O` (LBFGS by
+default). The output layout remains compatible with the ASE engine, so
+`--analyse` can read the results. Hybrid MD also supports torch-sim, as
+described below.
 
 The engine needs a C/C++ compiler wherever it runs, and pip does not install one:
 torch-sim's neighbour list goes through `torch.compile`, and without a compiler
@@ -171,10 +176,12 @@ the first relaxation stops with `InvalidCxxCompiler`. See
 [the installation page](../getting-started/installation.md#the-torch-sim-engine)
 for how to get one.
 
-What carries over: `-f/--fmax`, `--opt-steps`, `-O` (LBFGS by default, or FIRE, BFGS,
-gradient descent) and the cell filter (`cubic` maps
+What carries over: `-f/--fmax`, `--opt-steps`, `-O` (LBFGS by default, or FIRE
+and BFGS) and the cell filter (`cubic` maps
 to torch-sim's unit-cell filter with hydrostatic strain, `FrechetCellFilter` to
-its Frechet filter, `none` to fixed cell). Supported models: MACE foundation
+its Frechet filter, `none` to fixed cell). Gradient descent is available through
+YAML/Python as `optimizer: gradient_descent`; ASE-only choices such as `MDMin`
+and `BFGSLineSearch` are rejected by this engine. Supported models: MACE foundation
 models and `.model` files, SevenNet checkpoints, Lennard-Jones (single
 sigma/epsilon; used by the tests). CHGNet and Buckingham+Coulomb have no
 torch-sim implementation and raise a clear error; use the ASE engine for those.
@@ -186,7 +193,7 @@ is loose for cells of hundreds of atoms and left residuals of 0.1 to 0.3 GPa. Th
 `.cif` convenience copy is written next to the `.xyz`, as in the ASE path. Results
 are not bit-identical to the ASE path (different optimiser implementations) and
 may land in different local minima, as any two optimisers do on a random start. The single-structure melt-quench
-pipeline always uses ASE. The MD stages of the hybrid mode are not batched yet.
+pipeline uses ASE; batched hybrid MD is described below.
 
 
 ### Batched MD for the hybrid workflow

@@ -7,26 +7,26 @@ The melt-and-quench pipeline is a 7-stage molecular dynamics workflow that trans
 ```text
 ┌───────────┐    ┌───────────┐    ┌───────┐    ┌──────────┐    ┌─────────┐    ┌──────────┐    ┌───────────┐
 │ 1. Opt    │───▶│ 2. Pre-eq │───▶│ 3.Melt│───▶│ 4. Hi-eq │───▶│ 5.Quench│───▶│ 6. Lo-eq │───▶│ 7. Opt    │
-│  300 K    │    │  300 K    │    │ →3000K│    │  3000 K  │    │ →300 K  │    │  300 K   │    │  final    │
+│  relax    │    │  300 K    │    │ →3000K│    │  3000 K  │    │ →300 K  │    │  300 K   │    │  final    │
 └───────────┘    └───────────┘    └───────┘    └──────────┘    └─────────┘    └──────────┘    └───────────┘
 ```
 
 ## Stage descriptions
 
 ### Stage 1: Structure optimisation
-Relaxes the input structure (cell + atomic positions) to remove any initial stress. Uses LBFGS with `UnitCellFilter` by default.
+Relaxes the input structure (cell + atomic positions) to remove any initial stress. Uses LBFGS with `FrechetCellFilter` by default. Optimisation minimises the potential energy; it is not an MD stage at a prescribed temperature.
 
 ### Stage 2: Pre-melt equilibration
 Short NVT equilibration at 300 K. Thermalises the system before the rapid heating stage, improving trajectory stability.
 
 ### Stage 3: Melt (heat ramp)
-Linear temperature ramp from 300 K to the target melt temperature (default 3000 K). Uses **NPT with the Berendsen weak-coupling barostat** by default, the cell expands physically as the system heats.
+Segmented temperature ramp from 300 K to the target melt temperature (default 3000 K). Uses **NPT with the Berendsen weak-coupling barostat** by default, the cell expands physically as the system heats.
 
 ### Stage 4: High-temperature equilibration
 Holds the system at the melt temperature to ensure thorough melting and loss of crystalline memory. Uses **NPT with the Martyna-Tobias-Klein (MTK) Nose-Hoover-chain integrator** by default, giving true canonical fluctuations around the equilibrium melt volume. Users who want the legacy constant-volume behaviour can set `eq_high.ensemble: NVT`.
 
 ### Stage 5: Quench (cooling ramp)
-Linear cooling from the melt temperature back to 300 K. The quench rate controls the degree of structural disorder. Uses NVT by default.
+Segmented cooling from the melt temperature back to 300 K. The quench rate controls the degree of structural disorder. Uses NVT by default.
 
 ### Stage 6: Low-temperature equilibration
 Equilibrates the quenched structure at 300 K to relax any residual thermal stress.
@@ -51,7 +51,7 @@ Two parameters tune the Berendsen barostat for stiffer/slower volume control dur
 | Key | Default | What it does |
 |---|---|---|
 | `taup_factor` | 10.0 | Ratio of barostat coupling time to thermostat coupling time (`taup = taup_factor * ttime`). Larger → slower, more stable barostat. Applied to Berendsen `taup` and MTK `pdamp`. |
-| `compressibility_GPa` | 100.0 | Reference compressibility for the Berendsen barostat. The default (100 GPa) is liquid-like; oxides with bulk modulus 150–300 GPa benefit from 200 GPa for less aggressive volume control. |
+| `compressibility_GPa` | 100.0 | Reference bulk modulus in GPa. The Berendsen compressibility is its inverse; larger values reduce the volume response. |
 
 **Example: tighten the melt ramp for a-In₂O₃ / a-Ga₂O₃ / a-HfO₂**
 
@@ -73,7 +73,7 @@ eq_high:
   npt_method: mtk
 ```
 
-This is the new default for `eq_high`; the legacy NVT behaviour is restored by setting `ensemble: NVT`.
+This is the default for `eq_high`; the legacy NVT behaviour is restored by setting `ensemble: NVT`.
 
 ## Running specific stages
 

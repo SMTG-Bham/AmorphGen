@@ -18,9 +18,10 @@ MD-dynamics builder, trajectory I/O, config merging, density helper
 Shannon ionic / Cordero covalent / Goldschmidt metallic radii, bonding-type
 classification, automatic minsep + density + target-CN derivation, and
 charge-balance oxidation-state inference (``amorphgen.utils.radii``).
-These helpers are exercised end-to-end in **Tutorial 2**
-("Zero-config random structure generation") and underpin the
-auto-derivation chain documented in the JOSS paper.
+These helpers are exercised in **Tutorial 2**
+("Zero-config random structure generation"; see {doc}`/tutorials/index`)
+and underpin the automatic parameter choices described in
+{doc}`/guides/random-generation`.
 
 ```{eval-rst}
 .. automodule:: amorphgen.utils.radii

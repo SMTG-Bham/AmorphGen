@@ -14,7 +14,7 @@ DEFAULT_CONFIG = {
     # Foundation model short name — works across all backends:
     #   MACE:     "mace-mpa-0", "mace-mh-1", "mace-omat-0-medium", ...
     #   CHGNet:   "chgnet"
-    #   M3GNet:   "m3gnet"
+    #   SevenNet: "sevennet"
     "model": "mace-mpa-0",
 
     # Legacy alias — reads are redirected to "model" in the pipeline

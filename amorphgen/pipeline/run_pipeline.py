@@ -31,7 +31,7 @@ Usage
 
 Resuming from a checkpoint
 --------------------------
-    pipe.run(stages=[5, 6, 7], input_file="stage4_eq_high.xyz")
+    pipe.run(stages=[5, 6, 7], input_file="stage4_eq.xyz")
 """
 
 import os

@@ -15,8 +15,7 @@ The hybrid melt-quench (MQ) workflow skips the melt stage (stages 2-3)
 since the random structure is already disordered:
 
 ```
-Random (SC) → Optimise → High-T equilibrate → Quench → Low-T equilibrate → Final optimise
-  (stage 1)    (stage 4)      (stage 5)        (stage 6)       (stage 7)
+Random (SC) → Optimise (1) → High-T equilibrate (4) → Quench (5) → Low-T equilibrate (6) → Final optimise (7)
 ```
 
 ## Results
@@ -126,7 +125,7 @@ amorphgen SiO2_random/random_initial/random_0000.xyz \
     --work-dir SiO2_mq
 
 # Analyse
-amorphgen --analyse --input-dir SiO2_mq/ --save-plot SiO2_mq/plots
+amorphgen --analyse SiO2_mq/stage7_opt.xyz --save-plot SiO2_mq/plots
 ```
 
 ### Li₂ZrCl₆ with MACE MQ
@@ -179,7 +178,7 @@ amorphgen LZC_random/random_initial/random_0000.xyz \
     --config Li2ZrCl6_mace_mq.yaml \
     --stages 1 4 5 6 7 \
     --work-dir LZC_mq
-amorphgen --analyse --input-dir LZC_mq/ --save-plot LZC_mq/plots
+amorphgen --analyse LZC_mq/stage7_opt.xyz --save-plot LZC_mq/plots
 ```
 
 ### Python API
@@ -206,7 +205,7 @@ pipe = MeltQuenchPipeline(
     cfg_override={
         "model": "chgnet", "device": "mps",
         "opt": {"fmax": 0.05, "cell_filter": "cubic"},
-        "eq_high": {"T": 3000, "steps": 5000},
+        "eq_high": {"ensemble": "NVT", "T": 3000, "steps": 5000},
         "quench": {"T_start": 3000, "T_end": 300, "T_step": -100},
         "eq_low": {"T": 300, "steps": 2000},
     },
@@ -236,7 +235,7 @@ report = convergence_report(
 
 # From trajectory (full analysis: energy, MSD, RDF, CN)
 report = convergence_report(
-    "SiO2_mq/stage4_eq.xyz",
+    "SiO2_mq/stage4_eq_traj.xyz",
     timestep_fs=0.5,
     T_target=3000,
     pairs_cn=[("Si", "O", 4.0), ("O", "Si", 2.0)],

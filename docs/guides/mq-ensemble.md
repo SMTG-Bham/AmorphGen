@@ -1,6 +1,6 @@
 # MQ-ensemble workflow
 
-Generate **N independent amorphous structures from a single crystalline input** with one CLI command. This is the standard melt-quench MD ensemble pattern used in nearly every amorphous-oxide DFT/MLIP paper, packaged as a single AmorphGen mode.
+Generate **N amorphous structures from a single crystalline input** with one CLI command. This mode shares the initial melt preparation, then quenches selected snapshots separately.
 
 ## Concept
 
@@ -8,13 +8,13 @@ Generate **N independent amorphous structures from a single crystalline input** 
 Crystalline supercell  →  shared stages 1-4  →  extract N snapshots  →  N × stages 5-7  →  N amorphous structures
 ```
 
-The key efficiency win: **stages 1-4 (opt + premelt + heat + high-T equilibration) run only once** on the shared trajectory. Snapshots taken at evenly-spaced intervals from the long stage-4 trajectory are statistically independent samples of the equilibrium liquid; quenching each independently yields a diverse ensemble of amorphous structures.
+The key efficiency win: **stages 1-4 (opt + premelt + heat + high-T equilibration) run only once** on the shared trajectory. Snapshots are selected from the stage-4 trajectory and quenched separately. Uniform spacing does not guarantee statistical independence: discard unequilibrated frames with `--burn-in-frames` and choose spacing using the liquid's decorrelation time.
 
 ## Single-command CLI: `--mq-ensemble`
 
 ```bash
 amorphgen GaO.xyz --mq-ensemble --n-structures 20 \
-    --config mq.yaml --device cuda --model chgnet \
+    --config mq.yaml --device cuda --model chgnet --format vasp \
     -o ga2o3_mq/
 ```
 
@@ -62,7 +62,8 @@ high-T starting frame.
 
 For a single input, the ASE engine writes the stage outputs directly inside
 `quench_runs/`; the final structure is still collected into `final/mq_0000.<fmt>`.
-The torch-sim engine retains the `run_NNNN/` subdirectory for single inputs.
+`--mq-ensemble` uses the ASE engine; batched torch-sim MD is available in
+`--hybrid-ensemble`.
 
 ### HPC job-array tip
 
@@ -78,7 +79,7 @@ mkdir -p inputs_per_task/task_${TASK}
 cp snapshots/snapshot_${TASK}_frame*.xyz inputs_per_task/task_${TASK}/
 amorphgen --batch-quench \
   --snapshot-dir inputs_per_task/task_${TASK} \
-  --config mq.yaml --stages 5 6 7 \
+  --config mq.yaml --batch-stages 5 6 7 \
   --model chgnet --device cuda \
   -o quench_runs/run_${TASK}   # separate output directory for each task
 ```
@@ -88,15 +89,22 @@ A full SLURM array template ships with the package at
 
 ## Choosing protocol parameters: a note on methodology
 
-The defaults below match the common DFT-MD melt-quench protocol used in much of the amorphous-oxide literature (e.g. Kaewmeechai *et al.*, *Phys. Rev. B* 111, 035203, 2025), with one substitution forced by computational cost:
+The example below illustrates a protocol; it is not a material-independent
+validated recipe. Report and check the heating and cooling rates, equilibration
+duration, temperature, density and snapshot spacing for the chosen material
+and calculator. In particular:
 
-- Heating rate (Stage 3). DFT melt-quench studies typically use **0.5–1 K/ps** heating ramps. With foundation MLIPs (chgnet, MACE, SevenNet) on a single GPU, that translates to days of wall time per ramp. The default below uses **100 K/ps**, which is ~100× faster while still producing fully thermalised liquid configurations after the long Stage-4 equilibration. **If you are publishing a comparison to DFT melt-quench, document the heating-rate substitution explicitly in your methods section.**
-- Cooling rate (Stage 5). **100 K/ps** matches the upper end of the cooling rates used in published DFT melt-quench studies of oxides (typical range 0.5–100 K/ps). Defensible without methodology notes.
-- High-T anneal duration (Stage 4). **100 ps** matches typical DFT MD high-T equilibration. Long enough that snapshots taken at uniform intervals are statistically independent samples of the liquid.
-- Melt temperature (Stage 4). AmorphGen's default is **3000 K** (`eq_high.T: 3000`), inside the training window of all supported MLIPs. The example YAML below sets **4000 K** as a deliberate override matching the protocol of Kaewmeechai *et al.* (PRB 111, 035203, 2025): well above oxide melting points (~2000 K typical) but **outside chgnet's training window**. MACE and SevenNet handle 4000 K reliably for most systems; with chgnet, drop back to 3000 K if you see instability or non-physical behaviour.
-- Ensemble. **NPT throughout** lets the cell volume relax to the equilibrium liquid density at high T, then back to amorphous-solid density on cooling. NVT is an alternative if you trust the input cell volume and want to constrain it; matches AmorphGen's `examples/hybrid_airss_mq.yaml` template.
+- A `100 K/ps` heating or cooling rate is an input choice, not an assurance that
+  the structure has equilibrated. Check convergence before extracting snapshots.
+- `200000` steps at `0.5 fs` gives a `100 ps` high-temperature plateau. Longer
+  duration alone does not establish that snapshots are independent.
+- The example uses `4000 K`, above the package default of `3000 K`. Neither
+  temperature guarantees reliable MLIP predictions; inspect the trajectory
+  and validate the model for the system.
+- NPT allows the volume to change. Use NVT when holding a validated density
+  fixed, and inspect volume changes under NPT. See {doc}`best-practices`.
 
-## Recommended `mq.yaml` for an oxide
+## Example `mq.yaml` for an oxide
 
 ```yaml
 model: chgnet                       # or mace-mpa-0, sevennet, ...
@@ -123,7 +131,7 @@ eq_premelt:
 melt:
   ensemble: NPT
   T_start: 300
-  T_end: 4000           # well above oxide Tm
+  T_end: 4000           # example; validate for the material and model
   T_step: 100
   rate: 100             # K/ps; tighter (slower) for better-equilibrated melt
   timestep: 0.5
@@ -133,7 +141,7 @@ melt:
 eq_high:
   ensemble: NPT
   T: 4000
-  steps: 100000         # 100 ps - generous; ensures snapshots are independent
+  steps: 200000         # 100 ps at 0.5 fs; check decorrelation before sampling
   timestep: 0.5
   ttime: 25.0
 
@@ -143,7 +151,7 @@ quench:
   T_start: 4000
   T_end: 300
   T_step: -100
-  rate: 100             # K/ps; PRB protocols use 0.5-100 K/ps
+  rate: 100             # K/ps; check sensitivity to the cooling rate
   timestep: 0.5
   ttime: 25.0
 
@@ -156,7 +164,7 @@ eq_low:
   ttime: 25.0
 
 # Stage 7: final structural relaxation
-opt:
+final_opt:
   fmax: 0.05
   max_steps: 200
   optimizer: LBFGS
@@ -177,7 +185,7 @@ amorphgen --batch-quench --snapshot-dir shared/stage4_eq_traj.xyz \
     --config mq.yaml --resume -o quench_runs/
 ```
 
-`--batch-quench` accepts a trajectory file directly (polymorphic `--snapshot-dir`), internally extracts N snapshots, then runs the per-snapshot stages. Same final output as `--mq-ensemble` but split into two CLI invocations.
+`--batch-quench` accepts a trajectory file directly (polymorphic `--snapshot-dir`), internally extracts N snapshots, then runs the per-snapshot stages. It produces the same per-run stage outputs, but does not collect a separate `final/` directory; that collection is part of `--mq-ensemble`.
 
 ## HPC / Slurm split (best for parallelism)
 
@@ -212,8 +220,8 @@ Job 2 is an array (`#SBATCH --array=0-19`) whose tasks each set `TASK=$(printf "
 |--------------------|---------------------------|
 | Mid stages 1-4 | Skips completed stages and continues the interrupted MD stage from its last saved trajectory frame; optimisation stages restart from the beginning. |
 | Between stage 4 and snapshot extraction | Skips stages 1-4, re-extracts snapshots, runs 5-7. |
-| Mid quench-runs | Skips completed runs (looks for `final_amorphous.xyz`), re-runs the interrupted one. |
-| After all done | Reports "all complete", returns. Idempotent. |
+| Mid quench-runs | Skips completed runs (looks for `final_amorphous.xyz`), resumes interrupted MD from saved trajectory frames, and restarts final optimisation. |
+| After all done | Skips completed simulation work and rebuilds the snapshot and final collections. |
 
 ## When to use `--mq-ensemble` vs the alternatives
 
@@ -222,7 +230,7 @@ Job 2 is an array (`#SBATCH --array=0-19`) whose tasks each set `TASK=$(printf "
 | **Compare directly to published DFT melt-quench** | `--mq-ensemble` (full crystal → liquid → quench protocol) |
 | Generate amorphous structures from random starting points | `--hybrid-ensemble` ({doc}`hybrid-workflow`) |
 | Single amorphous structure (no ensemble) | Default pipeline (no flag, just `amorphgen INPUT --config ...`) |
-| Quench pre-extracted snapshots from an existing trajectory | `--batch-quench --snapshot-dir TRAJ` |
+| Quench existing snapshots or frames from a trajectory | `--batch-quench --snapshot-dir PATH` |
 
 ## Validation
 

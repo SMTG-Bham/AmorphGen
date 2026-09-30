@@ -21,7 +21,7 @@ amorphgen --random-gen --composition "TiO2*8" -n 20 \
 
 # 2. Run hybrid (stages 4-5-6-7) on each, in one CLI call
 amorphgen --hybrid-ensemble --input-dir random_TiO2/random_opt/ \
-    --config hybrid.yaml --device cuda --model chgnet \
+    --config hybrid.yaml --device cuda --model chgnet --format vasp \
     -o tio2_hybrid/
 ```
 
@@ -39,11 +39,14 @@ tio2_hybrid/
     └── hybrid_0019.vasp
 ```
 
-The `run_NNNN/` index matches the source snapshot index parsed from the input
-filename (`snapshot_NNNN_*.xyz`). When splitting the per-input runs across
-SLURM array tasks, point all tasks at the same `quench_runs/` directory;
-AmorphGen handles the per-snapshot naming. See {doc}`mq-ensemble`'s "HPC
-job-array tip" for the full SLURM template.
+For `snapshot_NNNN_*.xyz` inputs, the `run_NNNN/` index comes from the
+filename. Other filenames, including random-gen outputs, use their position
+in the sorted input list. A single input with the ASE engine writes directly
+inside `quench_runs/`; torch-sim keeps the `run_NNNN/` directory.
+
+Give each SLURM array task its own output directory to avoid collisions.
+See the "HPC job-array tip" in {doc}`mq-ensemble` for the per-task pattern;
+use `--batch-stages 4 5 6 7` for hybrid inputs.
 
 `--resume` is honoured at every step; re-running the command picks up incomplete runs.
 
@@ -66,17 +69,17 @@ from the last frame every run of a chunk has reached. For ten 350-atom IGZO
 structures with MACE-MPA-0 the batched run took 52 minutes against about
 100 minutes for the ASE engine on the same GPU. Details in {doc}`backends`.
 
-## Recommended `hybrid.yaml` for an oxide
+## Example `hybrid.yaml` for an oxide
 
 ```yaml
 model: chgnet
 device: cuda
 
-# Stage 4: anneal at high T (within MLIP training window)
+# Stage 4: anneal at high T (validate for the material and model)
 eq_high:
   ensemble: NVT
-  T: 3000              # above Tm but inside chgnet/MACE training data
-  steps: 20000         # 20 ps anneal - random inputs need less than crystal-melt
+  T: 3000              # illustrative temperature; check model reliability
+  steps: 20000         # 10 ps anneal at 0.5 fs
   timestep: 0.5
   friction: 0.01
 
@@ -94,7 +97,7 @@ quench:
 eq_low:
   ensemble: NVT
   T: 300
-  steps: 5000          # 5 ps
+  steps: 5000          # 2.5 ps at 0.5 fs
   timestep: 0.5
   friction: 0.01
 
@@ -110,7 +113,7 @@ opt:
 - Faster than running full 7-stage pipelines on N structures from crystals (skips crystal opt + premelt + heating ramp per structure).
 - Better sampling: random initial configurations provide diverse starting points.
 - Defensible cell volume: random-gen sets a sensible amorphous density up front; NVT preserves it.
-- Annealing at chgnet/MACE-trained T (e.g. 3000 K) avoids extrapolation while still being above the melting point of most oxides.
+- Choose the anneal temperature and duration for the material and validate the resulting structure; a temperature alone does not establish that an MLIP is operating within its training distribution. See {doc}`best-practices`.
 
 ## Comparison to `--mq-ensemble` (crystal melt-quench)
 
@@ -120,7 +123,7 @@ opt:
 | Stages run | 1-2-3-4 + N×(5-6-7) | N×(4-5-6-7) |
 | Crystal melt time | Yes (long stage 3) | No |
 | Cost per structure | High | Medium |
-| Defensibility for JOSS | Gold standard, matches DFT melt-quench protocols | Cheaper alternative; document the methodology deviation |
+| Method reporting | Record the shared melt and snapshot spacing | Record random placement, density and anneal settings |
 
 For tightly comparing to published DFT melt-quench results, use `--mq-ensemble`. For rapidly generating large ensembles for screening, use `--hybrid-ensemble`.
 

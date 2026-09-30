@@ -13,7 +13,7 @@ The pipeline module implements the 7-stage melt-and-quench molecular dynamics wo
 
 ## Stage modules
 
-### Stage 1 & 7: Structure optimisation
+### Stage 1: Structure optimisation
 
 ```{eval-rst}
 .. automodule:: amorphgen.pipeline.opt_cell
@@ -41,7 +41,10 @@ The pipeline module implements the 7-stage melt-and-quench molecular dynamics wo
    :members:
 ```
 
-### Final optimisation
+### Stage 7: Final optimisation
+
+Delegates to `opt_cell.run` with `stage_key="final_opt"`. Settings inherit
+from `opt`, with individual values overridden by `final_opt`.
 
 ```{eval-rst}
 .. automodule:: amorphgen.pipeline.final_opt

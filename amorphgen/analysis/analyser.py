@@ -354,10 +354,9 @@ class StructureAnalyser:
             Max radius for the underlying g(r). ``None`` = auto (half cell).
         weighting : {"unweighted", "xray", "neutron"}, default ``"unweighted"``
             How partials are combined into the total. ``"xray"`` uses
-            atomic-number-squared weighting (Faber-Ziman); ``"neutron"``
-            uses tabulated coherent scattering lengths. Pick ``"xray"``
-            for direct comparison with X-ray diffraction experiments
-            (recovers the FSDP that cancels in the unweighted sum).
+            q-dependent Waasmaier-Kirfel form factors (Faber-Ziman);
+            ``"neutron"`` uses tabulated coherent scattering lengths.
+            Match the weighting and normalization of the reference data.
 
         Returns
         -------
@@ -370,13 +369,11 @@ class StructureAnalyser:
     def structure_factor_direct(self, qmax=15.0, nq=300,
                                 weighting="xray", sigma_q=0.0,
                                 partials=False):
-        """Compute S(q) directly from atomic positions via the Debye
-        formula at reciprocal-lattice q-vectors.
+        """Compute Faber-Ziman S(q) from reciprocal-lattice scattering sums.
 
-        Avoids the rmax truncation that damps the FSDP in the FT-of-g(r)
-        method. Q-resolution is limited only by the cell size
-        (q_min ~ 2*pi/L). Slower than :meth:`structure_factor` but
-        gives correct peak intensities.
+        Avoids the finite-rmax integral in :meth:`structure_factor`.
+        The cell size still limits q sampling (q_min ~ 2*pi/L for a cubic
+        cell); inspect ``n_per_bin`` and check convergence.
 
         Parameters
         ----------
@@ -390,9 +387,8 @@ class StructureAnalyser:
             neutrons). See :func:`compute_structure_factor` for details.
         sigma_q : float, default 0.0
             Gaussian re-binning width in 1/A, weighted by the number of
-            q-vectors per shell. Removes the low-q speckle of the direct
-            method without moving peaks; keep well below the FSDP width.
-            0 returns the raw shell averages.
+            q-vectors per shell. Reduces noise but can broaden features;
+            compare with the raw values. 0 returns raw shell averages.
         partials : bool, default False
             Also return the Faber-Ziman partial structure factors
             ``S_ab(q)`` computed from the per-species amplitudes.

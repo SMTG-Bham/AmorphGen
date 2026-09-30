@@ -13,11 +13,11 @@ guidelines for contributing to this project.
    ```
 3. Install in development mode:
    ```bash
-   pip install -e ".[all,dev]"
+   pip install -e ".[dev,docs]"
    ```
 4. Create a branch for your changes:
    ```bash
-   git checkout -b my-feature
+   git switch -c my-feature
    ```
 
 ## Development setup
@@ -31,36 +31,37 @@ conda env create -f build_tools/environment_dev.yml
 conda activate amorphgen-dev
 ```
 
-Or install all dependencies including test tools into an environment of your
-own with pip:
+For the core package, tests, and documentation without an MLIP backend:
 
 ```bash
-pip install -e ".[all,dev]"
+pip install -e ".[dev,docs]"
 ```
 
-This installs the MACE and CHGNet backends plus pytest. SevenNet conflicts with
-MACE and needs an environment of its own.
+For MACE, CHGNet, and torch-sim development, use Python 3.12 and install
+`pip install -e ".[all,torchsim,dev,docs]"`. The torch-sim engine also needs
+a C/C++ compiler on `PATH`. SevenNet's e3nn dependency conflicts with the
+MACE extra, so use a separate environment for SevenNet.
 
 ## Running tests
 
 ```bash
-# Run the full test suite
+# Run the suite available in the current environment
 pytest test/ -v --tb=short
 
 # Run with MACE integration tests (requires mace-torch + GPU recommended)
 pytest test/ -v --tb=short --run-mace
 ```
 
-All tests must pass on Python 3.10 to 3.14 before a pull request will be
-merged. GitHub Actions CI runs automatically on every push and pull
-request to `main` and `dev`:
+Tests requiring an uninstalled optional backend are skipped. GitHub Actions
+tests the core package on Python 3.10 to 3.14 and runs backend tests in
+separate jobs on every push and pull request to `main` and `dev`:
 
 | Job | Checks |
 |---|---|
 | `lint` | syntax errors and undefined names (ruff) in the package, tests, docs config and tutorial notebooks |
 | `test` | the torch-free suite on Python 3.10 to 3.14 on Linux, and on 3.14 on macOS |
 | `backends` | the full suite with CPU-only PyTorch, the torch-sim engine and CHGNet, with a coverage report |
-| `min-deps` | the suite on Python 3.10 with every dependency at the lowest version `pyproject.toml` allows |
+| `min-deps` | the core suite on Python 3.10 with direct dependencies at their lowest allowed versions |
 | `package` | the sdist and wheel build, the README links as PyPI renders them, and the sdist's tests run against the installed wheel |
 | `light-install` | a bare `pip install` (no extras) stays torch-free |
 
@@ -74,8 +75,8 @@ run outside CI, before releases.
 To run the `backends` or `min-deps` job locally:
 
 ```bash
-# backends; the torch-sim tests need a C/C++ compiler on PATH (the conda
-# development environment installs one)
+# backends, in a Python 3.12 environment; torch-sim tests need a C/C++
+# compiler on PATH (the conda development environment installs one)
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -e ".[torchsim,chgnet,dev]"
 pytest test/
@@ -85,8 +86,8 @@ uv pip install --resolution lowest-direct -e ".[dev]"
 pytest test/
 ```
 
-When `min-deps` fails, the code needs a newer version of a dependency than
-`pyproject.toml` declares: raise that lower bound.
+If `min-deps` fails because the code requires a newer dependency, either
+restore compatibility or raise the relevant lower bound in `pyproject.toml`.
 
 ## Code style
 
@@ -100,6 +101,7 @@ When `min-deps` fails, the code needs a newer version of a dependency than
 ### Reporting bugs
 
 Open an issue on GitHub with:
+
 - A clear description of the problem
 - Steps to reproduce the issue
 - The full error traceback
@@ -109,6 +111,7 @@ Open an issue on GitHub with:
 ### Suggesting features
 
 Open an issue on GitHub describing:
+
 - What the feature would do
 - Why it would be useful
 - Any relevant references or examples
@@ -148,11 +151,12 @@ Notebook tutorials live under `Tutorials/`. New tutorials should:
 
 ### Documentation
 
-Sphinx docs live under `docs/`. To build locally:
+Sphinx docs live under `docs/`. From the repository root, install the docs
+extra and build with the same warning checks as CI:
 
 ```bash
-cd docs
-make html
+pip install -e ".[docs]"
+make -C docs html SPHINXOPTS="-W --keep-going"
 # output in docs/_build/html/
 ```
 

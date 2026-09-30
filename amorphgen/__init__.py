@@ -5,7 +5,7 @@ for amorphous structure generation using universal MLIPs.
 Quick start::
 
     # CLI: generate 10 random In2O3 structures (80 atoms each)
-    amorphgen --random-gen --composition "In2O3*16" --relax
+    amorphgen --random-gen --composition "In2O3*16" -n 10 --relax
 
     # Python: single structure
     from amorphgen import generate_random

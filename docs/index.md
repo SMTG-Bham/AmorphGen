@@ -17,7 +17,7 @@ Automated amorphous structure generation using machine-learning and classical in
   <a href="https://github.com/SMTG-Bham/AmorphGen/issues"><img src="https://img.shields.io/badge/issues-bug%20tracker-blue?style=flat&logo=github" alt="Issues"></a>
 </p>
 
-AmorphGen exposes three routes to amorphous structures: **random placement** from just a chemical formula, **melt-and-quench MD** from a crystal, and a **hybrid** workflow that anneals disordered inputs and quenches to low temperature. All three are powered by universal machine-learning interatomic potentials (MACE, CHGNet, SevenNet) or classical force fields (Buckingham, Lennard-Jones).
+AmorphGen exposes three routes to amorphous structures: **random placement** from just a chemical formula, **melt-and-quench MD** from a crystal, and a **hybrid** workflow that anneals disordered inputs and quenches to low temperature. Random placement runs without a potential. Relaxation and MD use machine-learning interatomic potentials (MACE, CHGNet, SevenNet) or classical force fields (Buckingham, Lennard-Jones).
 
 ```{image} images/main_Fig.png
 :alt: AmorphGen workflow: crystalline input or composition to amorphous structure
@@ -33,7 +33,7 @@ Making an amorphous model normally means writing your own MD scripts, picking a 
 
 AmorphGen wraps the whole thing in one command. You give it a formula or a crystal structure; it runs either random placement plus relaxation or a 7-stage melt-quench, using MACE, CHGNet or SevenNet as the potential (or Lennard-Jones and Buckingham+Coulomb if you have parameters). Minimum separations, density, temperatures and cooling rates have sensible automatic values and can all be overridden from the command line or a YAML file.
 
-You get the relaxed structure, the MD trajectory and an analysis mode (RDF, coordination, angles, rings, S(q)). Structures are written as VASP, CIF or extended XYZ, so they go straight into DFT or a further relaxation at a higher level of theory.
+MD runs save structures and trajectories; random generation saves the placed structures and, when requested, relaxed outputs. The analysis mode provides RDF, coordination, angles, rings and S(q). Structures are written as VASP, CIF or extended XYZ, so they go straight into DFT or a further relaxation at a higher level of theory.
 
 It has been used for oxides (SiO₂, In₂O₃, TiO₂, Ga₂O₃, Al₂O₃, InGaZnO₄), halides (LiF, Li₂ZrCl₆), GaAs, Si, and nitrides (GaN, BN), mostly to prepare structures for DFT or to screen across compositions.
 
@@ -58,7 +58,7 @@ See the {doc}`getting-started/installation` and {doc}`getting-started/quickstart
 
 ---
 
-## What it does
+## Choose a workflow
 
 AmorphGen exposes three workflows. Pick the one that matches your starting point:
 
@@ -70,7 +70,7 @@ AmorphGen exposes three workflows. Pick the one that matches your starting point
 
 `--random-gen`
 
-Place atoms into a cubic cell with automated minimum separations, density, and target CN from Shannon ionic/metallic radii. Optional relax with any backend.
+Place atoms into a cubic cell with automated minimum separations, density, and target CN from ionic, covalent or metallic radii. Optional relax with any backend.
 :::
 
 :::{grid-item-card} 2. Melt-and-Quench (MQ)
@@ -119,7 +119,7 @@ Composition  (e.g. "In2O3*16"  or  In=32,O=48)
          │
    ┌─────▼──────────────────────────────────────────┐
    │  Auto-derive  minsep, density, target CN       │
-   │  from Shannon ionic / metallic radii           │
+   │  from ionic / covalent / metallic radii           │
    └─────┬──────────────────────────────────────────┘
          │
    ┌─────▼──────────────────────────────────────────┐
@@ -178,7 +178,7 @@ Crystalline input  (POSCAR / .xyz / .cif / .extxyz)
    stage7_opt.cif  +  stage7_opt.xyz
 ```
 
-`--mq-ensemble` extends MQ: stages 1–4 run once, then N independent quenches (stages 5–6–7) are launched from snapshots of the stage-4 trajectory. See {doc}`guides/pipeline` and {doc}`guides/mq-ensemble`.
+`--mq-ensemble` extends MQ: stages 1–4 run once, then N separate quenches (stages 5–6–7) are launched from snapshots of the stage-4 trajectory. See {doc}`guides/pipeline` and {doc}`guides/mq-ensemble`.
 
 ### 3. Hybrid: random → MQ stages 4-7 (`--hybrid-ensemble`)
 
@@ -187,7 +187,7 @@ Directory of disordered structures  (e.g. --random-gen outputs)
          │
    ┌─────▼──────────────────────────────────────────┐
    │  Stage 4  High-T equilibration   T_melt        │
-   │           NVT/NPT,  20+ ps                     │
+   │           NVT/NPT, configured duration          │
    └─────┬──────────────────────────────────────────┘
          │
    ┌─────▼──────────────────────────────────────────┐
@@ -212,9 +212,9 @@ See {doc}`guides/hybrid-workflow`.
 
 ## Features
 
-- Random structure generation: generate amorphous structures from just a chemical formula (e.g. to model amorphous In₂O₃ for 16 formula units, `--composition "In2O3*16"`). Minimum separations, density, and coordination targets are derived automatically from Shannon ionic radii across material classes.
+- Random structure generation: generate amorphous structures from just a chemical formula (e.g. to model amorphous In₂O₃ for 16 formula units, `--composition "In2O3*16"`). Minimum separations, density, and coordination targets are derived automatically from ionic, covalent or metallic radii according to material class.
 - 7-stage melt-and-quench pipeline: from crystalline POSCAR to relaxed amorphous structure in a single command. Configurable temperatures, cooling rates, ensembles, and timesteps.
-- `--mq-ensemble`: generate N independent amorphous structures from one crystalline input in a single CLI call: shared stages 1-4, then N independent quenches via auto-extracted snapshots from the stage-4 trajectory.
+- `--mq-ensemble`: generate N amorphous structures from one crystalline input in a single CLI call: shared stages 1-4, then N separate quenches via auto-extracted snapshots from the stage-4 trajectory.
 - `--hybrid-ensemble`: generate an amorphous ensemble starting from disordered structures (e.g. random-gen outputs). Anneals each at high T, quenches, equilibrates, and relaxes.
 - Multiple calculator backends: MACE, CHGNet, SevenNet (MLIPs) and Lennard-Jones, Buckingham+Coulomb (classical). Swap with `--model` flag.
 - Structure analysis: built-in RDF, coordination numbers, bond angles, ring statistics, and energy ranking. Gaussian smearing for experimental comparison.
@@ -233,7 +233,7 @@ See {doc}`guides/hybrid-workflow`.
 | **CHGNet** | `pip install "amorphgen[chgnet]"` | `chgnet` |
 | **SevenNet** | `pip install "amorphgen[sevennet]"` | `sevennet`, `7net-mf-ompa` |
 | **Classical** | built-in | `buckingham`, `lennard-jones` |
-| **torch-sim engine** (batched ensembles on a GPU) | `pip install "amorphgen[mace,torchsim]"` | `--engine torchsim` with MACE, SevenNet or LJ |
+| **torch-sim engine** (Python ≥ 3.12; batched ensembles) | `pip install "amorphgen[mace,torchsim]"` | `--engine torchsim` with MACE, SevenNet or LJ |
 
 ```bash
 amorphgen --list-models   # see all 20+ model variants
@@ -254,8 +254,9 @@ For research collaborations or scientific questions, please email the maintainer
 
 ## Citing AmorphGen
 
-If you use AmorphGen in your research, please cite the JOSS paper (in
-preparation) and the GitHub repository:
+If you use AmorphGen in your research, cite the software version you used.
+The repository includes a [CITATION.cff](https://github.com/SMTG-Bham/AmorphGen/blob/main/CITATION.cff)
+file; a BibTeX citation is:
 
 ```bibtex
 @misc{amorphgen,

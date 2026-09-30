@@ -1,7 +1,8 @@
 # Structure analysis
 
 The ``amorphgen.analysis`` module provides ensemble structural analysis for
-amorphous structure files: pair distribution functions, coordination
+amorphous structure files: pair distribution functions, structure factors,
+total correlation functions, coordination
 numbers, bond angles, ring statistics, Voronoi metrics, energy ranking,
 and validation against literature reference ranges.
 
@@ -39,6 +40,18 @@ energy (used by ``amorphgen --rank-from-log LOG``):
    :show-inheritance:
 ```
 
+## Comparing ensembles
+
+Use `EnsembleSpec` to describe each structure set and `compare_ensembles`
+to save RDF, coordination, bond-angle, and density comparisons.
+
+```{eval-rst}
+.. autoclass:: amorphgen.analysis.EnsembleSpec
+   :members:
+
+.. autofunction:: amorphgen.analysis.compare_ensembles
+```
+
 ## Submodule reference
 
 ``StructureAnalyser`` delegates to focused submodules; advanced users can
@@ -46,11 +59,12 @@ import these directly:
 
 | Submodule | Provides |
 |---|---|
-| ``analysis.rdf`` | Pair distribution function g(r), partial RDFs |
+| ``analysis.rdf`` | Pair distribution function g(r), partial RDFs, S(q), T(r) |
 | ``analysis.structure`` | Coordination numbers, bond distances, bond angles |
-| ``analysis.rings`` | Ring statistics (King's shortest-path) |
+| ``analysis.rings`` | Shortest-path ring statistics with periodic-image closure |
 | ``analysis.voronoi`` | Voronoi cell volumes and connectivity |
 | ``analysis.energy`` | Total-energy parsing and ranking |
 | ``analysis.cutoff`` | Bond-cutoff selection from g(r) first minimum |
 | ``analysis.plotting`` | Publication-quality matplotlib helpers |
 | ``analysis.validate`` | Reference-YAML validation |
+| ``analysis.comparison_plots`` | Multi-ensemble comparison plots and CSV output |

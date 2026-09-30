@@ -18,10 +18,12 @@ stress tensor, which is even more sensitive to out-of-distribution force error
 than the energy: wrong stresses drive the cell to expand, collapsing the
 predicted density.
 
-AmorphGen's {doc}`random-generation` and {doc}`hybrid-workflow` routes are built
-around the reliable regime: they start from in-distribution disordered
-configurations and anneal at low temperature, in a **fixed cell (NVT-like)** when
-you keep the auto-estimated density. This avoids the unstable liquid entirely.
+AmorphGen's {doc}`random-generation` and {doc}`hybrid-workflow` routes let you
+start from disordered configurations and choose an anneal temperature. Random
+placement does not establish that a structure is within the model's training
+distribution. Set each MD stage to **NVT** and use `--cell-filter none` for
+relaxation when holding the starting density fixed; the random-gen and hybrid
+CLI modes otherwise default to isotropic cell relaxation (`cubic`).
 
 ```{tip}
 If you must run a melt-quench, prefer **NVT** (fixed cell) over NPT, keep the
@@ -33,7 +35,7 @@ mid-quench volume change as a red flag rather than a result.
 
 | Situation | Recommended route |
 |-----------|-------------------|
-| New composition, no crystal needed | `--random-gen` + `--relax` (NVT-like, fixed cell) |
+| New composition, no crystal needed | `--random-gen --relax --cell-filter none` when keeping a validated density fixed |
 | Want a diverse amorphous ensemble cheaply | `--hybrid-ensemble` (random → anneal → quench) |
 | You have a crystal and want classic MQ | Full pipeline, but prefer **NVT** stages; watch the density |
 | MLIP keeps over-expanding under NPT | Switch to random-gen / hybrid, or fix the cell |
@@ -87,7 +89,7 @@ or vibrational properties).
   minimum should be lower; if it is not, the anneal was too short or too
   cold.
 
-## Trust the relaxed density, set it when the estimate is shaky
+## Validate the density and override an uncertain estimate
 
 The auto-estimated density is a *starting cell* heuristic (class-aware sphere
 packing on Shannon/Cordero/Goldschmidt radii). It is good for common oxides but
@@ -97,8 +99,9 @@ approximate for unusual chemistries.
 For elements missing from the radii tables, or compositions far from the tuned
 material classes, the auto density can be off. AmorphGen prints
 `NOTE: Auto density is approximate for this composition` when confidence is low,
-in that case pass `--target-density` (or a `cell_length`) explicitly, or relax
-with a cell filter and trust the **relaxed** density, not the estimate.
+in that case pass `--target-density` explicitly (or `cell_length_ang` in the Python
+API). A cell relaxation provides a model-dependent density that also needs
+validation.
 ```
 
 Dense rutile-type dioxides are the usual culprits: the generic `metal_oxide`
@@ -106,7 +109,7 @@ packing factor under-predicts them, which is why rutile-type MO₂ oxides
 (TiO₂, SnO₂, RuO₂, IrO₂, OsO₂, …) are routed to a denser `rutile_dioxide`
 class. They are identified geometrically: an MO₂ whose 4+ cation radius is
 below the rutile/fluorite cutoff (~0.70 Å), so fluorite dioxides (ZrO₂, HfO₂,
-CeO₂) correctly stay `metal_oxide`. See {doc}`../validation/index` for the
+CeO₂) use the separate `fluorite_dioxide` class. See {doc}`../validation/index` for the
 validated density ranges.
 
 ## Known limitations
@@ -119,14 +122,15 @@ validated density ranges.
 - Density estimation is approximate: the auto density is a class-aware
   sphere-packing *estimate* for the starting cell, tuned on common material
   classes. It can be off for unusual chemistries; override with
-  `--target-density` and trust the relaxed density.
+  `--target-density` and validate the relaxed density.
 - Element coverage of the radii tables: minimum-separation and density
   estimation use Shannon/Cordero/Goldschmidt radii for a curated element set.
   Elements outside it fall back to approximate values, degrading the auto
   density (e.g. set an explicit `--target-density`, or add the element to
   `amorphgen/utils/radii.py`).
-- Single-point relaxation leaves voids: a 0 K relax of one random structure
-  can stay porous; use the hybrid (anneal + quench) route for densification.
+- Local relaxation can leave voids: a 0 K relaxation of one random structure
+  can stay porous. Annealing can rearrange the network, but NVT and fixed-cell
+  relaxation preserve the total density; densification requires a volume change.
 - Ensembles, not single structures: one structure is not statistically
   representative of an amorphous phase. Generate an ensemble (e.g. `-n 20`) and
   average for any reported property.

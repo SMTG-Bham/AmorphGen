@@ -1,10 +1,10 @@
 # Random structure generation
 
-Generate ensembles of amorphous structures by constrained random sequential placement with automated minimum separation distances derived from Shannon ionic radii.
+Generate ensembles of disordered structures by constrained random sequential placement with automated minimum separations from ionic, covalent and metallic radii.
 
 ## How it works
 
-Atoms are placed sequentially into a cubic cell. Each atom must satisfy pair-specific minimum interatomic distances computed automatically from Shannon ionic radii and bonding-type classification. No manual parameter tuning is required.
+Atoms are placed sequentially into a cubic cell. Pair-specific minimum separations are derived from radii and bonding-type classification. Composition-derived defaults provide starting structures; validate their density and local structure for the system being studied.
 
 ### Automated minsep
 
@@ -14,7 +14,7 @@ For each element pair, the bond type is classified and the appropriate radii are
 |-----------|-------------|--------------|---------|
 | Ionic (M-O, M-Cl) | Shannon ionic (CN-aware) | 0.80 | In-O: (0.80+1.40)*0.80 = 1.76 |
 | Metallic (M-M) | Metallic radii | 0.85 | Al-Al: (1.43+1.43)*0.85 = 2.43 |
-| M-M in oxide | max(metallic, sqrt(2)*d(M-O)*0.85) | cap 2.80 | In-In: max(2.84, 2.64) = 2.80 |
+| M-M in oxide | max(metallic, sqrt(2)*d(M-O)*0.85) | cap 2.80 | In-In: min(2.80, max(2.84, 2.64)) = 2.80 |
 | Metalloid (Si-Si) in oxide | max(metallic, sqrt(2)*d(Si-O)*0.85) | cap 2.80 | Si-Si: max(1.99, 2.12) = 2.12 |
 | Small anion (O-O) | Shannon ionic | 0.80 | O-O: (1.40+1.40)*0.80 = 2.24 |
 | Large anion (Cl-Cl) | Shannon ionic | 0.70 | Cl-Cl: (1.81+1.81)*0.70 = 2.53 |
@@ -121,13 +121,16 @@ starting cell, but a subsequent MLIP cell relaxation will correct it. Use
 `--target-density` to set the density explicitly when the experimental value is
 known.
 
-### Coordination-aware placement ("SC", optional)
+### Coordination-aware placement ("SC")
 
-With `--target-cn`, AmorphGen uses **SC ("Seed-Coordinate")** placement: each new atom is added as a bonded neighbour of an existing *under-coordinated* site (the **seed**) by placing it within that seed's bonding shell (`minsep ≤ d ≤ dmax`), which **coordinates** it. Over-coordinating a neighbour is rejected. This builds short-range order directly into the placement instead of relying on relaxation alone, giving more physical structures.
+When coordination targets are available, AmorphGen uses **SC ("Seed-Coordinate")** placement: each new atom is added as a bonded neighbour of an existing *under-coordinated* site (the **seed**) by placing it within that seed's bonding shell (`minsep ≤ d ≤ dmax`), which **coordinates** it. Over-coordinating a neighbour is rejected. This builds short-range order directly into the placement instead of relying on relaxation alone, giving more physical structures.
 
 SC is the placement half of the **Seed-Coordinate-Anneal (SCA)** algorithm of Youn et al., *Comput. Mater. Sci.* (2014). AmorphGen factors the *Anneal* step out into its own stages (the MLIP geometry optimisation (`--relax`) and the melt-quench / hybrid workflow) so the placement step is just **Seed-Coordinate** (hence "SC", not "SCA").
 
-Disable with `--no-sc` to fall back to plain random rejection sampling (no coordination bias).
+Targets are inferred from composition by default; `--target-cn` overrides them.
+The targets guide placement and cap over-coordination but do not guarantee that
+every atom reaches its target. Disable SC with `--no-sc` to fall back to plain
+random rejection sampling (or pass `target_cn={}` to the Python API).
 
 ### Transparency: the auto-derive log line
 
@@ -205,7 +208,7 @@ mode-aware: in `reduce-minsep` mode it never touches `density_scale`.
 ```python
 from amorphgen import generate_random, batch_random
 
-# Single structure (auto minsep, auto density from Shannon radii)
+# Single structure (auto minsep and material-class density estimate)
 atoms = generate_random(
     composition={"In": 16, "O": 24},   # atom counts (Python API)
     seed=42,
@@ -237,8 +240,9 @@ classify_bond("In", "O")       # "ionic"
 classify_bond("Si", "Si")      # "covalent"
 
 # Auto minsep for a composition
-ms = default_minsep(["In", "O"], target_cn={"In": 4})
-# {"In-In": 3.11, "In-O": 1.72, "O-O": 2.24}
+ms = default_minsep(["In"] * 16 + ["O"] * 24, target_cn={"In": 4})
+# Pass the full symbol list so the rules see the actual composition.
+print(ms)
 ```
 
 See {doc}`/api/random-gen` for the full API reference.

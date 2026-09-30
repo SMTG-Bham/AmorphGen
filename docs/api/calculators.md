@@ -15,12 +15,17 @@ The calculator module provides a unified interface to MLIP and classical backend
 ## Backend detection
 
 ```{eval-rst}
-.. autofunction:: amorphgen.utils.calculators._detect_backend
+.. autofunction:: amorphgen.utils.calculators.backend_available
+.. autofunction:: amorphgen.utils.calculators.available_backends
+.. autofunction:: amorphgen.utils.calculators.require_backend
 ```
 
 ## MACE models
 
-The following MACE foundation models are available via `get_calculator()`:
+The following MACE foundation model names are registered by AmorphGen.
+Install the `mace` extra to use them; model weights may download on first use.
+Slash-separated sizes below represent separate keys (for example,
+`mace-mp-0b3-small`, `mace-mp-0b3-medium`, and `mace-mp-0b3-large`).
 
 | Key | Variant |
 |-----|---------|
@@ -28,13 +33,22 @@ The following MACE foundation models are available via `get_calculator()`:
 | `mace-mp-0b-small/medium/large` | MP-0b (improved pair repulsion) |
 | `mace-mp-0b2-small/medium/large` | MP-0b2 (high-pressure stability) |
 | `mace-mp-0b3-small/medium/large` | MP-0b3 (fixed phonons) |
-| `mace-mpa-0` | Latest MPA model |
+| `mace-mpa-0`, `mace-mpa-0-medium` | MPA-0; AmorphGen default |
+| `mace-omat-0-small/medium`, `mace-omat-0` | OMAT-0; unsuffixed alias selects medium |
+| `mace-matpes-pbe`, `mace-matpes-r2scan` | MATPES models |
+| `mace-mh-0`, `mace-mh-1` | Multi-domain models |
+| `mace-omol` | Molecular model |
+
+## CHGNet
+
+`get_calculator("chgnet", device="auto")` loads CHGNet. Install the `chgnet`
+extra; CHGNet supports `float32` only, which `default_dtype="auto"` selects.
 
 ## SevenNet models
 
 | Key | Variant |
 |-----|---------|
-| `sevennet`, `7net-mf-ompa` | Multi-fidelity foundation (OMat+MPtrj+Alexandria), recommended |
+| `sevennet`, `sevennet-mf`, `7net-mf-ompa` | Multi-fidelity foundation (OMat+MPtrj+Alexandria); SevenNet default |
 | `7net-mf-0` | Multi-fidelity baseline |
 | `7net-omat` | OMat-only |
 | `7net-l3i5` | Improved equivariant features |
@@ -44,11 +58,15 @@ The following MACE foundation models are available via `get_calculator()`:
 Multi-fidelity (`mf`) variants accept a `modal` kwarg (`'mpa'` default, or `'omat24'`):
 
 ```python
-calc = get_calculator("7net-mf-ompa", device="auto")              # PBE
-calc = get_calculator("7net-mf-ompa", device="auto", modal="omat24")  # PBE+U
+from amorphgen.utils.calculators import get_calculator
+
+calc = get_calculator("7net-mf-ompa", device="auto")  # MPtrj+Alexandria modality
+calc = get_calculator("7net-mf-ompa", device="auto", modal="omat24")  # OMat modality
 ```
 
-Use `amorphgen --list-models` or `list_models()` for the complete list.
+Install the `sevennet` extra in its own environment because its e3nn
+requirement conflicts with the MACE extra. Use `amorphgen --list-models` or
+`list_models()` for the registered models and backend installation status.
 
 ## Classical potentials
 
@@ -62,6 +80,8 @@ Built-in pair potentials for initial structure preparation. No extra install nee
 Parameters are passed via `classical_params` in YAML config or Python API:
 
 ```python
+from amorphgen.utils.calculators import get_calculator
+
 calc = get_calculator("buckingham", classical_params={
     "params": {("Si", "O"): {"A": 18003.76, "rho": 0.2052, "C": 133.54}},
     "charges": {"Si": 2.4, "O": -1.2},
