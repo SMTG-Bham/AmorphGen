@@ -109,10 +109,9 @@ amorphgen POSCAR --config full_pipeline.yaml -o my_run/
 Skip stages 1–3 (already disordered starting structure), anneal at high T, quench:
 
 ```yaml
-# examples/hybrid_airss_mq.yaml
-model: chgnet
+# hybrid.yaml
+model: chgnet         # default_dtype left at auto (float32, CHGNet's only precision)
 device: cuda
-default_dtype: float64
 
 eq_high:
   ensemble: NVT
@@ -146,9 +145,11 @@ Run via batch-quench:
 
 ```bash
 amorphgen --batch-quench --snapshot-dir random_inputs/ \
-    --config hybrid_airss_mq.yaml --batch-stages 4 5 6 7 \
+    --config hybrid.yaml --batch-stages 4 5 6 7 \
     -o hybrid_runs/
 ```
+
+A MACE version with a 100 ps anneal ships as `examples/hybrid_airss_mq.yaml`.
 
 ## Example: validation reference YAML
 
@@ -194,7 +195,7 @@ amorphgen --analyse --input-dir my_structures/ \
     --reference reference_a_Ga2O3.yaml
 ```
 
-Each metric is reported as **match** (within range), **concern** (within ~5% of either bound), or **fail** (outside range). Fast, defensible answer to "do my structures agree with the literature?"
+Each metric is reported as **match** (within range), **concern** (within ~5% of either bound), **fail** (outside range), or **n/a** when the structures do not have it (an element that is absent, or no contact within the cutoff). A bond, and the two end atoms of an angle, can be written in either order (`Si-O` or `O-Si`). A coordination entry is directional: `Si-O` counts the O around Si. Fast, defensible answer to "do my structures agree with the literature?"
 
 ## Example: classical potential
 
@@ -359,11 +360,13 @@ seed:` is set, but the MD stages are not.
 ## Tips
 
 - Keep YAMLs in version control. They're tiny and document your protocol.
-- Mix YAML + CLI for parameter sweeps: a baseline YAML, with the swept variable on the CLI:
+- Mix YAML + CLI for parameter sweeps: a baseline YAML, with the swept variable on the CLI. A quench-rate sweep, with the default 100 K per segment at 0.5 fs:
   ```bash
-  for rate in 50 100 200; do
-      amorphgen POSCAR --config baseline.yaml --quench-rate $rate -o run_${rate}Kps/
+  # 4000 / 2000 / 1000 steps per segment = 50 / 100 / 200 K/ps
+  for steps in 4000 2000 1000; do
+      amorphgen POSCAR --config baseline.yaml --quench-steps-per-T $steps -o run_${steps}steps/
   done
   ```
+  Leave `rate:` out of the `quench:` block of `baseline.yaml` for this: when set, it takes precedence over `steps_per_T`, including a value given on the CLI.
 - Comment liberally: `# ...` after any value explains *why* you chose it. Reviewers and future you will thank you.
 - Pre-built examples ship in `examples/`: `full_pipeline.yaml`, `hybrid_airss_mq.yaml`, `fast_test.yaml`, `reference_a_Ga2O3.yaml`.

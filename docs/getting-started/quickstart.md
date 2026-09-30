@@ -112,7 +112,8 @@ amorphgen --batch-quench \
 
 ## 4. Ensembles on a GPU with the torch-sim engine
 
-With `pip install "amorphgen[mace,torchsim]"` (Python 3.12+) the ensemble
+With `pip install "amorphgen[mace,torchsim]"` (Python 3.12+, and a
+[C/C++ compiler](installation.md#the-torch-sim-engine)) the ensemble
 modes can batch all structures into one GPU call instead of running them one
 after another. Add `--engine torchsim` to the command; the output files are
 the same as with the ASE engine.

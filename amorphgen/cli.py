@@ -42,9 +42,9 @@ common usage:
   # Random generation + relax (one step)
   amorphgen --random-gen --composition "Nb2O5*40" -n 10 --relax -o out -m chgnet
 
-  # Generate only, then optimise the folder separately
+  # Generate only, then optimise the structures separately
   amorphgen --random-gen --composition "SiO2*32" -n 20 -o gen
-  amorphgen --batch-opt --input-dir gen -o opt -C cubic
+  amorphgen --batch-opt --input-dir gen/random_initial -o opt -C cubic
 
   # Full 7-stage melt-quench pipeline from a crystal
   amorphgen POSCAR -o mq_run
@@ -364,7 +364,9 @@ def _add_arguments(p):
                            "*.extxyz/*.vasp/*.cif).")
     g_bo.add_argument("--input-dir", default=None, metavar="DIR",
                      help="Directory of structures to optimise "
-                          "(also used by --analyse).")
+                          "(also used by --hybrid-ensemble and --analyse). "
+                          "For --random-gen output pass its random_initial/ "
+                          "or random_opt/ subdirectory.")
 
     # ── Analysis ──────────────────────────────────────────────────────────────
     g_an = p.add_argument_group("analyse", "Used with --analyse.")
@@ -995,7 +997,7 @@ def _run_hybrid_ensemble(args, override: dict) -> None:
     import glob as _glob
     from .pipeline import batch_quench
     from .utils import get_calculator
-    from .pipeline.random_gen import _FORMAT_MAP
+    from .pipeline.random_gen import _FORMAT_MAP, random_gen_dir_hint
 
     work_dir   = args.work_dir or "hybrid_ensemble"
     quench_dir = os.path.join(work_dir, "quench_runs")
@@ -1011,6 +1013,9 @@ def _run_hybrid_ensemble(args, override: dict) -> None:
     if not snap_files:
         print(f"Error: no structure files in {args.input_dir}/ "
               f"(looked for *.xyz, *.extxyz, *.vasp, *.cif, POSCAR*)")
+        hint = random_gen_dir_hint(args.input_dir)
+        if hint:
+            print(hint)
         sys.exit(1)
 
     bar = "=" * 70
@@ -1212,14 +1217,19 @@ def main():
     # Calculator-requiring modes abort BEFORE any setup work (no work dir, no
     # structure loading) with a copy-pasteable install hint. Backend knowledge
     # lives in utils.calculators (require_backend); this is just the gate.
-    # See DESIGN_MLIP_OPTIONAL.md (D2).
+    # See DESIGN_MLIP_OPTIONAL.md (D2). The same gate refuses a precision the
+    # model can't run (CHGNet + float64), which --mq-ensemble would otherwise
+    # only hit in phase 3, after stages 1-4 of MD.
     if _requires_calculator(args):
-        from .utils.calculators import require_backend, BackendNotInstalledError
+        from .utils.calculators import (require_backend, require_dtype,
+                                        BackendNotInstalledError)
         model = override.get("model", args.model) or "mace-mpa-0"
         model_path = override.get("model_path", getattr(args, "model_path", None))
         try:
             require_backend(model, model_path=model_path)
-        except (BackendNotInstalledError, ValueError) as exc:
+            require_dtype(model, override.get("default_dtype", args.default_dtype),
+                          model_path=model_path)
+        except (BackendNotInstalledError, ValueError, NotImplementedError) as exc:
             print(f"Error: {exc}")
             sys.exit(1)
 
@@ -1762,17 +1772,21 @@ def main():
     if args.batch_opt:
         if args.input_dir is None:
             print("Error: --input-dir is required for --batch-opt mode.")
-            print("  Example: amorphgen --batch-opt --input-dir random_Ga2O3/")
+            print("  Example: amorphgen --batch-opt --input-dir random_Ga2O3/random_initial/")
             sys.exit(1)
 
         from .pipeline.opt_cell import batch_optimize
         from .utils import get_calculator
 
+        # batch_optimize returns [] only when nothing matched (it has printed
+        # why); exit non-zero so a script or job chain doesn't carry on.
         if override.get("engine", "ase") == "torchsim":
-            batch_optimize(input_dir=args.input_dir, output_dir=args.work_dir,
-                           cfg_override=override, calc=None, engine="torchsim",
-                           resume=args.resume, batch_size=(int(args.batch_size) if args.batch_size and str(args.batch_size).isdigit() else args.batch_size),
-                           pattern=args.pattern, indices=args.indices)
+            paths = batch_optimize(input_dir=args.input_dir, output_dir=args.work_dir,
+                                   cfg_override=override, calc=None, engine="torchsim",
+                                   resume=args.resume, batch_size=(int(args.batch_size) if args.batch_size and str(args.batch_size).isdigit() else args.batch_size),
+                                   pattern=args.pattern, indices=args.indices)
+            if not paths:
+                sys.exit(1)
             return
 
         calc = get_calculator(
@@ -1784,7 +1798,7 @@ def main():
 
         )
 
-        batch_optimize(
+        paths = batch_optimize(
             input_dir=args.input_dir,
             output_dir=args.work_dir,
             cfg_override=override,
@@ -1792,6 +1806,8 @@ def main():
             pattern=args.pattern,
             indices=args.indices,
         )
+        if not paths:
+            sys.exit(1)
         return
 
     # ── Batch quench mode ─────────────────────────────────────────────────────
@@ -1829,8 +1845,12 @@ def main():
             if snap_files:
                 break
         if not snap_files:
+            from .pipeline.random_gen import random_gen_dir_hint
             print(f"Error: no snapshot files found in {snap_source}/ "
                   f"(looked for *.xyz, *.extxyz, *.vasp, *.cif, POSCAR*)")
+            hint = random_gen_dir_hint(snap_source)
+            if hint:
+                print(hint)
             sys.exit(1)
 
         calc = get_calculator(

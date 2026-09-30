@@ -1,11 +1,14 @@
 # Weekly MLIP-backend canary (DESIGN_MLIP_OPTIONAL.md, D7).
 #
-# The PR/push matrix is deliberately torch-free, so upstream backend breakage
-# (API drift, dependency-pin conflicts like the e3nn 0.4/0.5 split) would
-# otherwise go unnoticed until a user reports it. This job installs the
-# CHGNet extra (CPU-capable, smallest footprint) once a week and runs a tiny
-# end-to-end relax. MACE is validated locally before releases — its
-# foundation-model downloads are too large/flaky for CI.
+# Upstream backend breakage (API drift, dependency-pin conflicts like the e3nn
+# 0.4/0.5 split) lands with upstream releases, not with our pushes. Once a
+# week this installs each backend whose pretrained model ships inside its
+# wheel, in an environment of its own (SevenNet's e3nn>=0.5 conflicts with
+# MACE's pin) and exactly as a user would, with PyPI's default torch, and runs
+# a tiny end-to-end relax on CPU. The backends job in test.yml runs the CHGNet
+# and torch-sim tests on every push, with CPU-only torch. MACE is validated
+# locally before releases — its foundation-model downloads are too large/flaky
+# for CI.
 name: Backend canary
 
 on:
@@ -13,36 +16,54 @@ on:
     - cron: "0 6 * * 1"   # Mondays 06:00 UTC
   workflow_dispatch: {}    # manual trigger for debugging
 
+permissions:
+  contents: read
+
 jobs:
-  chgnet-canary:
+  canary:
+    name: canary (${{ matrix.backend }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - backend: chgnet
+          model: chgnet
+        - backend: sevennet
+          model: 7net-0   # bundled in the sevenn wheel, so no download
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: "3.12"
 
-    - name: Install with CHGNet backend
+    - name: Install with the ${{ matrix.backend }} backend
       run: |
         python -m pip install --upgrade pip
-        pip install -e ".[chgnet]"
+        pip install -e ".[${{ matrix.backend }}]"
 
-    - name: End-to-end relax smoke (CHGNet, CPU)
+    - name: End-to-end relax smoke (${{ matrix.model }}, CPU)
+      env:
+        BACKEND: ${{ matrix.backend }}
+        MODEL: ${{ matrix.model }}
       run: |
         python - <<'EOF'
+        import os
         from amorphgen import generate_random
         from amorphgen.utils.calculators import get_calculator, require_backend
 
-        assert require_backend("chgnet") == "chgnet"
+        backend, model = os.environ["BACKEND"], os.environ["MODEL"]
+        assert require_backend(model) == backend
 
         atoms = generate_random({"Si": 4, "O": 8}, seed=0)
-        atoms.calc = get_calculator("chgnet", device="cpu")
+        atoms.calc = get_calculator(model, device="cpu")
 
         from ase.optimize import FIRE
         FIRE(atoms, logfile=None).run(fmax=0.5, steps=5)  # API smoke, not physics
         e = atoms.get_potential_energy()
         assert isinstance(float(e), float)
-        print(f"chgnet canary OK: E = {e:.2f} eV after 5 FIRE steps")
+        print(f"{model} canary OK: E = {e:.2f} eV after 5 FIRE steps")
         EOF

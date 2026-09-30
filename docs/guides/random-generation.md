@@ -18,6 +18,8 @@ For each element pair, the bond type is classified and the appropriate radii are
 | Metalloid (Si-Si) in oxide | max(metallic, sqrt(2)*d(Si-O)*0.85) | cap 2.80 | Si-Si: max(1.99, 2.12) = 2.12 |
 | Small anion (O-O) | Shannon ionic | 0.80 | O-O: (1.40+1.40)*0.80 = 2.24 |
 | Large anion (Cl-Cl) | Shannon ionic | 0.70 | Cl-Cl: (1.81+1.81)*0.70 = 2.53 |
+| Nonmetal cation to anion (P-O, S-O, C-O) | Shannon cation radius (top state, lowest CN) | 0.80 | P-O: (0.17+1.40)*0.80 = 1.26 |
+| Nonmetal cation to cation | sqrt(2)*d(X-O), or 2*d(X-O) for the same element | 0.85, cap 2.80 | P-P: 2*(0.17+1.40)*0.85 = 2.67 |
 
 When `--target-cn` is provided, CN-specific Shannon radii are used (e.g. Si CN=4: 0.26 A vs CN=6: 0.40 A), giving tighter minsep values.
 
@@ -57,6 +59,22 @@ The Δχ = 1.0 threshold sits exactly where chemistry genuinely gets ambiguous: 
 
 These disagreements are **benign**: the bond classifier governs which radii produce the per-pair `minsep`, while the material classifier governs which radii produce the density estimate. The two answer different questions, and any modest inconsistency at the boundary is absorbed by the subsequent MLIP relaxation. If you generate one of these systems and the auto-derived density looks off (typically ±15–20% from experiment), set `--target-density` explicitly to bypass the auto path for that composition.
 
+#### Nonmetal cations: oxoanions and hydroxides
+
+In a phosphate, a sulfate or a carbonate, the P, S or C is a nonmetal but it is the cation of its oxoanion, and in a hydroxide the H is. Which nonmetals are cations is decided by charge balance (`radii.cation_nonmetals`): an element of the anion table is promoted to cation when that brings the compound closer to neutrality, and C and P are cations when an anion more electronegative than them is present and they balance the charge better as cations than as C⁴⁻ / P³⁻. So the P of Li₃PO₄ and Li₃PS₄, the S of Li₂SO₄, the C of CaCO₃ and the H of Mg(OH)₂ are cations, while the carbide C of SiOC, the P of InP and the S of La₂O₂S stay anions. A nonmetal cation:
+
+- bonds to its anions at its Shannon cation radius (P-O 1.26, S-O 1.22, C-O 1.06, O-H 0.82 Å, about 0.8 of the bond, as for Si-O);
+- targets the ligand count of its oxoanion: 4 in PO₄³⁻, SO₄²⁻ and ClO₄⁻, 3 in CO₃²⁻, NO₃⁻, IO₃⁻ and a sulfite, 1 for H;
+- takes its oxidation state from the same charge balance (S⁶⁺ in Li₂SO₄, which leaves Li⁺), and is sized as that cation in the density estimate.
+
+With a composition, `classify_bond(sym_a, sym_b, composition)` applies these roles: a nonmetal cation and an anion are `ionic`, a nonmetal cation and another cation are `cation-cation` (a second-shell contact across the anion, never a bond), and two cations of a compound with anions are never `ionic`. That last rule is why Na-B in a borate and K-Si in a silicate are placed 2.16 and 2.75 Å apart, like Na-Si, rather than as the ionic bond their Δχ ≥ 1 would suggest.
+
+#### Hydrogenated networks: a-Si:H, a-C:H
+
+C, Si and Ge with H and nothing else, with at most one H per host atom, are the `hydrogenated_network` class: a-Si:H, a-Ge:H, a-C:H up to the polymer-like 50 % H, a-SiC:H and a-SiGe:H. H there caps a host atom through a covalent bond; it is not the H⁻ of LiH, MgH₂ or NaAlH₄, which stay `hydride`. The host keeps what it has without H: its Cordero radii and packing factor, its minimum separations (Si-Si 1.87 Å as in a-Si, C-C 1.22 Å as in a-C, the C-C anion packing of SiC) and its bonds. Each H targets one bond (the hosts target 4) and is kept at 0.8 of its bond from any host (C-H 0.86, Si-H 1.18 Å). Two H can share a host atom (H-H 1.21 Å in a-C:H, 1.67 Å in a-Si:H) but cannot form H₂.
+
+In the density estimate H is sized at 0.90 Å, not its Cordero 0.31 Å, which would give it no volume: each H replaces a host-host bond and brings free volume with it, so the density falls as the H content rises. Si₆₄H₈ (11 % H) comes out at 2.30 g/cm³ (glow-discharge a-Si:H ≈ 2.2), and a-C:H at 2.19, 1.84, 1.52 and 1.24 g/cm³ for 20, 30, 40 and 50 % H (hard a-C:H 1.6–2.2 g/cm³ at 30–40 % H, polymer-like 1.2–1.6 g/cm³ at 40–50 %). The real density also depends on how the film was grown (sp³ fraction, voids), so use `--target-density` when the measured value is known.
+
 ### Automated density
 
 Cell volume is estimated by **class-aware sphere packing**: the composition is
@@ -88,6 +106,7 @@ over every anion-former (oxynitrides, oxyfluorides).
 | `pnictide` | Cordero covalent | 0.32 | GaAs, InP, InAs |
 | `covalent_carbide` | Cordero covalent | 0.32 | SiC, B4C |
 | `group_iv` | Cordero covalent | 0.30 | Si, Ge, C |
+| `hydrogenated_network` | Cordero covalent (host), H 0.90 Å | the H-free host's (0.28–0.32) | a-Si:H, a-Ge:H, a-C:H, a-SiC:H, a-SiGe:H |
 | `chalcogenide` | Cordero covalent | 0.30 | ZnS, CdTe, GeTe |
 | `chalcogenide_glass` | Cordero covalent | 0.23 | GeS2, GeSe2, As2S3, As2Se3 (network glasses; tellurides stay `chalcogenide`) |
 | `elemental_semiconductor` | Cordero covalent | 0.28 | a-Se, a-Te, a-As, a-Sb, a-P |
@@ -128,7 +147,7 @@ Each field:
 | `minsep{pair:value class [Δχ=val]}` | Per-pair: bond class + Pauling Δχ (shown only when the ionic classification is at stake) + minsep value in Å |
 | `ρ=… g/cm³  L=… Å` | Auto-estimated mass density and cubic cell length |
 
-The line is grep-friendly: `grep "auto-derive" random_gen.log` retrieves it as a single line per generation run. Bond classes shown are `ionic`, `covalent`, `metallic`, and `anion-pack` (same-element nonmetal pairs use a separate anion-packing scale factor, see "Bond-type classifier" above).
+The line is grep-friendly: `grep "auto-derive" random_gen.log` retrieves it as a single line per generation run. Bond classes shown are `ionic`, `covalent`, `metallic`, `cation-cation` (a nonmetal cation and another cation, see "Nonmetal cations" above), and `anion-pack` (same-element anion pairs use a separate anion-packing scale factor, see "Bond-type classifier" above).
 
 ## CLI examples
 

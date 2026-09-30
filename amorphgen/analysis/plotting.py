@@ -64,6 +64,19 @@ def _find_reciprocal_pair(cn_data):
     return None, None
 
 
+def _figure(nrows=1, ncols=1, *, figsize=None, dpi=None, **kwargs):
+    """``plt.subplots`` without pyplot.
+
+    These figures are only saved, never shown, so they stay out of pyplot:
+    the caller's backend and open figures are left alone (a notebook keeps
+    showing its own figures inline), no display is needed, and there is
+    nothing to close.
+    """
+    from matplotlib.figure import Figure
+    fig = Figure(figsize=figsize, dpi=dpi)
+    return fig, fig.subplots(nrows, ncols, **kwargs)
+
+
 def _save_fig(fig, base_path, dpi=300, save_pdf=False):
     """Save PNG (and optionally PDF) at the given base path (no extension)."""
     fig.savefig(f"{base_path}.png", dpi=dpi, bbox_inches='tight')
@@ -81,16 +94,13 @@ def plot_pair_panels(x, curves, xlabel, ylabel, base_path, dpi=300,
     Up to three panels per row; NaNs are skipped.
     """
     import math
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
 
     labels = list(curves)
     n = len(labels)
     ncols = 1 if n == 1 else (2 if n <= 4 else 3)
     nrows = math.ceil(n / ncols)
-    fig, axes = plt.subplots(nrows, ncols, figsize=(3.3 * ncols, 2.5 * nrows),
-                             sharex=True, sharey=True, squeeze=False)
+    fig, axes = _figure(nrows, ncols, figsize=(3.3 * ncols, 2.5 * nrows),
+                        sharex=True, sharey=True, squeeze=False)
     x = np.asarray(x, dtype=float)
     for k, ax in enumerate(axes.flat):
         if k >= n:
@@ -119,7 +129,6 @@ def plot_pair_panels(x, curves, xlabel, ylabel, base_path, dpi=300,
         fig.suptitle(title, fontsize=11)
     fig.tight_layout()
     _save_fig(fig, base_path, dpi, save_pdf)
-    plt.close(fig)
 
 
 def plot_analysis(analyser, output_dir=".", prefix="analysis",
@@ -153,10 +162,6 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
         Total-coordination requests (``"O"``, ``"O:In+Ga"``) plotted as
         ``{prefix}_cn_total.png`` with a CSV.
     """
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
     os.makedirs(output_dir, exist_ok=True)
     formula = analyser.atoms_list[0].get_chemical_formula(mode="hill")
 
@@ -174,7 +179,7 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
     if rdf_pairs is not None:
         pairs = [p for p in pairs if p in rdf_pairs]
 
-    fig, ax = plt.subplots(figsize=(7, 4.5))
+    fig, ax = _figure(figsize=(7, 4.5))
     rdf_csv_data = {}
 
     if normalise:
@@ -208,7 +213,6 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
     _apply_pub_style(ax)
     fig.tight_layout()
     _save_fig(fig, os.path.join(output_dir, f"{prefix}_rdf"), dpi, save_pdf)
-    plt.close(fig)
 
     if pair_panels and pairs:
         plot_pair_panels(rdf_csv_data[pairs[0]][0],
@@ -284,15 +288,14 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
         _apply_pub_style(ax)
 
     def _panels_figure(items, base):
-        fig, axes = plt.subplots(1, len(items), figsize=(3.8 * len(items), 3.8),
-                                 squeeze=False)
+        fig, axes = _figure(1, len(items), figsize=(3.8 * len(items), 3.8),
+                            squeeze=False)
         for idx, (label, data) in enumerate(items.items()):
             _bar_panel(axes[0, idx], label, data, _PALETTE[idx % len(_PALETTE)])
         if show_title:
             fig.suptitle(f"CN Distribution — {formula}", fontsize=12, y=1.02)
         fig.tight_layout()
         _save_fig(fig, base, dpi, save_pdf)
-        plt.close(fig)
 
     if cn_pairs:
         from matplotlib.ticker import FuncFormatter
@@ -311,7 +314,7 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
             all_cn = sorted(set(top) | set(bot))
             x = np.array(all_cn, dtype=float)
 
-            fig, ax = plt.subplots(figsize=(5.0, 4.0))
+            fig, ax = _figure(figsize=(5.0, 4.0))
             ax.bar(x, [top.get(c, 0) for c in all_cn], 0.6,
                    color=_PALETTE[0], edgecolor="black", lw=0.4,
                    label=top_key)
@@ -339,7 +342,6 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
             fig.tight_layout()
             _save_fig(fig, os.path.join(output_dir, f"{prefix}_cn"),
                       dpi, save_pdf)
-            plt.close(fig)
         else:
             # ── Side-by-side panels: multi-cation (Ga-O, In-O, Zn-O, then
             #    O-(Ga+In+Zn)), or mono-element / alloy (every pair) ──
@@ -389,8 +391,8 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
     all_angle_data = {k: v for k, v in all_angle_data.items() if len(v) > 10}
 
     if all_angle_data:
-        fig, ax = plt.subplots(figsize=(7, 4.5))
-        bins = np.arange(40, 180, 2)
+        fig, ax = _figure(figsize=(7, 4.5))
+        bins = np.arange(40, 181, 2)        # last edge 180: linear triplets count
         bin_centres = (bins[:-1] + bins[1:]) / 2
 
         for i, (triplet, angles) in enumerate(all_angle_data.items()):
@@ -415,7 +417,6 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
         fig.tight_layout()
         _save_fig(fig, os.path.join(output_dir, f"{prefix}_angles"),
                   dpi, save_pdf)
-        plt.close(fig)
 
         if save_csv:
             angle_csv_path = os.path.join(output_dir, f"{prefix}_angles.csv")
@@ -432,7 +433,7 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
     density_dict = analyser.density()
     rho_values = np.array(density_dict.get("values", []))
     if len(rho_values) >= 2:
-        fig, ax = plt.subplots(figsize=(5.0, 4.0))
+        fig, ax = _figure(figsize=(5.0, 4.0))
         x_pos = 1
         vp = ax.violinplot([rho_values], positions=[x_pos], widths=0.65,
                            showmeans=False, showmedians=False,
@@ -474,7 +475,6 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
         fig.tight_layout()
         _save_fig(fig, os.path.join(output_dir, f"{prefix}_density"),
                   dpi, save_pdf)
-        plt.close(fig)
 
         if save_csv:
             rho_csv_path = os.path.join(output_dir, f"{prefix}_density.csv")
@@ -501,9 +501,6 @@ def plot_sq(sq_result, output_dir=".", prefix="analysis", dpi=300,
     ``pair_panels`` also one panel per pair in ``{prefix}_sq_partials_panels.png``.
     """
     import csv
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
 
     os.makedirs(output_dir, exist_ok=True)
     q = np.array(sq_result["q"], dtype=float)
@@ -514,7 +511,7 @@ def plot_sq(sq_result, output_dir=".", prefix="analysis", dpi=300,
          if "n_per_bin" in sq_result else None)
     m = ~np.isnan(s) & ((n > 0) if n is not None else True)
 
-    fig, ax = plt.subplots(figsize=(5.4, 4.0))
+    fig, ax = _figure(figsize=(5.4, 4.0))
     ax.plot(q[m], s[m], lw=1.4, color=_PALETTE[0])
     ax.axhline(1.0, ls=":", color="grey", alpha=0.6)
     # Conventional S(q) presentation starts at 0. Note the Faber-Ziman total
@@ -532,7 +529,7 @@ def plot_sq(sq_result, output_dir=".", prefix="analysis", dpi=300,
 
     partials = sq_result.get("partials") or {}
     if partials:
-        fig2, ax2 = plt.subplots(figsize=(5.4, 4.0))
+        fig2, ax2 = _figure(figsize=(5.4, 4.0))
         for i, (pair, s_ab) in enumerate(partials.items()):
             s_ab = np.array(s_ab, dtype=float)
             mm = ~np.isnan(s_ab) & ((n > 0) if n is not None else True)
@@ -623,12 +620,9 @@ def plot_rings(rings, output_dir, label="auto", dpi=300, save_pdf=False,
                show_title=False):
     """Bar chart of the ring-size distribution (percent of network edges)."""
     import os
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
     os.makedirs(output_dir, exist_ok=True)
     sizes = list(rings["ring_sizes"]); frac = list(rings["fractions"])
-    fig, ax = plt.subplots(figsize=(5.0, 3.4), dpi=dpi)
+    fig, ax = _figure(figsize=(5.0, 3.4), dpi=dpi)
     ax.bar(sizes, frac, color="#2a78d6", width=0.7)
     ax.set_xlabel("ring size (network nodes)")
     ax.set_ylabel("fraction of edges (%)")
@@ -642,5 +636,4 @@ def plot_rings(rings, output_dir, label="auto", dpi=300, save_pdf=False,
     fig.savefig(base + ".png")
     if save_pdf:
         fig.savefig(base + ".pdf")
-    plt.close(fig)
     return base + ".png"

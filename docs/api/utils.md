@@ -25,7 +25,8 @@ auto-derivation chain documented in the JOSS paper.
 ```{eval-rst}
 .. automodule:: amorphgen.utils.radii
    :members: default_minsep, estimate_cell_length, auto_target_cn,
-             infer_oxidation_state, get_ionic_radius
+             infer_oxidation_state, cation_nonmetals, classify_bond,
+             get_ionic_radius
    :show-inheritance:
 ```
 

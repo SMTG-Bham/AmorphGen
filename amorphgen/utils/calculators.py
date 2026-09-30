@@ -71,6 +71,18 @@ MACE_FOUNDATION_MODELS: dict[str, str] = {
 # ── CHGNet identifiers ───────────────────────────────────────────────────────
 CHGNET_MODELS: set[str] = {"chgnet"}
 
+# Raised by _load_chgnet and, before any work starts, by require_dtype.
+_CHGNET_FLOAT64_MSG = (
+    "CHGNet does not support default_dtype='float64': its "
+    "composition_model submodule constructs input tensors at "
+    "float32 regardless of torch.get_default_dtype(), so the "
+    "forward pass crashes with a dtype mismatch.  CHGNet is "
+    "trained and benchmarked at float32 — keep default_dtype "
+    "as 'float32' (or omit it) for CHGNet, or switch to MACE "
+    "(model='mace-mpa-0', default_dtype='float64') if you need "
+    "float64 precision."
+)
+
 
 def _ci_get(registry: dict, name: str):
     """Case-insensitive registry lookup (``MACE-MPA-0`` == ``mace-mpa-0``)."""
@@ -234,16 +246,7 @@ def _load_chgnet(device: str, default_dtype: str | None = None,
     if default_dtype is None:
         default_dtype = "float32"
     if default_dtype == "float64":
-        raise NotImplementedError(
-            "CHGNet does not support default_dtype='float64': its "
-            "composition_model submodule constructs input tensors at "
-            "float32 regardless of torch.get_default_dtype(), so the "
-            "forward pass crashes with a dtype mismatch.  CHGNet is "
-            "trained and benchmarked at float32 — keep default_dtype "
-            "as 'float32' (or omit it) for CHGNet, or switch to MACE "
-            "(model='mace-mpa-0', default_dtype='float64') if you need "
-            "float64 precision."
-        )
+        raise NotImplementedError(_CHGNET_FLOAT64_MSG)
     if default_dtype != "float32":
         raise ValueError(
             f"default_dtype must be 'float32' or None for CHGNet; "
@@ -504,6 +507,22 @@ def require_backend(model: str, model_path: str | None = None) -> str:
         f"                          with classical_params in a YAML config)\n"
         f"  See all models:         amorphgen --list-models"
     )
+
+
+def require_dtype(model: str, default_dtype: str | None = None,
+                  model_path: str | None = None) -> None:
+    """Fail-fast check that *model* can run at *default_dtype*.
+
+    Raises the same :class:`NotImplementedError` as the CHGNet loader when
+    CHGNet is asked for float64. The CLI calls this next to
+    :func:`require_backend`, BEFORE any setup work: the melt-quench stages
+    build their calculator without ``default_dtype``, so ``--mq-ensemble``
+    would otherwise run stages 1-4 and only fail when phase 3 builds one.
+    """
+    # dtype first: _detect_backend warns about unregistered mace-* names
+    if (default_dtype == "float64" and model_path is None
+            and _detect_backend(model) == "chgnet"):
+        raise NotImplementedError(_CHGNET_FLOAT64_MSG)
 
 
 # ═════════════════════════════════════════════════════════════════════════════

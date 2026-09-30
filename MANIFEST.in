@@ -1,0 +1,4 @@
+# Files the sdist needs beyond what setuptools finds itself. By default it takes
+# only test/test*.py from the suite, which leaves out conftest.py (the fixtures
+# and the --run-mace gate), so the tests of an unpacked sdist would fail.
+recursive-include test *.py

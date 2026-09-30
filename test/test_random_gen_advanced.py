@@ -352,7 +352,7 @@ class TestAutoDeriveInLogFile:
             output_dir=str(out_dir),
             seed=0,
         )
-        log = (out_dir / "random_gen.log").read_text()
+        log = (out_dir / "random_gen.log").read_text(encoding="utf-8")
         # The auto-derive summary line must be present
         assert "[auto-derive]" in log
         # And contain the expected fields

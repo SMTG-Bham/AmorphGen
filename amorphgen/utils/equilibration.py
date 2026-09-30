@@ -215,8 +215,6 @@ def plot_energy_convergence(source, timestep_fs: float = DEFAULT_TIMESTEP_FS,
     drift_eV_per_ps : float
         Linear drift in energy. Should be ~0 if equilibrated.
     """
-    import matplotlib
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     # Get time array from log or compute from timestep
@@ -345,8 +343,6 @@ def plot_block_averages(source, n_blocks: int = 4,
                         n_atoms: int | None = None, ax=None,
                         frame_stride: int = TRAJ_LOG_INTERVAL):
     """Visualise block averaging: block means vs overall mean +/- 2*SEM."""
-    import matplotlib
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     is_eq, bd = block_average_test(source, n_blocks, discard_fraction,
@@ -411,7 +407,9 @@ def compute_msd(traj, timestep_fs: float = DEFAULT_TIMESTEP_FS,
     Compute MSD from trajectory using unwrapped positions.
 
     Handles both orthorhombic and non-orthorhombic cells via
-    fractional coordinate unwrapping.
+    fractional coordinate unwrapping. Displacements are measured relative
+    to the centre of mass, so a drift of the whole system does not count
+    as diffusion.
 
     ``timestep_fs`` is the MD integration timestep. AmorphGen writes one
     trajectory frame every ``frame_stride`` MD steps (``TRAJ_LOG_INTERVAL``,
@@ -458,19 +456,26 @@ def compute_msd(traj, timestep_fs: float = DEFAULT_TIMESTEP_FS,
 
         positions[i] = positions[i - 1] + delta
 
-    r0 = positions[0]
     # Frames are stored every frame_stride MD steps, so the wall time between
     # frames is timestep_fs * frame_stride (fs). Dividing by 1000 -> ps.
     time_ps = np.arange(n_frames) * timestep_fs * frame_stride / 1000.0
     msd_dict = {}
 
+    # Displacements relative to the centre of mass: its drift (the Langevin
+    # thermostat leaves it free, and the Nose-Hoover NPT integrators keep the
+    # net momentum of the drawn velocities) is a rigid translation, not
+    # diffusion.
+    masses = frames[0].get_masses()
+    disp_all = positions - positions[0]
+    disp_all -= ((disp_all * masses[None, :, None]).sum(axis=1)
+                 / masses.sum())[:, None, :]
+
     if by_element:
         for elem in sorted(set(symbols)):
             mask = np.array([s == elem for s in symbols])
-            disp = positions[:, mask, :] - r0[mask, :]
+            disp = disp_all[:, mask, :]
             msd_dict[elem] = np.mean(np.sum(disp ** 2, axis=2), axis=1)
 
-    disp_all = positions - r0
     msd_dict["all"] = np.mean(np.sum(disp_all ** 2, axis=2), axis=1)
 
     return time_ps, msd_dict
@@ -491,8 +496,6 @@ def plot_msd(traj, timestep_fs: float = DEFAULT_TIMESTEP_FS, ax=None,
         D > 1e-6 cm^2/s indicates liquid/diffusive behaviour.
         D < 1e-6 cm^2/s indicates frozen/glass behaviour.
     """
-    import matplotlib
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     time_ps, msd_dict = compute_msd(traj, timestep_fs=timestep_fs,
@@ -547,8 +550,6 @@ def plot_temperature(source, timestep_fs: float = DEFAULT_TIMESTEP_FS,
     T_target : float, optional
         Target temperature (K). If given, shows expected fluctuation band.
     """
-    import matplotlib
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     if isinstance(source, str) and source.endswith('.log'):
@@ -656,8 +657,6 @@ def plot_rdf_time_windows(traj, pairs: list[tuple[str, str]] | None = None,
 
     If the RDFs from all windows overlap, the structure is equilibrated.
     """
-    import matplotlib
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     frames = _load_trajectory(traj)
@@ -784,8 +783,6 @@ def plot_cn_vs_time(traj, pairs: list[tuple[str, str, float]],
     cutoffs : list of float, optional
         Bond cutoffs per pair. None = auto from covalent radii.
     """
-    import matplotlib
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     if cutoffs is None:
@@ -866,8 +863,6 @@ def convergence_report(source, timestep_fs: float = DEFAULT_TIMESTEP_FS,
         energy_drift_eV_per_atom_per_ps, block_test_passed, block_data,
         diffusion_coefficients_cm2_s, summary_text.
     """
-    import matplotlib
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import os
 

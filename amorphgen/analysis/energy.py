@@ -88,7 +88,7 @@ def rank_from_log(logfile):
     in_block = False
     last_e = last_fmax = n_steps = status = None
 
-    with open(logfile) as f:
+    with open(logfile, encoding="utf-8") as f:   # batch_random writes UTF-8
         for line in f:
             cm = _COMP_RE.match(line)
             if cm:

@@ -331,6 +331,28 @@ orphan: true
   Requested totals are also plotted (`analysis_cn_total.png` + CSV).
 - **Total g(r) always in `analysis_rdf.csv`** (`g(r)_Total` column) for every system;
   the plot still draws it only with `--total-rdf`.
+- **Conda environment files** in `build_tools/`: `environment.yml` (env `amorphgen`)
+  installs the checkout in editable mode with MACE + CHGNet, and `environment_dev.yml`
+  (env `amorphgen-dev`) adds the torch-sim engine, pytest and the Sphinx toolchain.
+  Both install through the `pyproject.toml` extras, so the dependencies are declared in
+  one place. `conda env create -f build_tools/environment.yml`.
+- **Wider CI.** Every push and pull request to `main` and `dev` now also runs the
+  torch-free suite on macOS and Windows; the torch-sim engine, CHGNet and pymatgen tests
+  on CPU-only PyTorch (previously skipped in CI), with a coverage report; the suite with
+  every dependency at the lowest version `pyproject.toml` allows; the suite against the
+  built wheel; and a ruff check for syntax errors and undefined names. The docs build
+  treats Sphinx warnings as errors and runs for `dev` too, the `build_tools/` conda
+  environments are built and tested when they or the extras change, and the weekly
+  canary covers SevenNet (`7net-0`) as well as CHGNet. See `CONTRIBUTING.md`.
+- **Python 3.13 and 3.14.** The torch-free suite now runs on Python 3.10 to 3.14 on
+  Linux, and on 3.14 (was 3.12) on macOS and Windows, and the classifiers list 3.13 and
+  3.14. The `backends` job and the `build_tools/` conda environments stay on 3.12:
+  CHGNet 0.4.2 publishes wheels up to 3.12 only, so on 3.13 and 3.14 pip compiles it,
+  which needs a C compiler.
+- **`CITATION.cff` and `CODE_OF_CONDUCT.md`.** GitHub's "Cite this repository" button
+  now gives the reference the README asks for, in APA and BibTeX. The code of conduct
+  adopts the Contributor Covenant 3.0 and says where to report a problem. A test checks
+  that `CITATION.cff` names the current release, so a version bump has to update it.
 
 ### Fixed after the rc4 upload (on GitHub main; not in the rc4 wheel on PyPI)
 
@@ -509,3 +531,213 @@ orphan: true
   binary oxides keep the mirrored layout, multi-cation compounds get one panel per
   cation-centred pair (Ga-O, In-O, Zn-O) plus the anion total (O-(Ga+In+Zn)), which
   also goes into `analysis_cn.csv`.
+- **Lower bounds that could not work.** `ase>=3.22` and `matplotlib>=3.5` allowed
+  versions that break: `import amorphgen` needs `ase.filters` (ASE 3.23), the `mtk`
+  barostat (the stage-4 default) needs `IsotropicMTKNPT` (ASE 3.25), and before 3.6.1
+  matplotlib's `violinplot` (the density panel of `--analyse --save-plot`) raises
+  `IndexError` with numpy >= 1.24. The bounds are now `ase>=3.25` and
+  `matplotlib>=3.6.1`, and the new `min-deps` CI job tests them.
+- **`--random-gen` failed on Windows.** `random_gen.log` was written in the locale
+  encoding, and cp1252 cannot encode the `→`, `ρ` and `Δχ` of the auto-derive line, so
+  `batch_random` raised `UnicodeEncodeError` before placing a structure. The log is now
+  written, and read back by `rank_from_log`, as UTF-8.
+- **Tutorial 1 stopped with a `NameError`** in its summary table: `cn_all_unrelaxed` was
+  no longer defined. The cell now computes the unrelaxed In-O coordination itself.
+- **ASE cross-references in the docs** pointed at the retired wiki.fysik.dtu.dk
+  inventory; they now resolve against docs.ase-lib.org.
+- **License metadata in the PEP 639 form.** `license = "MIT"` (an SPDX expression) and
+  `license-files = ["LICENSE"]` replace the `{text = "MIT"}` table and the `License ::`
+  classifier, which setuptools deprecated and stops accepting on 2027-02-18. Building
+  from source now needs setuptools >= 77 (pip's isolated builds fetch it), and the
+  distributions carry `Metadata-Version: 2.4`, so uploading them needs twine >= 6.1.
+- **No deprecated ASE MD calls.** Initial momenta come from `thermalize_momenta`, the
+  ASE 3.29 name for `MaxwellBoltzmannDistribution` (the old name is used on ASE
+  3.25-3.28), and the NVT Langevin thermostat runs with `fixcm=False`, since ASE 3.28
+  deprecates `fixcm=True` for not sampling NVT exactly. **Behaviour change:** NVT stages
+  no longer pin the centre of mass. It diffuses (about 0.5 Å in 10 ps for 108 Cu atoms
+  at 300 K), a rigid translation that leaves the structure, temperature and energy
+  unchanged, but seeded NVT trajectories differ from earlier versions (they stay
+  reproducible). ASE's suggested `FixCom` constraint is not used: it would stay on the
+  atoms, and `IsotropicMTKNPT` rejects constrained atoms. The equilibration MSD
+  (`compute_msd`) is now measured relative to the centre of mass, so a drift of the
+  whole system, from this or from the net momentum that the `mtk` and
+  `parrinello-rahman` integrators conserve, no longer reads as diffusion.
+- **`cell_filter: cubic` without ASE's deprecated `ExpCellFilter`.** The isotropic cell
+  relaxation, the default of `--random-gen --relax`, `--batch-opt` and
+  `--hybrid-ensemble`, now runs through `FrechetCellFilter` with hydrostatic strain,
+  which gives the same forces as `ExpCellFilter` for this deformation. It uses
+  `exp_cell_factor=1`, `ExpCellFilter`'s scale for the cell forces, so the convergence
+  test still requires |P| V < fmax; `FrechetCellFilter`'s default divides the cell
+  forces by the number of atoms, which would let a relaxation stop at about 0.1 GPa at
+  fmax = 0.01 eV/Å. In a check on a strained 108-atom Cu cell, every ASE optimiser took
+  the same number of steps with either filter. An explicit `-C ExpCellFilter` still
+  selects ASE's deprecated filter.
+- **Bond-angle plots left out angles above 178°.** The histogram bins of `--analyse
+  --save-plot` and of the ensemble comparison plots ended at 178°, so linear triplets
+  (every Si-O-Si of ideal β-cristobalite, the trans O-M-O of an ideal octahedron) were
+  not counted, and a triplet type with only such angles became an invisible NaN curve.
+  The bins now end at 180°, which adds a 179° row to the comparison plots' `angles.csv`.
+- **File handles closed.** The torch-sim batch quench wrote `batch_size.json`, and on
+  resume rewrote the stage logs, through file objects it never closed, leaving the
+  flush to the garbage collector.
+- **A quiet test suite.** `pytest test/` reported about 9,900 warnings, nearly all NumPy
+  2.5's deprecation of setting `ndarray.shape`, which ASE 3.29 triggers inside
+  `Atoms.copy`, the MD integrators and the `.traj` reader. That warning and the
+  TorchScript and `weights_only` notices of loading a MACE model are now filtered in
+  `pyproject.toml`, and the tests that raised warnings of their own (unclosed files,
+  Berendsen MD started from rest, expected warnings not asserted, a class-scoped fixture
+  written as a method, which pytest 10 rejects) are fixed.
+- **Next steps after `--random-gen` found no structures.** `--random-gen` writes to
+  `<work-dir>/random_initial/` (and `random_opt/` with `--relax`), but the README, the
+  `--examples` text and several guides passed `<work-dir>` itself to `--batch-opt` or
+  `--hybrid-ensemble` (and `<work-dir>/random_0000.xyz` to the pipeline), and
+  `--batch-opt` then exited 0 having done nothing. The examples now name the
+  subdirectory, `--batch-opt` exits 1 when it has nothing to optimise, and
+  `--batch-opt`, `--hybrid-ensemble` and `--batch-quench` given a random-gen work dir
+  name the subdirectory that holds its structures.
+- **CHGNet with `default_dtype: float64` failed only after hours of MD.** The CHGNet
+  configs in the MQ-ensemble and YAML guides set float64, which CHGNet does not support,
+  and under `--mq-ensemble` the error came in phase 3, after stages 1-4, because the
+  melt-quench stages build their calculator without `default_dtype`. The configs now
+  leave it at `auto`, and the CLI refuses the combination before any work starts.
+  **Behaviour change:** the 7-stage pipeline, which ran such a config at float32
+  without saying so, now refuses it too.
+- **Flags and example files the docs referred to but that do not exist.** The sweep
+  example used a `--quench-rate` flag (now `--quench-steps-per-T`), and the validation
+  page, the MQ-ensemble guide and a docstring named `examples/hybrid_stages_4567_cuda.yaml`,
+  `examples/mq_stages_1234_cuda.yaml`, `mq_stages_567.yaml`, `examples/hpc/` with its
+  SLURM scripts, and `examples/test_structure_factor.py`, none of which were ever
+  committed. They now use configs and commands that exist. The validation page's
+  reproduction also generated 160 atoms instead of 400 and collected the results from
+  the pre-rc2 `run_*/run_0000/` layout.
+- **Plotting switched notebooks off inline figures.** `StructureAnalyser.plot()`,
+  `plot_sq`, `plot_rings`, `plot_pair_panels` and the equilibration plots
+  (`convergence_report`, `plot_msd` and the rest) called `matplotlib.use("Agg")`. After
+  one call a notebook showed no more figures, `plt.show()` only warning that
+  FigureCanvasAgg is non-interactive, and a script lost its interactive backend the same
+  way. The analysis plots, `compare_ensembles` included, only write files: they now draw
+  on a `matplotlib.figure.Figure` outside pyplot, so they leave the backend and the open
+  figures alone, and the files are unchanged. The equilibration plots return pyplot
+  figures on the caller's backend, so a notebook shows them inline, including those of
+  `convergence_report()` without `output_dir`. Without a display, as on a compute node,
+  matplotlib picks Agg by itself.
+- **The sdist's tests could not run.** setuptools puts only `test/test*.py` in the sdist,
+  so `test/conftest.py` was missing: from an unpacked sdist 45 tests errored for want of
+  their fixtures, and the MACE tests, which it skips unless `--run-mace` is given, ran
+  and failed. `MANIFEST.in` now adds every module under `test/`. The `package` CI job,
+  which ran the checkout's copy of the suite, now runs the sdist's.
+- **The torch-sim engine's compiler requirement was undocumented.** torch-sim's
+  neighbour list goes through `torch.compile`, which builds kernels with the system C/C++
+  compiler, so without one the first relaxation stops with `InvalidCxxCompiler`. The
+  installation page, the quickstart, the backends and HPC guides, the README and
+  `build_tools/README.md` now say so, and the installation page gives the commands that
+  install a compiler.
+- **README links that 404 on PyPI.** The links to the licence, `build_tools/` and the
+  tutorials were relative, and PyPI resolves them against pypi.org. They now point at
+  GitHub, and the `package` job renders the README as PyPI does and fails on a relative
+  link (`twine check` does not render Markdown, so it passed them).
+- **`draft-pdf.yml` removed.** It built the JOSS draft from `paper/`, which was deleted
+  in June, so it could no longer run. The README's package layout no longer lists
+  `paper/`.
+- **The stage functions ignored `work_dir=`.** `opt_cell.run`, `equilibrate.run`,
+  `melt_cell.run`, `quench.run` and `final_opt.run` took the keyword into `**kwargs`
+  and wrote their log, trajectory and output structure to the current directory. They
+  now write them into `work_dir`, which is created if missing. Without it they write to
+  the current directory as before, which is where `MeltQuenchPipeline` and
+  `batch_quench` run each stage.
+- **Tutorials.** Five notebooks left over from the old numbering (`T1_random_gen`, the
+  two in `T2_MQ_via_7_steps`, `T3_mix_random_MQ` and `T4_classical_potential`)
+  duplicated Tutorials 3-6 and are removed, with the logs that came with them. Tutorial
+  6 had never been run and now ships with its output; its coordination table used a
+  3.0 Å cutoff that counted second-shell oxygens (Si 4.6 instead of 4.1) and now
+  closes the first shell. Tutorial 7 stopped with a `ZeroDivisionError` (its colour
+  scale divided by the number of temperatures minus one, and it had been run with one),
+  so its Arrhenius cells never ran. Its trajectory analysis had found nothing anyway:
+  `equilibrate.run` wrote the trajectory outside the `work_dir` it was given, and the
+  time axis treated frames, which are saved every 100 MD steps, as one step apart. Its
+  CLI commands used a `--no-relax` flag that does not exist, a lower-case ensemble
+  name, the default 0.5 fs timestep and file names from an older layout. The notebook
+  now runs end to end.
+- **The `auto-rdf` cutoff could stop inside the first shell.** The first minimum of
+  g(r) was the first point past the peak that was below half its height and no higher
+  than its neighbours, and in a small cell that can be a flat step or a noise dip on the
+  falling side of the peak. The shipped 64-atom a-Si was cut at 2.53 Å, inside its first
+  shell, and gave a CN of 3.75 instead of 4.00; the 96-atom a-HfO₂ was cut at 2.31 Å,
+  which left out its longer Hf–O bonds (CN 5.47 instead of 5.78). The minimum is now
+  read from g(r) averaged over 0.25 Å, and it has to be the lowest point within 0.25 Å
+  on either side. Where g(r) is zero over a range, the cutoff goes in the middle of it.
+  Cutoffs move outwards, and bonded pairs change most in small cells: a-Si now gets 4.00
+  at 2.84 Å, and the Ir coordination of the 24-atom IrO₂ model goes from 4.0 to 5.4, the
+  value its README lists. The O–O and cation–cation cutoffs of the non-bonded contacts
+  move as well. **Re-run any analysis done with the default cutoff.**
+- **Ring statistics counted paths that cross the cell.** The ring search followed bonds
+  by atom index and ignored which periodic image a bond reached. So a path that came
+  back to another image of its first atom, having crossed the cell, counted as a ring.
+  The 8-atom diamond cell gave 100 % 4-rings, and the shipped 48-atom a-SiO₂ gave 84 %
+  4-rings; it now has 10 % 3-, 23 % 4-, 45 % 5- and 23 % 6-rings. Each bond now carries
+  its cell offset, and a ring has to close on the image it started from, so a structure
+  and its supercells give the same distribution. The shipped Sb₂O₃ and Sb₂O₅ ensembles
+  (112-120 atoms) change as well; a-Si, a-HfO₂ and the 400-atom a-Ga₂O₃ do not.
+  **Re-run ring statistics of small cells.**
+- **`--reference` dropped the Si–O bond check.** The analyser names a bond with its
+  elements in alphabetical order (`O-Si`). `examples/reference_a_SiO2.yaml` writes
+  `Si-O`, so the check found no value and left its row out of the table without saying
+  so. A bond, and the two end atoms of an angle, now match in either order. A
+  coordination entry is still directional: `Si-O` counts O around Si. A reference
+  metric the structures do not have is now listed as `n/a` and counted in the summary,
+  instead of being left out. Of the shipped references only a-SiO₂ was affected.
+- **Random generation mangled oxoanion compounds.** The radii rules took every nonmetal
+  for an anion, including the centre of an oxoanion (P in a phosphate, S in a sulfate, C
+  in a carbonate, N in a nitrate, Cl in a perchlorate, I in an iodate) and the H of a
+  hydroxide. So P-O was kept 2.46 Å apart against a 1.53 Å bond (S-O 2.27, C-O 2.24,
+  N-O 2.29, O-H 2.24 Å), and no generated P, S, C, N or H had an O within bonding
+  distance. These centres had no target coordination. Counting S, N, Cl or H as anions in
+  the charge balance gave Li+5 in Li2SO4, Ca+10 in CaSO4, Na+9 in NaNO3 and Mg+6 in
+  Mg(OH)2, which put sulfates, nitrates and hydroxides in the high-valent-oxide class and
+  perchlorates and iodates in the oxyhalide class. Charge balance now decides which
+  nonmetals are cations (`radii.cation_nonmetals`). They are the ones the
+  `anion_elements` rule promotes, plus C and P. C and P count only when an anion more
+  electronegative than them is present and they balance the charge better as cations
+  than as C4- or P3-. That test keeps the carbide C of SiOC and SiCN, carbides,
+  phosphides and a-C:H as they were. A nonmetal cation bonds to its anions at its
+  Shannon cation radius (P-O 1.26, S-O 1.22, C-O 1.06, N-O 1.04, O-H 0.82 Å, P-S 1.61 Å
+  in Li3PS4). It targets the ligand count of its oxoanion: 4 in PO4, SO4 and ClO4, 3 in
+  CO3, NO3, IO3 and a sulfite, 1 for H. It is solved for its oxidation state, and sized
+  as that cation in the density estimate. Sulfate, carbonate, nitrate, perchlorate and
+  hydroxide estimates go from 52-72 % to 79-88 % of the crystal density.
+  **Behaviour change:** `infer_oxidation_state` now returns the state of a nonmetal
+  cation (P +5 in Li3PO4) instead of `None`.
+- **Borates and K/Ba silicates placed cations on top of each other.** A metal-metalloid
+  pair with Δχ ≥ 1 was classed as an ionic bond even when both are cations of an oxide.
+  So Na-B was kept only 0.90 Å apart (Li-B 0.70, K-Si 1.31, Ba-Si 1.29 Å), and the
+  coordination-aware placement counted the pair as a bond. `classify_bond(a, b,
+  composition)` now applies the compound's roles, and two cations of a compound with
+  anions are never an ionic bond. Na-B is 2.16 Å, as Na-Si already was. A nonmetal cation
+  and another cation get the right-angle contact across the anion that M-M pairs use.
+  Two of the same element (P-P, S-S, C-C) get their two bonds end to end, which is above
+  their homonuclear bond, so `--check-dimers` still flags a P-P or S-S bond. None of the
+  100 class-benchmark systems changes. The placement still has no seed for a centre (O
+  carries no target CN), so a centre starts with about as many O as Si does in an alkali
+  silicate (P 2.75 of 4, C 2.05 of 3 on average), and it relies on the relaxation to
+  complete the polyhedron.
+- **Random generation could not build a-Si:H or a-C:H.** H is on the anion table as the
+  H- of LiH, so a-Si:H was classed as a hydride and sized with the Si4+ ionic radius:
+  15.1 g/cm³ for Si64H8 against a measured ~2.2 (a-Ge:H 32 g/cm³). a-C:H was a covalent
+  carbide with H as its anion, at 3.5 g/cm³ whatever its H content against a measured
+  1.2-2.0, and H targeted 6 neighbours. As anions, C and H were kept 2.24 Å from
+  everything, so no C-C or C-H bond could be placed, and the placement of both failed
+  after four cell expansions. C, Si and Ge with H and nothing else, with at most one H per
+  host atom, are now the `hydrogenated_network` class: a-Si:H, a-Ge:H, a-C:H, a-SiC:H,
+  a-SiGe:H. The host keeps what it has without H (Cordero radii, packing factor, minimum
+  separations and bonds of a-Si, a-C, SiC or SiGe), so the estimate runs into those as the
+  H goes to zero. The hosts target 4 bonds and H one, and a network's C gets the
+  three-bond floor of Si. H is kept at 0.8 of its bond from a host (C-H 0.86, Si-H
+  1.18 Å); two H can share a host (H-H 1.21 Å in a-C:H, 1.67 Å in a-Si:H) but cannot
+  form H2. In the density estimate H is sized at 0.90 Å, about 10 Å³ per H, so the density
+  falls with the H content: Si64H8 is 2.30 g/cm³, and a-C:H 2.19, 1.84, 1.52 and
+  1.24 g/cm³ at 20, 30, 40 and 50 % H. The cells now place at that density with every H
+  bonded to a host; a MACE-MPA-0 cell relaxation takes two Si64H8 cells to 2.19 and
+  2.22 g/cm³, with every H on one Si. `--check-dimers` no longer flags the C-C bonds and
+  CH2 pairs of a-C:H. The real hydrides (LiH, MgH2, NaAlH4, TiH2) and all 100
+  class-benchmark systems are unchanged. **Behaviour change:** `infer_oxidation_state`
+  returns `None` for these networks (Si50H50 gave Si +1).

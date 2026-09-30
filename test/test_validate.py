@@ -126,11 +126,52 @@ class TestValidateAgainstReference:
         assert len(result["rows"]) == 1
         assert result["rows"][0][0] == "Density"
 
-    def test_unknown_pair_skipped(self):
-        # Asking for In-O when the analyser only has Ga-O → no row.
+    def test_unknown_pair_reported_na(self):
+        # Asking for In-O when the analyser only has Ga-O keeps the row, as
+        # n/a, so a check that did not run shows in the table.
         ref = {"bond_distances": {"In-O": {"expected": [2.0, 2.2]}}}
         result = validate_against_reference(_StubAnalyser(), ref)
-        assert result["rows"] == []
+        assert result["rows"] == [("Bond In-O", None, 2.0, 2.2, "Å", "n/a")]
+
+    def test_bond_and_angle_match_in_either_order(self):
+        # the analyser names a pair in alphabetical order ("O-Si") and an
+        # angle with its end atoms in that order; the reference may not
+        class _SiO:
+            def bond_distances(self):
+                return {"O-Si": {"mean": 1.61}}
+
+            def bond_angles(self):
+                return {"N-Si-O": {"mean": 109.0}}
+
+        ref = {"bond_distances": {"Si-O": {"expected": [1.58, 1.65]}},
+               "bond_angles": {"O-Si-N": {"expected": [105.0, 113.0]}}}
+        rows = validate_against_reference(_SiO(), ref)["rows"]
+        assert [(r[0], r[1], r[5]) for r in rows] == [
+            ("Bond Si-O", 1.61, "match"), ("Angle O-Si-N", 109.0, "match")]
+
+    def test_coordination_is_directional(self):
+        # CN O-Ga counts Ga around O: it must not take the Ga-O value
+        ref = {"coordination": {"O-Ga": {"mean_expected": [2.7, 3.0]}}}
+        rows = validate_against_reference(_StubAnalyser(), ref)["rows"]
+        assert rows == [("CN O-Ga", None, 2.7, 3.0, "", "n/a")]
+
+    def test_si_o_bond_checked_on_real_structure(self):
+        # regression: --reference with examples/reference_a_SiO2.yaml left out
+        # the Si-O bond, which StructureAnalyser keys "O-Si"
+        from ase.spacegroup import crystal
+        from amorphgen.analysis import StructureAnalyser
+        crist = crystal(["Si", "O"], basis=[(0, 0, 0), (0.125, 0.125, 0.125)],
+                        spacegroup=227, cellpar=[7.16, 7.16, 7.16, 90, 90, 90])
+        ref = {"bond_distances": {"Si-O": {"expected": [1.50, 1.60]}},
+               "coordination": {"Si-O": {"mean_expected": [3.9, 4.1]},
+                                "O-Si": {"mean_expected": [1.95, 2.05]}},
+               "bond_angles": {"Si-O-Si": {"expected": [175.0, 180.0]},
+                               "O-Si-O": {"expected": [105.0, 113.0]}}}
+        rows = validate_against_reference(StructureAnalyser([crist], cutoff=2.0),
+                                          ref)["rows"]
+        assert [r[0] for r in rows] == ["Bond Si-O", "CN Si-O", "CN O-Si",
+                                        "Angle Si-O-Si", "Angle O-Si-O"]
+        assert [r[5] for r in rows] == ["match"] * 5
 
     def test_no_system_falls_back_to_unspecified(self, reference):
         ref_no_system = {k: v for k, v in reference.items() if k != "system"}
@@ -174,7 +215,18 @@ class TestFormatValidationReport:
             ],
         }
         out = format_validation_report(result)
-        assert "Summary: 1 match, 1 concern, 1 fail" in out
+        assert "Summary: 1 match, 1 concern, 1 fail (out of 3 metrics)" in out
+        assert "n/a" not in out
+
+    def test_summary_counts_na(self):
+        result = {
+            "system": "X",
+            "sources": [],
+            "rows": [("A", 1.0, 0.0, 2.0, "", "match"),
+                     ("Bond In-O", None, 2.0, 2.2, "Å", "n/a")],
+        }
+        out = format_validation_report(result)
+        assert "Summary: 1 match, 0 concern, 0 fail, 1 n/a (out of 2 metrics)" in out
 
     def test_handles_none_value(self):
         result = {

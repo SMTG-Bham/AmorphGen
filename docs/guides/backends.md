@@ -30,7 +30,7 @@ calc = get_calculator(model="chgnet")
 
 Install: `pip install amorphgen[chgnet]`
 
-Precision: CHGNet is trained and benchmarked at `float32`. AmorphGen's CHGNet loader enforces this, passing `default_dtype="float64"` raises `NotImplementedError` with a clear message pointing the user to MACE, because CHGNet's `composition_model` submodule builds its input feature vectors via a path that bypasses `torch.get_default_dtype()` and crashes at forward time when the rest of the model is upcast. Keeping `float32` (the default) is the recommended path for MD; switch to MACE if you genuinely need `float64` for static-energy precision.
+Precision: CHGNet is trained and benchmarked at `float32`. AmorphGen's CHGNet loader enforces this, passing `default_dtype="float64"` raises `NotImplementedError` with a clear message pointing the user to MACE, because CHGNet's `composition_model` submodule builds its input feature vectors via a path that bypasses `torch.get_default_dtype()` and crashes at forward time when the rest of the model is upcast. The CLI refuses `model: chgnet` with `default_dtype: float64` before any work starts. Keeping `float32` (the default) is the recommended path for MD; switch to MACE if you genuinely need `float64` for static-energy precision.
 
 A note on MD speed: CHGNet's `CHGNetCalculator.calculate()` rebuilds the atomic graph (neighbour list + edges + line graph) from scratch on every MD step. For systems above ~200 atoms or with high density (e.g. a-Ga₂O₃ at 400 atoms), the per-step cost on an A100 is around 500 ms, substantially slower than the AdvanceSoft H100 benchmark (≈ 84 ms/step at 400 atoms for Li₁₀GeP₂S₁₂) would predict, mostly because (a) denser oxides have more graph edges per atom and (b) the ASE → pymatgen → graph round-trip carries Python overhead. For large-system MD where speed matters, MACE (which caches neighbour lists internally) is 3–5× faster at the same system size.
 
@@ -151,7 +151,7 @@ batched MLIP call with automatic GPU memory management. AmorphGen can hand the
 ensemble modes to it:
 
 ```bash
-pip install "amorphgen[torchsim]"          # Python >= 3.12; CUDA GPU or CPU (no Apple MPS)
+pip install "amorphgen[torchsim]"          # Python >= 3.12 and a C/C++ compiler; CUDA GPU or CPU (no Apple MPS)
 
 amorphgen --batch-opt --input-dir random_structures/random_initial/ \
     -m mace-mpa-0 --engine torchsim -o relaxed/
@@ -164,6 +164,12 @@ use it: all structures are relaxed together with torch-sim's FIRE optimiser
 instead of one after another through ASE. Output files, names and logs are the
 same as with the ASE engine, so `--analyse` and everything downstream is
 unchanged.
+
+The engine needs a C/C++ compiler wherever it runs, and pip does not install one:
+torch-sim's neighbour list goes through `torch.compile`, and without a compiler
+the first relaxation stops with `InvalidCxxCompiler`. See
+[the installation page](../getting-started/installation.md#the-torch-sim-engine)
+for how to get one.
 
 What carries over: `-f/--fmax`, `--opt-steps`, `-O` (LBFGS by default, or FIRE, BFGS,
 gradient descent) and the cell filter (`cubic` maps

@@ -41,12 +41,12 @@ amorphgen --random-gen --config config.yaml
 ### Batch Optimisation
 
 ```bash
-# Optimise all structures in a directory
-amorphgen --batch-opt --input-dir random_structures/ \
+# Optimise all structures in a directory (--random-gen writes to random_initial/)
+amorphgen --batch-opt --input-dir random_structures/random_initial/ \
           --model chgnet --device cpu --fmax 0.01
 
 # With cell filter
-amorphgen --batch-opt --input-dir random_structures/ \
+amorphgen --batch-opt --input-dir random_structures/random_initial/ \
           --cell-filter cubic
 
 # Cell filter options: FrechetCellFilter (default), UnitCellFilter,
@@ -175,7 +175,7 @@ from amorphgen.utils import get_calculator
 calc = get_calculator(model="chgnet", device="cpu")
 
 paths = batch_optimize(
-    input_dir="random_SiO2",
+    input_dir="random_SiO2/random_initial",
     output_dir="optimised_SiO2",
     cfg_override={
         "opt": {
@@ -238,6 +238,21 @@ atoms = pipe.run(stages=[1, 4, 5, 6, 7])
 
 # Resume from checkpoint
 atoms = pipe.run(stages=[1, 4, 5, 6, 7], resume=True)
+```
+
+A stage can also run on its own. `work_dir` sets where its log, trajectory and
+output structure go (default: the current directory):
+
+```python
+from amorphgen.pipeline import equilibrate
+from amorphgen.utils.calculators import get_calculator
+
+calc = get_calculator("mace-mpa-0", device="cuda")
+liquid = equilibrate.run(
+    "mq_run/stage1_opt.xyz", calc=calc, stage="high",
+    cfg_override={"eq_high": {"ensemble": "NVT", "T": 3000, "steps": 20000}},
+    work_dir="eq_3000K",
+)  # eq_3000K/stage4_eq.log, stage4_eq_traj.xyz, stage4_eq.xyz
 ```
 
 ### Structure Analysis
@@ -456,6 +471,7 @@ All parameters are auto-detected from the composition. No manual tuning needed.
 | Halide (Li2ZrCl6, LiF, NaCl) | Shannon CN=6 sphere packing | 0.58 |
 | Nitride (AlN, GaN, Si3N4) | Shannon CN=6 sphere packing | 0.52 |
 | Hydride (LiH, MgH2) | Shannon CN=6 sphere packing | 0.55 |
+| Hydrogenated network (a-Si:H, a-C:H, a-SiC:H) | Cordero sphere packing, H 0.90 A | H-free host's (0.28-0.32) |
 
 ### Coordination-aware placement (auto coordination targeting)
 
@@ -468,6 +484,7 @@ All parameters are auto-detected from the composition. No manual tuning needed.
 | Chalcogenide (ZnS, CdTe) | 4-6 | 0 | tetrahedral or octahedral |
 | Carbide (SiC, TiC) | 4-6 | 0 | metalloid=4, metal=6 |
 | Hydride (LiH, MgH2) | 6 | 0 | 6 only |
+| Hydrogenated network (a-Si:H, a-C:H) | host 4, H 1 | 0 | 4 / 1 only |
 | Boride (TiB2) | 6 | 0 | 6 only |
 | Pnictide (GaAs, InP) | 4 | 0 | 4 only |
 | Group IV (Si, Ge) | 4 | 0 | 4 only |
@@ -490,7 +507,7 @@ All defaults can be overridden via CLI flags (`--target-cn`, `--cn-tolerance`,
 |-------|-------------|
 | `FrechetCellFilter` | Default. Riemannian metric, best convergence for non-cubic cells |
 | `UnitCellFilter` | Classic ASE filter, relaxes full cell in Cartesian |
-| `ExpCellFilter` | Exponential cell filter, good for large deformations |
+| `ExpCellFilter` | Exponential cell filter; deprecated in ASE 3.23 in favour of `FrechetCellFilter`, which corrects its cell gradients |
 | `StrainFilter` | Relaxes cell via strain tensor only (no positions) |
 | `cubic` | Isotropic volume only (keeps a=b=c, 90 deg angles) |
 | `none` | Fixed cell, positions only |

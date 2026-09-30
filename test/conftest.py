@@ -18,10 +18,16 @@ import shutil
 import tempfile
 import pytest
 import numpy as np
+import matplotlib
 
 from ase import Atoms
 from ase.build import bulk
 from ase.calculators.emt import EMT
+
+# The tests save figures and never show them. The package leaves the backend
+# to the user, so the suite picks Agg itself and runs the same with or without
+# a display.
+matplotlib.use("Agg")
 
 
 # ── CLI options ───────────────────────────────────────────────────────────────

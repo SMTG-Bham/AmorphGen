@@ -11,7 +11,7 @@ from __future__ import annotations
 from .opt_cell import run as _opt_run
 
 
-def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
+def run(atoms_or_file, cfg_override=None, calc=None, work_dir=None, **kwargs):
     """
     Final optimisation of the amorphous structure.
 
@@ -19,4 +19,5 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
     """
     print("[Stage 7] Final optimisation (amorphous)")
     return _opt_run(atoms_or_file, cfg_override=cfg_override,
-                    calc=calc, stage_key="final_opt", **kwargs)
+                    calc=calc, stage_key="final_opt", work_dir=work_dir,
+                    **kwargs)

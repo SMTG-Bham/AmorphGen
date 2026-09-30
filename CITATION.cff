@@ -1,0 +1,43 @@
+# Shown by GitHub as "Cite this repository". The title and authors are repeated
+# in the BibTeX entries in README.md and docs/index.md, and the authors in
+# pyproject.toml, amorphgen/__init__.py, docs/conf.py and the docs/index.md
+# author line: change them together. Update version and date-released with each
+# release (test/test_citation.py checks them).
+cff-version: 1.2.0
+message: >-
+  If you use AmorphGen in your research, please cite it as below, and also cite
+  the interatomic potential you used: the README lists their references.
+type: software
+title: >-
+  AmorphGen: A Python package for amorphous structure generation with
+  machine-learning and classical interatomic potentials
+abstract: >-
+  AmorphGen generates amorphous structure models by melt-quench molecular
+  dynamics, by random placement, or by random placement followed by a
+  melt-quench anneal, using machine-learning interatomic potentials (MACE,
+  CHGNet, SevenNet) or classical potentials, and analyses the resulting
+  ensembles.
+authors:
+  - family-names: Kaewmeechai
+    given-names: Chaiyawat
+    affiliation: University of Birmingham
+    orcid: "https://orcid.org/0000-0003-1603-2659"
+  - family-names: Slocombe
+    given-names: Louie
+    affiliation: University of Birmingham
+    orcid: "https://orcid.org/0000-0002-6986-5526"
+  - family-names: Scanlon
+    given-names: David O.
+    affiliation: University of Birmingham
+    orcid: "https://orcid.org/0000-0001-9174-8601"
+repository-code: "https://github.com/SMTG-Bham/AmorphGen"
+license: MIT
+keywords:
+  - amorphous materials
+  - melt-quench
+  - random structure generation
+  - molecular dynamics
+  - machine-learning interatomic potentials
+  - materials science
+version: "1.0.0rc4"
+date-released: "2026-09-24"

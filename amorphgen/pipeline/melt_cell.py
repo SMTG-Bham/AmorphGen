@@ -10,14 +10,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 from ase.io import read, write
-from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 
 from ..utils import (get_calculator, make_cubic,
                      build_md_dynamics, attach_outputs, merge_config)
+from ..utils.common import thermalize_momenta, stage_file
 from ..configs import DEFAULT_CONFIG
 
 
-def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
+def run(atoms_or_file, cfg_override=None, calc=None, work_dir=None, **kwargs):
     """
     Heat the structure from T_start -> T_end.
 
@@ -26,6 +26,9 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
     atoms_or_file : str or ase.Atoms
     cfg_override : dict, optional
     calc : ASE calculator, optional
+    work_dir : str or path-like, optional
+        Directory for the log, trajectory and output structure, created if
+        missing. Default: the current directory.
 
     Returns
     -------
@@ -49,8 +52,8 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
         atoms = make_cubic(atoms)
         print("[Stage 3] Cell reshaped to cubic")
 
-    logfile = cfg.get("log_file", "stage3_melt.log")
-    trajfile = cfg.get("traj_file", "stage3_melt_traj.xyz")
+    logfile = stage_file(cfg.get("log_file", "stage3_melt.log"), work_dir)
+    trajfile = stage_file(cfg.get("traj_file", "stage3_melt_traj.xyz"), work_dir)
 
     # Frame-level resume: continue a walltime-killed ramp from the last
     # trajectory frame (momenta included); the ramp position is recovered
@@ -59,7 +62,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
     from ..utils.common import (resume_md_stage, needs_velocity_init,
                                 ramp_resume_position, resolve_ramp, set_md_temperature)
     ck_atoms, elapsed = resume_md_stage(trajfile, kwargs.get("resume"), "3",
-                                        legacy_trajfile="stage3_melt.xyz")
+                                        legacy_trajfile=stage_file("stage3_melt.xyz", work_dir))
     if ck_atoms is not None:
         atoms = ck_atoms
 
@@ -75,7 +78,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
 
     T_start = cfg["T_start"]
     if needs_velocity_init(atoms, elapsed):
-        MaxwellBoltzmannDistribution(atoms, temperature_K=T_start, rng=rng)
+        thermalize_momenta(atoms, temperature_K=T_start, rng=rng)
 
     dyn = build_md_dynamics(
         atoms, ensemble=ensemble, T=T_start,
@@ -139,7 +142,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, **kwargs):
     logger.close()
     traj.close()
 
-    out_xyz = cfg.get("output_xyz", "stage3_melted.xyz")
+    out_xyz = stage_file(cfg.get("output_xyz", "stage3_melted.xyz"), work_dir)
     write(out_xyz, atoms, format="extxyz")
     print(f"[Stage 3] Saved -> {out_xyz}\n")
     return atoms

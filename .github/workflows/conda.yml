@@ -1,0 +1,70 @@
+# Builds the conda environments in build_tools/ as the install docs do and
+# uses them, so an extra, a pin or a Python bound that stops resolving together
+# (the MACE e3nn pin against CHGNet and torch-sim, say) fails here rather than
+# for a user following the docs. Runs when the files or the extras they
+# install change, and weekly for upstream releases.
+#
+# PIP_EXTRA_INDEX_URL makes pip take the CPU-only torch wheel, which keeps each
+# environment near 2.5 GB instead of 6 GB; the files are used unchanged.
+name: Conda environments
+
+on:
+  push:
+    branches: [ main, dev ]
+    paths:
+      - build_tools/**
+      - pyproject.toml
+      - .github/workflows/conda.yml
+  pull_request:
+    branches: [ main, dev ]
+    paths:
+      - build_tools/**
+      - pyproject.toml
+      - .github/workflows/conda.yml
+  schedule:
+    - cron: "0 6 * * 1"   # Mondays 06:00 UTC, with the backend canary
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  conda-env:
+    name: conda (${{ matrix.file }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - file: environment.yml
+          env-name: amorphgen
+        - file: environment_dev.yml
+          env-name: amorphgen-dev
+    defaults:
+      run:
+        shell: bash -el {0}   # login shell, so the environment is active
+    env:
+      PIP_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Create the ${{ matrix.env-name }} environment
+      uses: conda-incubator/setup-miniconda@v4
+      with:
+        miniforge-version: latest
+        environment-file: build_tools/${{ matrix.file }}
+        activate-environment: ${{ matrix.env-name }}
+
+    - name: Check the install
+      run: |
+        python --version
+        pip list
+        python -c "from mace.calculators import mace_mp; import chgnet.model"
+        amorphgen --list-models
+
+    - name: Run the full suite
+      if: matrix.env-name == 'amorphgen-dev'
+      run: |
+        pytest test/ -rs --durations=10

@@ -4,38 +4,222 @@ on:
   push:
     branches: [ main, dev ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, dev ]
+  workflow_dispatch: {}
+
+# A new push to a pull request cancels the run still in progress for it;
+# every push to main or dev gets a complete run of its own (its own group).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# bash on every OS, so a failing command fails its step on Windows too
+defaults:
+  run:
+    shell: bash
 
 jobs:
-  test:
+  # Hard errors only (syntax errors, undefined names, invalid comparisons) in
+  # the package, the tests, docs/conf.py and the tutorial notebooks. Style is
+  # not enforced.
+  lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: "3.12"
+
+    - name: Lint
+      run: |
+        python -m pip install ruff
+        ruff check --select E9,F63,F7,F82 --output-format github .
+
+  # The torch-free suite (Tier 1 + Tier 2) on every supported Python on Linux,
+  # and on the newest one on macOS and Windows, where the bare install
+  # (random generation and analysis on a laptop) is used.
+  test:
+    name: test (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        os: [ubuntu-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        include:
+        - os: macos-latest
+          python-version: "3.14"
+        - os: windows-latest
+          python-version: "3.14"
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: ${{ matrix.python-version }}
+        cache: pip
+        cache-dependency-path: pyproject.toml
 
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -e ".[dev,analysis]"
+        pip install -e ".[dev]"
 
-    - name: Run Tier 1 + Tier 2 tests (no MACE required)
+    - name: Run Tier 1 + Tier 2 tests (no MLIP backend)
       run: |
-        pytest test/ -v --tb=short -x
+        pytest test/ -rs --durations=10 --junitxml=pytest-results.xml
 
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
-        name: test-results-py${{ matrix.python-version }}
-        path: .pytest_cache/
+        name: test-results-${{ matrix.os }}-py${{ matrix.python-version }}
+        path: pytest-results.xml
+
+  # The optional backends on CPU: the torch-sim engine (with its Lennard-Jones
+  # model), CHGNet, and the pymatgen Ewald cross-check that CHGNet brings in.
+  # Their tests skip in the torch-free jobs. The CPU-only torch wheel keeps
+  # the install near 2 GB instead of 6 GB. The MACE tests (foundation-model
+  # download, see canary.yml) and the CUDA tests still skip.
+  backends:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: "3.12"   # the oldest Python torch-sim supports
+        cache: pip
+        cache-dependency-path: pyproject.toml
+
+    - name: Install CPU torch, then the torch-sim and CHGNet extras
+      run: |
+        python -m pip install --upgrade pip
+        pip install torch --index-url https://download.pytorch.org/whl/cpu
+        pip install -e ".[torchsim,chgnet,dev]"
+
+    # importorskip would otherwise turn a broken backend install into skips
+    - name: Check the backends import
+      run: |
+        python -c "import torch_sim, chgnet, pymatgen.analysis.ewald"
+
+    - name: Run the full suite with coverage
+      env:
+        # sys.monitoring: near-zero overhead, where the default tracer makes
+        # the pure-Python placement loops about 2.5x slower
+        COVERAGE_CORE: sysmon
+      run: |
+        pytest test/ -rs --durations=10 --cov=amorphgen --cov-report=term
+
+    - name: Coverage summary
+      run: |
+        coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
+
+  # The lower bounds in pyproject.toml, installed exactly on the oldest
+  # supported Python: uv's lowest-direct resolution takes the declared minimum
+  # of every direct dependency and the newest release of everything else. A
+  # bound the code has outgrown fails here instead of on a user's machine.
+  min-deps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: "3.10"
+
+    # setup-uv publishes no floating major tag (v7 was the last); v10.2.0 is
+    # an immutable release
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v10.2.0
+
+    - name: Install the minimum supported versions
+      run: |
+        uv pip install --system --resolution lowest-direct -e ".[dev]"
+        uv pip list --system
+
+    - name: Run Tier 1 + Tier 2 tests
+      run: |
+        pytest test/ -rs --durations=10
+
+  # Builds the sdist and the wheel (from the sdist), checks their metadata, and
+  # runs the sdist's copy of the suite against the installed wheel instead of
+  # the checkout, so a test file missing from the sdist, or a module or data
+  # file missing from the wheel, fails here.
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: "3.12"
+
+    - name: Build the sdist and wheel
+      run: |
+        python -m pip install --upgrade pip build twine "readme-renderer[md]"
+        python -m build
+        twine check --strict dist/*
+
+    # PyPI shows README.md as the project page, where a relative link resolves
+    # against pypi.org and 404s. twine check does not render Markdown, so this
+    # renders it as PyPI does (readme-renderer) and looks at the links.
+    - name: Check the README links work on PyPI
+      run: |
+        python - <<'EOF'
+        import re, sys
+        from html.parser import HTMLParser
+        from readme_renderer.markdown import render
+
+        relative = []
+
+        class Links(HTMLParser):
+            def handle_starttag(self, tag, attrs):
+                relative.extend(value for name, value in attrs if name in ("href", "src")
+                                and not re.match(r"[a-z][a-z0-9+.-]*:|#", value or ""))
+
+        with open("README.md", encoding="utf-8") as fh:
+            Links().feed(render(fh.read()))
+        if relative:
+            sys.exit("Relative links in README.md, which 404 on PyPI (use absolute URLs):\n  "
+                     + "\n  ".join(relative))
+        EOF
+
+    - name: Install the wheel
+      run: |
+        pip install dist/*.whl pytest
+
+    # From outside the checkout, so `import amorphgen` can only find the wheel
+    # and the tests have only the files the sdist ships
+    - name: Run the sdist's tests against the installed wheel
+      working-directory: ${{ runner.temp }}
+      run: |
+        mkdir sdist
+        tar -xzf "$GITHUB_WORKSPACE"/dist/*.tar.gz -C sdist --strip-components=1
+        python -c "import amorphgen; print(amorphgen.__file__)"
+        amorphgen --version
+        pytest sdist/test -rs
+
+    - name: Upload the distributions
+      uses: actions/upload-artifact@v7
+      with:
+        name: dist
+        path: dist/
 
   # Guards the torch-free promise: a bare `pip install amorphgen` (no extras)
   # must support random generation, numeric analysis, and the CLI. A stray
@@ -43,11 +227,12 @@ jobs:
   # this job.
   light-install:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: "3.12"
 

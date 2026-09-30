@@ -12,14 +12,15 @@ from __future__ import annotations
 
 from copy import deepcopy
 from ase.io import read, write
-from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 
 from ..utils import (get_calculator, make_cubic, build_md_dynamics,
                      attach_outputs, merge_config)
+from ..utils.common import thermalize_momenta, stage_file
 from ..configs import DEFAULT_CONFIG
 
 
-def run(atoms_or_file, cfg_override=None, calc=None, stage="high", **kwargs):
+def run(atoms_or_file, cfg_override=None, calc=None, stage="high",
+        work_dir=None, **kwargs):
     """
     Equilibrate the structure at a fixed temperature.
 
@@ -31,6 +32,9 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high", **kwargs):
     stage : str
         "premelt" for Stage 2 (eq_premelt), "high" for Stage 4 (eq_high),
         or "low" for Stage 6 (eq_low).
+    work_dir : str or path-like, optional
+        Directory for the log, trajectory and output structure, created if
+        missing. Default: the current directory.
 
     Returns
     -------
@@ -65,8 +69,8 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high", **kwargs):
         atoms = make_cubic(atoms)
         print(f"[Stage {stage_label}] Reshaped cell to cubic (make_cubic)")
 
-    logfile = cfg.get("log_file", f"stage{stage_label}_eq.log")
-    trajfile = cfg.get("traj_file", f"stage{stage_label}_eq_traj.xyz")
+    logfile = stage_file(cfg.get("log_file", f"stage{stage_label}_eq.log"), work_dir)
+    trajfile = stage_file(cfg.get("traj_file", f"stage{stage_label}_eq_traj.xyz"), work_dir)
     steps = cfg.get("steps", 10000)
 
     # Frame-level resume: pick a walltime-killed stage up from the last
@@ -96,7 +100,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high", **kwargs):
     from ..utils.common import stage_rng, run_index_for
     rng = stage_rng(global_cfg.get("seed"), int(stage_label), run_index_for(global_cfg))
     if needs_velocity_init(atoms, elapsed):
-        MaxwellBoltzmannDistribution(atoms, temperature_K=T, rng=rng)
+        thermalize_momenta(atoms, temperature_K=T, rng=rng)
 
     dyn = build_md_dynamics(
         atoms, ensemble=ensemble, T=T,
@@ -125,7 +129,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high", **kwargs):
     logger.close()
     traj.close()
 
-    out_xyz = cfg.get("output_xyz", f"stage{stage_label}_eq.xyz")
+    out_xyz = stage_file(cfg.get("output_xyz", f"stage{stage_label}_eq.xyz"), work_dir)
     write(out_xyz, atoms, format="extxyz")
     print(f"[Stage {stage_label}] Saved -> {out_xyz}\n")
     return atoms

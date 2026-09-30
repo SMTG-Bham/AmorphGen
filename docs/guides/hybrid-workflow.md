@@ -20,7 +20,7 @@ amorphgen --random-gen --composition "TiO2*8" -n 20 \
     -o random_TiO2/
 
 # 2. Run hybrid (stages 4-5-6-7) on each, in one CLI call
-amorphgen --hybrid-ensemble --input-dir random_TiO2/ \
+amorphgen --hybrid-ensemble --input-dir random_TiO2/random_opt/ \
     --config hybrid.yaml --device cuda --model chgnet \
     -o tio2_hybrid/
 ```
@@ -54,7 +54,7 @@ For MACE, SevenNet or Lennard-Jones on a CUDA GPU, add `--engine torchsim`
 stages 4 to 7 for all inputs together in batched calls:
 
 ```bash
-amorphgen --hybrid-ensemble --input-dir random_TiO2/ \
+amorphgen --hybrid-ensemble --input-dir random_TiO2/random_opt/ \
     --config hybrid.yaml --device cuda --model mace-mpa-0 \
     --engine torchsim -o tio2_hybrid/ --resume
 ```

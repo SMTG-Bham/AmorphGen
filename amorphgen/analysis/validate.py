@@ -26,6 +26,20 @@ def _verdict(value, low, high, tol_frac=0.05):
     return "fail"
 
 
+def _mean(computed, key, either_order=False):
+    """``computed[key]["mean"]``, or ``None`` when the analyser has no entry.
+
+    With ``either_order`` the key also matches reversed: the analyser writes
+    a bond distance with its two elements in alphabetical order ("O-Si") and
+    an angle with its end atoms in that order ("N-Si-O"), while a reference
+    may name them "Si-O" or "O-Si-N".
+    """
+    entry = computed.get(key)
+    if entry is None and either_order:
+        entry = computed.get("-".join(reversed(key.split("-"))))
+    return None if entry is None else entry["mean"]
+
+
 def validate_against_reference(analyser, reference):
     """Compare analyser output to a reference dict (loaded from YAML).
 
@@ -41,7 +55,9 @@ def validate_against_reference(analyser, reference):
     dict
         ``{"system": str, "sources": list[str], "rows": list[tuple]}``
         where each row is (descriptor, computed, expected_lo, expected_hi,
-        units, verdict).
+        units, verdict). A metric the structures do not have (an element
+        pair absent, or with no contact inside its cutoff) keeps its row, with
+        ``None`` and the verdict "n/a".
     """
     rows = []
 
@@ -54,27 +70,22 @@ def validate_against_reference(analyser, reference):
 
     bd = analyser.bond_distances() if "bond_distances" in reference else {}
     for pair, spec in reference.get("bond_distances", {}).items():
-        if pair not in bd:
-            continue
         lo, hi = spec["expected"]
-        v = bd[pair]["mean"]
+        v = _mean(bd, pair, either_order=True)
         rows.append((f"Bond {pair}", v, lo, hi,
                      spec.get("units", "Å"), _verdict(v, lo, hi)))
 
+    # directional: CN Si-O counts O around Si, CN O-Si counts Si around O
     cn = analyser.coordination() if "coordination" in reference else {}
     for pair, spec in reference.get("coordination", {}).items():
-        if pair not in cn:
-            continue
         lo, hi = spec["mean_expected"]
-        v = cn[pair]["mean"]
+        v = _mean(cn, pair)
         rows.append((f"CN {pair}", v, lo, hi, "", _verdict(v, lo, hi)))
 
     ba = analyser.bond_angles() if "bond_angles" in reference else {}
     for triplet, spec in reference.get("bond_angles", {}).items():
-        if triplet not in ba:
-            continue
         lo, hi = spec["expected"]
-        v = ba[triplet]["mean"]
+        v = _mean(ba, triplet, either_order=True)
         rows.append((f"Angle {triplet}", v, lo, hi,
                      spec.get("units", "°"), _verdict(v, lo, hi)))
 
@@ -118,7 +129,12 @@ def format_validation_report(result):
     n_match = sum(1 for r in rows if r[5] == "match")
     n_concern = sum(1 for r in rows if r[5] == "concern")
     n_fail = sum(1 for r in rows if r[5] == "fail")
+    n_na = sum(1 for r in rows if r[5] == "n/a")
+    na = f", {n_na} n/a" if n_na else ""
     lines.append(f"  Summary: {n_match} match, {n_concern} concern, "
-                 f"{n_fail} fail (out of {len(rows)} metrics)")
+                 f"{n_fail} fail{na} (out of {len(rows)} metrics)")
+    if n_na:
+        lines.append("  n/a: not found in the structures (element absent, "
+                     "or no contact within the cutoff)")
     lines.append(bar)
     return "\n".join(lines)
