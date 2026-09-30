@@ -127,8 +127,6 @@ SHANNON_IONIC_RADII = {
     "O":  {-2: {6: 1.400}},
     "S":  {-2: {6: 1.840}, 4: {6: 0.37}, 6: {4: 0.12, 6: 0.29}},
     "Se": {-2: {6: 1.980}, 4: {6: 0.50}, 6: {4: 0.28, 6: 0.42}},
-    "S":  {-2: {6: 1.840}, 4: {6: 0.37}, 6: {4: 0.12, 6: 0.29}},
-    "Se": {-2: {6: 1.980}, 4: {6: 0.50}, 6: {4: 0.28, 6: 0.42}},
     "Te": {-2: {6: 2.210}, 4: {6: 0.970}, 6: {6: 0.560}},
     "F":  {-1: {6: 1.330}},
     "Cl": {-1: {6: 1.810}, 5: {3: 0.12}, 7: {4: 0.08, 6: 0.27}},
@@ -1667,73 +1665,6 @@ def get_packing_factor(cls: str, composition: dict | None = None) -> float:
 
 
 _MAX_POSITIVE_OS = {"H": 1, "C": 4, "N": 5, "O": 2, "F": 1, "P": 5, "S": 6,
-                    "Cl": 7, "Se": 6, "Br": 7, "Te": 6, "I": 7}
-
-
-def _max_positive_os(sym: str) -> int:
-    if sym in _MAX_POSITIVE_OS:
-        return _MAX_POSITIVE_OS[sym]
-    states = [k for k in SHANNON_IONIC_RADII.get(sym, {}) if k > 0]
-    return max(states) if states else 4
-
-
-def anion_elements(composition) -> set:
-    """Which elements act as ANIONS in this compound, decided by charge balance.
-
-    Membership of the anion table is not enough on its own: tellurium is the
-    anion in CdTe and the cation in TeO2, sulfur the anion in ZnS and the
-    cation in a sulfate, hydrogen the anion in LiH and the cation in a
-    hydroxide. So every element on the anion table starts as a candidate
-    anion, and while the cations present cannot supply the positive charge the
-    candidates demand, the least electronegative candidate is promoted to
-    cation. This reproduces the chemistry without a lookup table of exceptions:
-    La2O2S balances with sulfur as an anion and keeps it, H2SO4 does not and
-    promotes first hydrogen then sulfur, leaving the sulfate O as the anion.
-
-    A promotion happens only when it brings the compound CLOSER to charge
-    balance, which is what keeps real cells intact without any tolerance
-    setting. In a chalcogen-rich glass or a doped cell, promoting the major
-    anion would overshoot far past neutrality (Ge20S10Se70: a gap of 80 before,
-    480 after; F-doped silica: 2 before, 254 after), so every anion is kept:
-    the mixed chalcogen glasses keep Ge-Se and Ge-Te, F-doped silica keeps
-    Si-O, an O impurity in NaCl keeps Na-Cl and LiPON keeps P-N. Where a
-    promotion really is the chemistry, it improves the balance and happens:
-    TeO2, a tellurite, a sulfate, a nitrate, a hydroxide.
-
-    Known limitation: an element that is a cation in one site of a polyatomic
-    group and an anion in another cannot be both. In a thiosulfate the central
-    sulfur is cation-like and the terminal sulfur is an anion; the rule keeps
-    both as anions, so the S-O bonds are not counted. Rare in amorphous work.
-
-    ``composition`` may be a mapping of counts (preferred) or a bare set of
-    symbols, in which case one of each is assumed.
-    """
-    counts = (dict(composition) if hasattr(composition, "items")
-              else {e: 1 for e in composition})
-    anions = {e for e in counts if e in ANION_CHARGES}
-    if not anions:
-        return set()
-
-    def imbalance(anion_set):
-        """Positive charge the cations can supply minus what the anions demand."""
-        cations = set(counts) - anion_set
-        return (sum(_max_positive_os(e) * counts[e] for e in cations)
-                - sum(-ANION_CHARGES[e] * counts[e] for e in anion_set))
-
-    # The most electronegative element is always an anion, so it is never a
-    # candidate: an off-stoichiometry cell (a random Ga16Zn16O48 composition, a
-    # defective model) must not end up with no anion at all.
-    for candidate in sorted(anions, key=lambda e: PAULING_EN.get(e, 2.0))[:-1]:
-        before = imbalance(anions)
-        if before >= 0:
-            break                       # the cations already cover the anions
-        trial = anions - {candidate}
-        if abs(imbalance(trial)) < abs(before):
-            anions = trial
-    return anions
-
-
-_MAX_POSITIVE_OS = {"H": 1, "C": 4, "N": 5, "O": 2, "F": 1, "P": 5, "S": 6,
                     "Cl": 7, "Se": 6, "Br": 7, "Te": 6, "I": 7,
                     "Sb": 5}   # Sb(V); Sb has no Shannon entry to read it from
 
@@ -1834,26 +1765,16 @@ def _radius_for_density(sym: str, cls: str,
     ox = infer_oxidation_state(sym, composition) if composition else None
     # A non-metal acting as the CATION of an oxide (P in P2O5, S in SO3, Se in
     # SeO2, Te in TeO2) must take its highest positive Shannon state; the anion
-    # A non-metal acting as the CATION of an oxide (P in P2O5, S in SO3, Se in
-    # SeO2, Te in TeO2) must take its highest positive Shannon state; the anion
     # default would hand back P3- (2.12 A) and shrink the density threefold.
-    # Gated on the element actually being a cation here, which charge balance
-    # decides: the Cl of an oxychloride, the N of an oxynitride and the H of a
-    # hydroxide are anions and keep their ionic radii.
     # Gated on the element actually being a cation here, which charge balance
     # decides (cation_nonmetals): the Cl of an oxychloride, the N of an
     # oxynitride and the carbide C of an oxycarbide (SiOC) are anions and keep
     # their anion radii.
     if (ox is None and composition and "O" in composition and sym != "O"
-            and sym in NONMETALS and sym not in anion_elements(composition)):
             and sym in NONMETALS and sym in cation_nonmetals(composition)):
         positive = [k for k in SHANNON_IONIC_RADII.get(sym, {}) if k > 0]
         if positive:
             ox = max(positive)
-        else:
-            # promoted but no positive state tabulated: the anion radius would
-            # be ~4x too large, so use the covalent radius instead
-            return covalent_radii[atomic_numbers[sym]]
         else:
             # promoted but no positive state tabulated: the anion radius would
             # be ~4x too large, so use the covalent radius instead
