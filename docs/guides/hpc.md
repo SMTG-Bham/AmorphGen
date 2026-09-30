@@ -1,8 +1,41 @@
 # HPC deployment
 
-AmorphGen is designed for deployment on GPU-enabled HPC clusters via SLURM.
+AmorphGen runs on GPU-enabled HPC clusters through SLURM. Install the package
+and the backend used by your job first; see {doc}`../getting-started/installation`.
+
+## Configuring the bundled examples
+
+The `examples/*.slurm` scripts use BlueBEAR module and QoS names. Adapt those
+settings to your cluster, choose your own allocation account at submission,
+and export the path to a virtualenv containing AmorphGen and the required
+backends:
+
+```bash
+export AMORPHGEN_VENV=/path/to/your/venv
+export AMORPHGEN_ROOT=/path/to/AmorphGen
+cd "$AMORPHGEN_ROOT"
+mkdir -p logs
+sbatch --account=your-project examples/run_ensemble_resume_bluebear.slurm
+```
+
+`AMORPHGEN_VENV` is required; the scripts stop with a setup message if it is
+unset or empty. Use a virtualenv compatible with the Python module loaded by
+the script (Python 3.12 or newer for torch-sim). Scripts that read files from
+the repository use `AMORPHGEN_ROOT`, defaulting to `SLURM_SUBMIT_DIR` (or the
+current directory when run directly). Run inputs and outputs remain relative
+to the submission directory; follow each script's input/config instructions.
+Create `logs/` there **before** calling `sbatch`, so SLURM can open its log files.
+
+The scripts have no embedded allocation account. Pass `--account=your-project`
+on each submission, or set `export SBATCH_ACCOUNT=your-project` when submitting
+several jobs, including dependency chains. Keep these settings in your shell
+or a local submission wrapper. `#SBATCH` directives do not expand shell variables.
 
 ## SLURM job script
+
+Adapt the resource requests and environment paths to your cluster. This example
+initialises conda explicitly because batch shells may not read your interactive
+shell configuration:
 
 ```bash
 #!/bin/bash
@@ -13,15 +46,23 @@ AmorphGen is designed for deployment on GPU-enabled HPC clusters via SLURM.
 #SBATCH --time=24:00:00
 #SBATCH --account=your-account
 
-module load CUDA/11.8.0
-conda activate /path/to/your/env
+set -euo pipefail
+export PYTHONUNBUFFERED=1
 
-amorphgen POSCAR --model mace-mpa-0 --device cuda
+# Load any compiler/Python modules required by your cluster environment.
+source /path/to/miniforge3/etc/profile.d/conda.sh
+conda activate amorphgen
+
+amorphgen POSCAR --model mace-mpa-0 --device cuda \
+    --work-dir my_run --resume
 ```
 
 ## Resuming timed-out jobs
 
-The `--resume` flag enables smart checkpoint detection for both pipeline and batch-quench modes. It scans the work directory for completed stage outputs and automatically skips them.
+`--resume` reuses completed stage outputs and saved MD frames in the work
+directory. Resubmit with the same input, model, configuration and work directory;
+use a new directory when changing the simulation protocol. Do not run two jobs
+against the same output directory at once.
 
 ### Pipeline mode
 
@@ -63,7 +104,8 @@ in batched chunks. Relaxed structures are written after every chunk and MD
 trajectories every 100 steps, so a walltime kill loses at most one chunk of
 relaxation or 100 MD steps: `--resume` skips finished runs, continues a
 partly done MD stage from the last frame common to the chunk, and reuses the
-chunk size recorded in `batch_size.json` so the chunking is identical.
+chunk size recorded in `quench_runs/batch_size.json` under the hybrid work
+directory. Keep the input list and chunk size unchanged when resuming.
 Resubmitting the same job script until the log reports the ensemble complete
 is the intended way to run a large ensemble through a short queue. Put
 `export PYTHONUNBUFFERED=1` in the script, otherwise the progress messages
@@ -99,9 +141,14 @@ For running many structures in parallel (e.g. 100 AIRSS structures), use a SLURM
 #SBATCH --time=12:00:00
 #SBATCH --array=1-100
 
+set -euo pipefail
+export PYTHONUNBUFFERED=1
+source /path/to/miniforge3/etc/profile.d/conda.sh
+conda activate amorphgen
 SAMPLE=${SLURM_ARRAY_TASK_ID}
 
 amorphgen "inputs/sample-${SAMPLE}.xyz" \
+    --model mace-mpa-0 --device cuda \
     --stages 1 4 5 6 7 \
     --config config.yaml \
     --work-dir "results/sample_${SAMPLE}" \

@@ -1,42 +1,63 @@
 # Calculator backends
 
-AmorphGen supports multiple calculator backends through a unified factory: three machine-learning interatomic potentials (MLIPs) and two classical pair potentials.
+AmorphGen supports three machine-learning interatomic potential (MLIP)
+backends and two classical pair potentials through one calculator factory.
+
+The Python examples on this page use:
+
+```python
+from amorphgen.utils import get_calculator
+```
 
 ```{note}
-`amorphgen.utils.calculators.get_calculator()` is a thin wrapper around each backend's upstream ASE calculator (`MACECalculator`, `CHGNetCalculator`, `SevenNetCalculator`, plus the built-in classical calculators).  AmorphGen does **not** apply any custom unit conversion, stress-sign flip, or PBC override - energies are returned in eV, forces in eV/Å, stress in eV/Å³, and `atoms.pbc` is passed through unchanged.  This means cross-backend numerical consistency is inherited directly from the upstream MLIP package.  If you upgrade `mace-torch`, `chgnet`, or `sevenn` and observe a sudden density / energy shift, check the upstream calculator's release notes for unit-convention changes before assuming an AmorphGen regression.
+The factory delegates MLIP calculations to the upstream ASE calculator. It
+does not convert energies, forces or stresses, change the stress sign, or
+change `atoms.pbc`. ASE units are eV for energy, eV/Å for forces and eV/Å³ for
+stress when the calculator supplies it. Results depend on the selected model
+and backend version.
 ```
 
 ## MLIP backends
 
 ### MACE
 
-The default backend. Provides 20+ pre-trained foundation models including `mace-mpa-0`, `mace-mp-0`, and size variants (small, medium, large).
+The default backend. Supported model names include `mace-mpa-0`,
+`mace-mp-0b2-medium`, and `mace-omat-0-medium`. Run `amorphgen --list-models`
+for the full registry; available sizes depend on the model family.
 
 ```python
 calc = get_calculator(model="mace-mpa-0", device="auto")
 ```
 
-`device="auto"` picks CUDA → MPS → CPU automatically; pass `"cpu"` / `"cuda"` / `"mps"` explicitly to override.
+`device="auto"` picks CUDA → MPS → CPU automatically. On Apple Silicon,
+MACE and SevenNet default to float64, which MPS cannot represent; use
+`device="cpu"` (CLI: `--device cpu`) with those defaults. CHGNet uses float32
+and has an MPS loading path. See the
+[installation guide](../getting-started/installation.md#backend-compatibility).
 
-Install: `pip install amorphgen[mace]`
+Install: `pip install "amorphgen[mace]"`
 
 ### CHGNet
 
-Crystal Hamiltonian Graph Neural Network. Good balance of speed and accuracy, especially on CPU.
+Crystal Hamiltonian Graph Neural Network. Select `chgnet` to load its
+pre-trained model.
 
 ```python
 calc = get_calculator(model="chgnet")
 ```
 
-Install: `pip install amorphgen[chgnet]`
+Install: `pip install "amorphgen[chgnet]"`
 
-Precision: CHGNet is trained and benchmarked at `float32`. AmorphGen's CHGNet loader enforces this, passing `default_dtype="float64"` raises `NotImplementedError` with a clear message pointing the user to MACE, because CHGNet's `composition_model` submodule builds its input feature vectors via a path that bypasses `torch.get_default_dtype()` and crashes at forward time when the rest of the model is upcast. The CLI refuses `model: chgnet` with `default_dtype: float64` before any work starts. Keeping `float32` (the default) is the recommended path for MD; switch to MACE if you genuinely need `float64` for static-energy precision.
+CHGNet uses `float32`. AmorphGen rejects `default_dtype="float64"` because
+the model's composition features remain in float32 and would cause a dtype
+mismatch. Leave the dtype at `auto` or set it to `float32`.
 
-A note on MD speed: CHGNet's `CHGNetCalculator.calculate()` rebuilds the atomic graph (neighbour list + edges + line graph) from scratch on every MD step. For systems above ~200 atoms or with high density (e.g. a-Ga₂O₃ at 400 atoms), the per-step cost on an A100 is around 500 ms, substantially slower than the AdvanceSoft H100 benchmark (≈ 84 ms/step at 400 atoms for Li₁₀GeP₂S₁₂) would predict, mostly because (a) denser oxides have more graph edges per atom and (b) the ASE → pymatgen → graph round-trip carries Python overhead. For large-system MD where speed matters, MACE (which caches neighbour lists internally) is 3–5× faster at the same system size.
+Backend speed depends on the model, system size, composition and hardware.
+Measure a short run of your own system before choosing a production protocol.
 
 ### SevenNet
 
-Equivariant graph neural network from KAIST (MDIL-SNU). Foundation models pre-trained on Materials Project / OMat / Alexandria. Multi-fidelity (`mf`) variants combine multiple DFT datasets.
+Equivariant graph neural network. Foundation models pre-trained on Materials Project / OMat / Alexandria. Multi-fidelity (`mf`) variants combine multiple DFT datasets.
 
 ```python
 calc = get_calculator(model="7net-mf-ompa", device="auto")  # ★ recommended default
@@ -45,9 +66,11 @@ calc = get_calculator(model="7net-l3i5")                    # lighter, single-fi
 calc = get_calculator(model="7net-omat")                    # OMat-trained
 ```
 
-For multi-fidelity models (`7net-mf-*`), AmorphGen defaults `modal='mpa'` (MPtrj+Alexandria, PBE). Override with the `modal` kwarg if you want `'omat24'` (PBE+U).
+For multi-fidelity models (`7net-mf-*`), AmorphGen defaults to `modal="mpa"`.
+For the ASE engine, pass another modality supported by your checkpoint through
+`get_calculator(..., modal="omat24")`.
 
-Install: `pip install amorphgen[sevennet]` (no DGL dep, works on Mac/Linux)
+Install: `pip install "amorphgen[sevennet]"`
 
 :::{warning}
 Use a separate environment for SevenNet: it depends on `e3nn>=0.5`,
@@ -65,12 +88,13 @@ To use SevenNet, create a dedicated env:
 ```bash
 conda create -n amorphgen-sevennet python=3.11
 conda activate amorphgen-sevennet
-pip install -e ".[sevennet,chgnet]"
+pip install "amorphgen[sevennet,chgnet]"
 ```
 
-The `[full]` extra installs everything in one env, but loading MACE
-foundation models will then fail unless you use a `mace-torch` release
-that supports e3nn 0.5+. CHGNet is unaffected (no e3nn dependency).
+The `[full]` extra installs the three MLIP backends in one environment;
+it does not include the optional torch-sim engine. Loading MACE foundation
+models can then fail unless the installed `mace-torch` release supports
+e3nn 0.5+. CHGNet is unaffected (no e3nn dependency).
 :::
 
 ### Custom / fine-tuned models
@@ -81,14 +105,22 @@ calc = get_calculator(model="mace", model_path="/path/to/finetuned.model")
 
 ## Classical potentials
 
-Built-in pair potentials for initial structure preparation. No extra install or GPU required. Parameters are provided via YAML config or the `classical_params` keyword.
+Built-in pair potentials for initial structure preparation. CPU calculations
+need no extra dependencies; optional CUDA acceleration requires PyTorch.
+Parameters are provided via YAML config or the `classical_params` keyword.
+Set `device="cpu"` explicitly to use the NumPy implementation.
+
+The built-in ASE classical calculators supply energies and forces, but no
+stress tensor. Use `cell_filter: none` for relaxation and NVT for every MD
+stage; NPT and cell relaxation require stress. The torch-sim Lennard-Jones
+model supports stress and cell relaxation.
 
 ### Lennard-Jones
 
 Standard 12-6 pair potential. V(r) = 4*epsilon*[(sigma/r)^12 - (sigma/r)^6].
 
 ```python
-calc = get_calculator("lennard-jones", classical_params={
+calc = get_calculator("lennard-jones", device="cpu", classical_params={
     "params": {("Ar", "Ar"): {"epsilon": 0.0104, "sigma": 3.40}},
     "cutoff": 10.0,
 })
@@ -96,10 +128,15 @@ calc = get_calculator("lennard-jones", classical_params={
 
 ### Buckingham + Coulomb
 
-Buckingham short-range potential with Ewald summation for the long-range Coulomb term. V(r) = A*exp(-r/rho) - C/r^6 + q_i*q_j/(4*pi*eps0*r). Rigid-ion model (no core-shell). The Ewald real-space part runs over the pair cutoff with alpha = 3.5/cutoff, the reciprocal-space part is summed in NumPy; energies match a reference Ewald to 0.02 meV/atom. The damped-shifted Wolf sum is still available as `coulomb_method: wolf`, but note it is only approximate (about 10 % force error for an ionic melt at a 10 A cutoff), so use it for speed comparisons rather than production runs.
+Buckingham short-range potential with an optional Coulomb term and a rigid-ion
+model (no core-shell). The short-range term is
+`A * exp(-r / rho) - C / r^6`. Ewald summation is the default for electrostatics;
+`coulomb_method: wolf` selects an approximate damped-shifted Wolf sum.
+The real-space cutoff and charge parameters affect the result, so validate
+them for the system and conditions you plan to simulate.
 
 ```python
-calc = get_calculator("buckingham", classical_params={
+calc = get_calculator("buckingham", device="cpu", classical_params={
     "params": {
         ("Si", "O"): {"A": 18003.76, "rho": 0.2052, "C": 133.54},
         ("O", "O"):  {"A": 1388.77,  "rho": 0.3623, "C": 175.0},
@@ -128,7 +165,9 @@ opt:
   cell_filter: none
 ```
 
-See `amorphgen/configs/example_classical.yaml` for a complete example.
+See the bundled
+[`example_classical.yaml`](https://github.com/SMTG-Bham/AmorphGen/blob/main/amorphgen/configs/example_classical.yaml)
+for a complete example.
 
 ## Listing available models
 
@@ -151,7 +190,7 @@ batched MLIP call with automatic GPU memory management. AmorphGen can hand the
 ensemble modes to it:
 
 ```bash
-pip install "amorphgen[torchsim]"          # Python >= 3.12 and a C/C++ compiler; CUDA GPU or CPU (no Apple MPS)
+pip install "amorphgen[mace,torchsim]"   # Python 3.12+; C/C++ compiler required
 
 amorphgen --batch-opt --input-dir random_structures/random_initial/ \
     -m mace-mpa-0 --engine torchsim -o relaxed/
@@ -159,11 +198,11 @@ amorphgen --random-gen --composition "GeO2*192" -n 20 --relax \
     -m mace-mpa-0 --engine torchsim -o geo2_ensemble/
 ```
 
-or `engine: torchsim` in the YAML. Only `--batch-opt` and `--random-gen --relax`
-use it: all structures are relaxed together with torch-sim's FIRE optimiser
-instead of one after another through ASE. Output files, names and logs are the
-same as with the ASE engine, so `--analyse` and everything downstream is
-unchanged.
+or `engine: torchsim` in the YAML. In `--batch-opt` and `--random-gen --relax`,
+structures are relaxed in batches. Select the optimiser with `-O` (LBFGS by
+default). The output layout remains compatible with the ASE engine, so
+`--analyse` can read the results. Hybrid MD also supports torch-sim, as
+described below.
 
 The engine needs a C/C++ compiler wherever it runs, and pip does not install one:
 torch-sim's neighbour list goes through `torch.compile`, and without a compiler
@@ -171,22 +210,25 @@ the first relaxation stops with `InvalidCxxCompiler`. See
 [the installation page](../getting-started/installation.md#the-torch-sim-engine)
 for how to get one.
 
-What carries over: `-f/--fmax`, `--opt-steps`, `-O` (LBFGS by default, or FIRE, BFGS,
-gradient descent) and the cell filter (`cubic` maps
+What carries over: `-f/--fmax`, `--opt-steps`, `-O` (LBFGS by default, or FIRE
+and BFGS) and the cell filter (`cubic` maps
 to torch-sim's unit-cell filter with hydrostatic strain, `FrechetCellFilter` to
-its Frechet filter, `none` to fixed cell). Supported models: MACE foundation
-models and `.model` files, SevenNet checkpoints, Lennard-Jones (single
-sigma/epsilon; used by the tests). CHGNet and Buckingham+Coulomb have no
-torch-sim implementation and raise a clear error; use the ASE engine for those.
+its Frechet filter, `none` to fixed cell). Gradient descent is available through
+YAML/Python as `optimizer: gradient_descent`; ASE-only choices such as `MDMin`
+and `BFGSLineSearch` are rejected by this engine. Supported models: MACE foundation
+models and `.model` files, SevenNet checkpoints, and Lennard-Jones with a
+single sigma/epsilon pair. For mixtures with different pair parameters, use
+ASE. CHGNet and Buckingham+Coulomb have no torch-sim implementation and
+raise a clear error; use the ASE engine for those.
 
-With a cell filter the convergence test also requires the pressure to be below
-`pressure_tol_gpa` (0.02 GPa by default, settable under `opt:`), so the returned
-cells are at zero pressure like the ASE path. torch-sim's own cell-force criterion
-is loose for cells of hundreds of atoms and left residuals of 0.1 to 0.3 GPa. The
-`.cif` convenience copy is written next to the `.xyz`, as in the ASE path. Results
+With a cell filter, convergence also requires the absolute mean pressure to
+be below `pressure_tol_gpa` (0.02 GPa by default, settable under `opt:`).
+Reaching the step limit can still leave a structure unconverged. A `.cif`
+convenience copy is written next to each relaxed `.xyz` in `--batch-opt` and
+`--random-gen --relax`, as in the ASE path. Results
 are not bit-identical to the ASE path (different optimiser implementations) and
 may land in different local minima, as any two optimisers do on a random start. The single-structure melt-quench
-pipeline always uses ASE. The MD stages of the hybrid mode are not batched yet.
+pipeline uses ASE; batched hybrid MD is described below.
 
 
 ### Batched MD for the hybrid workflow
@@ -211,20 +253,19 @@ What differs from the ASE path:
   stage from there with the momenta stored in the trajectory, so a walltime
   kill costs at most 100 steps per stage. Stages already finished for the whole
   chunk are skipped. The chunking must be the same on resume (same inputs and
-  chunk size). An `auto` chunk size is therefore written to `batch_size.json`
-  in the work directory and read back on `--resume` instead of probing again,
-  so a resubmitted job script re-chunks identically.
+  chunk size). An `auto` chunk size is written to
+  `quench_runs/batch_size.json` under the hybrid work directory and read back
+  on `--resume` instead of probing again.
 - Runs are processed in chunks of `--batch-size` structures. The default,
-  `auto`, integrates a short probe of the first structure on the GPU, reads
-  the peak memory it needed, and sizes the chunk to use about half of the
-  card, so the chunk follows the cell size and the model. Give an integer to
-  fix it (for 600-atom cells in float64 on a 40 GB card, 4 to 5 is the
-  practical limit); on CPU `auto` means 16.
+  `auto`, probes the largest of the first four unfinished structures on the
+  GPU and estimates a chunk size using half of the card's memory as its
+  budget. Memory use depends on atom count, density, model and precision;
+  reduce the chunk size if the estimate is too large. On CPU `auto` means 16.
 - The `seed` seeds torch-sim's state generator per stage, chunk, resume block
-  and run index, so a batch is reproducible for the same inputs and chunking,
-  every chunk draws its own velocities and thermostat noise, and two SLURM
-  array tasks running the same inputs with one `--seed` do not coincide. Without a seed each
-  batch gets fresh entropy, so ensemble members are independent either way.
+  and job index. Reproducibility requires the same inputs, chunking and
+  resume pattern. Each chunk draws its own velocities and thermostat noise;
+  different SLURM array task IDs get separate streams even with the same
+  `--seed`. Without a seed, each batch gets fresh entropy.
 - SevenNet runs in float32 on this engine (its torch-sim wrapper accepts no
   other precision); multi-fidelity checkpoints get `modal="mpa"` as on the ASE
   path.
@@ -232,9 +273,11 @@ What differs from the ASE path:
   (the pipeline default for stage 4 is NPT) and refuses an explicit NPT before
   starting.
 - The thermostat is torch-sim's Langevin (same friction, `0.01/fs` by default,
-  as ASE's) but not the same integrator step, so trajectories are statistically
-  equivalent to the ASE path, not identical.
+  as ASE's), with a different integration scheme. Do not expect identical
+  trajectories; compare equilibrated observables when validating a protocol.
 
 GPU tests for both engines live in `test/test_torchsim_gpu.py` (skipped without
-CUDA); `examples/run_gpu_tests_bluebear.slurm` runs them, plus the Tier 3 MACE
-integration tests, on one BlueBEAR GPU in about ten minutes.
+CUDA); its MACE checks also require `--run-mace`, which permits model downloads.
+`examples/run_gpu_tests_bluebear.slurm` runs them, plus the Tier 3 MACE
+integration tests, on one BlueBEAR GPU. Adapt its environment settings using
+{doc}`hpc`.

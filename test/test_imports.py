@@ -1,10 +1,12 @@
 """
-tests/test_imports.py
+test/test_imports.py
 ---------------------
 Verify all public API imports work correctly.
 """
 
-import pytest
+import subprocess
+import sys
+from pathlib import Path
 
 
 class TestPackageImports:
@@ -13,10 +15,8 @@ class TestPackageImports:
     def test_top_level_import(self):
         import amorphgen
         assert hasattr(amorphgen, "__version__")
-        # Accept any 1.0.0 family version (1.0.0, 1.0.0rc2, 1.0.0.post1, ...)
-        # so the test doesn't break on every release-candidate bump.
         assert isinstance(amorphgen.__version__, str)
-        assert amorphgen.__version__.startswith("1.0.0")
+        assert amorphgen.__version__
 
     def test_pipeline_import(self):
         from amorphgen import MeltQuenchPipeline
@@ -62,6 +62,10 @@ class TestPackageImports:
             MDLogger, TrajectoryWriter, TRAJ_FORMATS,
             attach_outputs, merge_config, extract_snapshots,
         )
+        for utility in (make_cubic, build_md_dynamics, resolve_ramp, MDLogger,
+                        TrajectoryWriter, attach_outputs, merge_config, extract_snapshots):
+            assert callable(utility)
+        assert {"extxyz", "traj"} <= TRAJ_FORMATS
 
     def test_model_registries_import(self):
         from amorphgen.utils import (
@@ -70,7 +74,34 @@ class TestPackageImports:
             SEVENNET_MODELS,
             MODEL_DESCRIPTIONS,
         )
-        assert len(MACE_FOUNDATION_MODELS) > 10
+        assert "mace-mpa-0" in MACE_FOUNDATION_MODELS
+        assert "mace-mpa-0-medium" in MODEL_DESCRIPTIONS
         assert "chgnet" in CHGNET_MODELS
         assert "sevennet" in SEVENNET_MODELS
         assert "7net-mf-ompa" in SEVENNET_MODELS
+
+
+def test_public_imports_do_not_load_optional_ml_backends():
+    """A fresh interpreter catches eager imports hidden by pytest's module cache."""
+    script = """
+import importlib.abc
+import sys
+
+class BlockMLImports(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split(".")[0] in {"torch", "torch_sim", "mace", "chgnet", "sevenn"}:
+            raise AssertionError(f"Unexpected optional backend import: {fullname}")
+
+sys.meta_path.insert(0, BlockMLImports())
+import amorphgen
+import amorphgen.utils
+for name in amorphgen.__all__:
+    getattr(amorphgen, name)
+for name in amorphgen.utils.__all__:
+    getattr(amorphgen.utils, name)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script], cwd=Path(__file__).resolve().parents[1],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr

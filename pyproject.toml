@@ -38,6 +38,8 @@ requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -85,19 +87,19 @@ mace = [
 chgnet = [
     "chgnet>=0.3",
 ]
-# SevenNet pulls in e3nn>=0.5, which conflicts with the MACE pin above.
-# Install SevenNet in its own environment, or with `[full]` if you accept
-# that MACE foundation-model loading may then break.
 torchsim = [
     "torch-sim-atomistic>=0.6; python_version >= '3.12'",
 ]
+# SevenNet pulls in e3nn>=0.5, which conflicts with the MACE pin above.
+# Install SevenNet in its own environment, or with `[full]` if you accept
+# that MACE foundation-model loading may then break.
 sevennet = [
     "sevenn>=0.10",
 ]
 
-# DEPRECATED alias (matplotlib moved into the core dependencies; see
-# DESIGN_MLIP_OPTIONAL.md D6). Kept as a no-op for one release so existing
-# `pip install amorphgen[analysis]` lines keep working; remove after v1.1.
+# DEPRECATED alias (matplotlib moved into the core dependencies).
+# Kept as a no-op for one release so existing `pip install amorphgen[analysis]`
+# lines keep working; remove after v1.1.
 analysis = []
 
 # Convenience bundles
@@ -137,14 +139,15 @@ Issues = "https://github.com/SMTG-Bham/AmorphGen/issues"
 amorphgen = "amorphgen.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["amorphgen*"]
+include = ["amorphgen", "amorphgen.*"]
+namespaces = false
 
 [tool.setuptools.package-data]
-amorphgen = ["configs/*.yaml"]
+"amorphgen.configs" = ["*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["test"]
-addopts = ["-v", "--tb=short"]
+addopts = ["-v", "--tb=short", "--strict-markers", "--strict-config"]
 # Warnings raised inside dependencies, which AmorphGen cannot act on; its own
 # code raises none of them. Matched by message only: pytest.warns re-emits the
 # warnings it does not match under the module name "warnings", which a module

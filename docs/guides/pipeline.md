@@ -1,38 +1,38 @@
 # Melt-and-quench pipeline
 
-The melt-and-quench pipeline is a 7-stage molecular dynamics workflow that transforms a crystalline input into a realistic amorphous structure.
+The melt-and-quench pipeline is a 7-stage molecular dynamics workflow that generates an amorphous candidate from a crystalline input. Validate the resulting structure and the chosen calculator for your material.
 
 ## Overview
 
 ```text
 ┌───────────┐    ┌───────────┐    ┌───────┐    ┌──────────┐    ┌─────────┐    ┌──────────┐    ┌───────────┐
 │ 1. Opt    │───▶│ 2. Pre-eq │───▶│ 3.Melt│───▶│ 4. Hi-eq │───▶│ 5.Quench│───▶│ 6. Lo-eq │───▶│ 7. Opt    │
-│  300 K    │    │  300 K    │    │ →3000K│    │  3000 K  │    │ →300 K  │    │  300 K   │    │  final    │
+│  relax    │    │  300 K    │    │ →3000K│    │  3000 K  │    │ →300 K  │    │  300 K   │    │  final    │
 └───────────┘    └───────────┘    └───────┘    └──────────┘    └─────────┘    └──────────┘    └───────────┘
 ```
 
 ## Stage descriptions
 
 ### Stage 1: Structure optimisation
-Relaxes the input structure (cell + atomic positions) to remove any initial stress. Uses LBFGS with `UnitCellFilter` by default.
+Relaxes the input structure (cell + atomic positions) to remove any initial stress. Uses LBFGS with `FrechetCellFilter` by default. Optimisation minimises the potential energy; it is not an MD stage at a prescribed temperature.
 
 ### Stage 2: Pre-melt equilibration
-Short NVT equilibration at 300 K. Thermalises the system before the rapid heating stage, improving trajectory stability.
+NVT equilibration at 300 K (100000 steps at 0.5 fs, or 50 ps, by default). Thermalises the system before heating.
 
 ### Stage 3: Melt (heat ramp)
-Linear temperature ramp from 300 K to the target melt temperature (default 3000 K). Uses **NPT with the Berendsen weak-coupling barostat** by default, the cell expands physically as the system heats.
+Segmented temperature ramp from 300 K to the target melt temperature (default 3000 K). Uses **NPT with the Berendsen weak-coupling barostat** by default, the cell volume can change as the system heats.
 
 ### Stage 4: High-temperature equilibration
-Holds the system at the melt temperature to ensure thorough melting and loss of crystalline memory. Uses **NPT with the Martyna-Tobias-Klein (MTK) Nose-Hoover-chain integrator** by default, giving true canonical fluctuations around the equilibrium melt volume. Users who want the legacy constant-volume behaviour can set `eq_high.ensemble: NVT`.
+Holds the system at the melt temperature (20000 steps at 0.5 fs, or 10 ps, by default). Check that the system has melted and lost crystalline memory before selecting snapshots. Uses **NPT with the Martyna-Tobias-Klein (MTK) Nose-Hoover-chain integrator** by default, which samples the NPT ensemble. Users who want the legacy constant-volume behaviour can set `eq_high.ensemble: NVT`.
 
 ### Stage 5: Quench (cooling ramp)
-Linear cooling from the melt temperature back to 300 K. The quench rate controls the degree of structural disorder. Uses NVT by default.
+Segmented cooling from the melt temperature back to 300 K. The quench rate controls the degree of structural disorder. Uses NVT by default.
 
 ### Stage 6: Low-temperature equilibration
-Equilibrates the quenched structure at 300 K to relax any residual thermal stress.
+Equilibrates the quenched structure at 300 K using NVT (20000 steps at 0.5 fs, or 10 ps, by default). The cell is fixed during this stage.
 
 ### Stage 7: Final optimisation
-Final cell + position relaxation of the amorphous structure. Produces the output file.
+Final cell + position relaxation of the amorphous structure. Writes `stage7_opt.xyz` and `stage7_opt.cif`; `--format vasp` also writes `stage7_opt.vasp`. Stage 7 inherits `opt:` settings, with any `final_opt:` keys applied on top.
 
 ## NPT integrators
 
@@ -40,8 +40,8 @@ AmorphGen exposes three NPT integrators via the per-stage `npt_method` YAML key:
 
 | `npt_method` | ASE class | Use case |
 |---|---|---|
-| `berendsen` *(default)* | `NPTBerendsen` | Robust during the 300 K → 3000 K melt ramp; **does not** produce true canonical fluctuations (averages are correct, fluctuation-derived quantities like heat capacity are not). |
-| `mtk` | `IsotropicMTKNPT` | Martyna-Tobias-Klein Nose-Hoover-chain NPT. True canonical fluctuations. Recommended for equilibration plateaux; may become unstable during rapid temperature ramps. |
+| `berendsen` *(default)* | `NPTBerendsen` | Robust during the 300 K → 3000 K melt ramp; **does not** sample the NPT ensemble correctly; avoid using its fluctuations to estimate thermodynamic response functions. |
+| `mtk` | `IsotropicMTKNPT` | Martyna-Tobias-Klein Nose-Hoover-chain NPT. Samples NPT fluctuations. Suitable for equilibration plateaux; may become unstable during rapid temperature ramps. |
 | `parrinello-rahman` | `MelchionnaNPT` | Nose-Hoover + Parrinello-Rahman flexible-cell NPT. Allows the cell shape (not just volume) to change; useful for anisotropic glasses. Requires upper-triangular cell. |
 
 ### Stability knobs
@@ -51,21 +51,21 @@ Two parameters tune the Berendsen barostat for stiffer/slower volume control dur
 | Key | Default | What it does |
 |---|---|---|
 | `taup_factor` | 10.0 | Ratio of barostat coupling time to thermostat coupling time (`taup = taup_factor * ttime`). Larger → slower, more stable barostat. Applied to Berendsen `taup` and MTK `pdamp`. |
-| `compressibility_GPa` | 100.0 | Reference compressibility for the Berendsen barostat. The default (100 GPa) is liquid-like; oxides with bulk modulus 150–300 GPa benefit from 200 GPa for less aggressive volume control. |
+| `compressibility_GPa` | 100.0 | Reference bulk modulus in GPa. The Berendsen compressibility is its inverse; larger values reduce the volume response. |
 
-**Example: tighten the melt ramp for a-In₂O₃ / a-Ga₂O₃ / a-HfO₂**
+**Example: slower volume response during the melt ramp**
 
 ```yaml
 melt:
   ensemble: NPT
   npt_method: berendsen
   taup_factor: 30.0              # slower barostat (3× default)
-  compressibility_GPa: 200.0     # stiffer, oxide-realistic
+  compressibility_GPa: 200.0     # larger reference bulk modulus
 ```
 
-On a Cu/EMT benchmark at 1500 K over 300 fs, these settings reduce the maximum volume excursion from 6.7 % (defaults) to 1.8 %, a 74 % reduction.
+Choose these coupling parameters for the material and inspect the volume trajectory; they do not establish that the calculator predicts the correct density.
 
-**Example: true canonical fluctuations at the equilibration plateau**
+**Example: NPT sampling at the equilibration plateau**
 
 ```yaml
 eq_high:
@@ -73,7 +73,7 @@ eq_high:
   npt_method: mtk
 ```
 
-This is the new default for `eq_high`; the legacy NVT behaviour is restored by setting `ensemble: NVT`.
+This is the default for `eq_high`; the legacy NVT behaviour is restored by setting `ensemble: NVT`.
 
 ## Running specific stages
 
@@ -81,8 +81,10 @@ You can run a subset of stages using the `--stages` flag:
 
 ```bash
 # Only quench and post-process (e.g. after restarting from a snapshot)
-amorphgen POSCAR --model mace-mpa-0 --stages 5 6 7
+amorphgen snapshot.xyz --model mace-mpa-0 --stages 5 6 7 -o quench_run/
 ```
+
+The input must be appropriate for the first requested stage; selecting stages 5–7 does not create a melt. Temperatures are independent settings: when changing the melt endpoint, also set `eq_high.T` and `quench.T_start` to match.
 
 ## Customising parameters
 

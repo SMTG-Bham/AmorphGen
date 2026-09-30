@@ -8,16 +8,16 @@
 # holds its density when the cell is allowed to relax, or over-expands like the
 # random-gen+relax structures did.
 #
-# Submit FROM the directory containing the finals dir (examples_iro2_new/):
-#   cd examples_iro2_new && sbatch run_iro2_hybrid_cubic_relax_bluebear.slurm
+# Submit FROM the directory containing the finals dir (my_iro2_run/):
+#   cd my_iro2_run && sbatch run_iro2_hybrid_cubic_relax_bluebear.slurm
 # Output: iro2_hybrid_cubic_relax/  (relaxed structures + analysis)
 # ----------------------------------------------------------------------------
 
 #SBATCH --job-name=amg_iro2_hybcub
-# Defaults are the Birmingham BlueBEAR project this was developed on. To run it
-# elsewhere set AMORPHGEN_ROOT and AMORPHGEN_VENV, and give your own project with
-#   sbatch --account=<your-project> <this script>
-#SBATCH --account=scanlodo-amorphous-oxides
+# Export AMORPHGEN_VENV=/path/to/venv before submitting (see docs/guides/hpc.md).
+# For repository files, AMORPHGEN_ROOT defaults to the submission directory.
+# Choose your account at submission: sbatch --account=your-project <this-script>
+# Adapt the BlueBEAR modules and QoS below to your cluster.
 #SBATCH --qos=bbgpu
 #SBATCH --time=03:00:00
 #SBATCH --ntasks=1
@@ -32,7 +32,7 @@ set -eu
 module purge
 module load bear-apps/2023a/live
 module load Python/3.11.3-GCCcore-12.3.0
-source "${AMORPHGEN_VENV:-/rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/venvs/amorphgen}/bin/activate"
+source "${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}/bin/activate"
 
 cd "${SLURM_SUBMIT_DIR:-.}"
 mkdir -p logs

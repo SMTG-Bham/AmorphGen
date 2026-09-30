@@ -1,118 +1,86 @@
----
-orphan: true
----
-
 # S(q) and XRD: methodology notes
 
-This page archives the investigation behind AmorphGen's choice of
-S(q) implementation. The user-facing recommendation in
-{doc}`/guides/analysis` is the **direct q-vector method**
-(``structure_factor_direct()``); this note keeps the underlying
-comparison and physical reasoning for posterity.
+This page describes the two structure-factor implementations in
+`amorphgen/analysis/rdf.py`. See {doc}`/guides/analysis` for runnable examples.
 
-## Two methods that were on the table
+## Choosing a method
 
-AmorphGen ships both implementations because they have genuinely
-different properties:
-
-| Method | API | Speed | Peak intensity |
+| Method | Python API | CLI | Finite-cell limitation |
 |---|---|---|---|
-| **FT-of-g(r)** | ``structure_factor()`` | Fast (seconds) | Damped ~2× by finite ``rmax`` |
-| **Direct q-vector (Debye sum)** | ``structure_factor_direct()`` | Slower (~20s × 20 structs) | Quantitatively correct |
+| Direct reciprocal-space sum | `structure_factor_direct()` | `--sq-method direct` (default) | Discrete q vectors and sparse low-q shells |
+| Fourier transform of g(r) | `structure_factor()` | `--sq-method ft` | Finite-r truncation and histogram resolution |
 
-Both implement well-established physics; the difference is only how
-the Fourier integral is handled in a finite simulation cell.
+Use configurations with the same composition and a valid periodic cell.
+The direct Python method defaults to X-ray weighting; the FT Python method
+defaults to unweighted scattering. The CLI defaults to X-ray weighting for
+both methods. Specify the weighting explicitly when comparing results.
 
-## Why peak intensities differ between the two
+## Normalization of the direct method
 
-The FT-of-g(r) route starts from the ensemble-averaged radial distribution
-function:
+For each nonzero reciprocal vector, the code calculates
 
-$$S(q) - 1 = 4\pi\rho \int_0^{r_{\max}} [g(r)-1]\,\frac{\sin(qr)}{qr}\,r^2\,\mathrm{d}r$$
+$$I(\vec q)=\left|\sum_i f_i(q)e^{i\vec q\cdot\vec r_i}\right|^2,$$
 
-In a finite cell with side $L$, the integral has to be truncated at
-$r_{\max} = L/2$ because beyond this the minimum-image convention
-becomes ambiguous. For a typical 400-atom amorphous-oxide cell
-$L \approx 16$ Å so $r_{\max} = 8$ Å, exactly where the medium-range
-correlations responsible for the FSDP live. Cutting them off damps
-the FSDP intensity by about 50 %.
+then applies the Faber–Ziman convention:
 
-The direct q-vector route evaluates the Debye scattering equation at the
-reciprocal-lattice vectors of the periodic cell:
+$$S(\vec q)=1+\frac{I(\vec q)/N-\langle f^2(q)\rangle}
+{\langle f(q)\rangle^2}.$$
 
-$$S(\vec G) = \frac{1}{N\langle f\rangle^{2}}\,\Bigl|\sum_i f_i\,
-\mathrm{e}^{\mathrm{i}\vec G\cdot\vec r_i}\Bigr|^{2}, \qquad
-\vec G = 2\pi(n_1 \vec b_1 + n_2 \vec b_2 + n_3 \vec b_3)$$
+The composition averages are $\langle f\rangle=\sum_\alpha c_\alpha f_\alpha$
+and $\langle f^2\rangle=\sum_\alpha c_\alpha f_\alpha^2$.
+For uncorrelated positions this normalization tends to 1. The uncorrected
+quantity $I/(N\langle f\rangle^2)$ instead tends to
+$\langle f^2\rangle/\langle f\rangle^2$, which generally differs from 1 in a
+mixture. These quantities should not be compared without converting them
+to the same convention.
 
-No truncation, no minimum-image issues. Spherical averaging then
-gives a clean S(q) curve.
+With real-space cell vectors as rows of $\mathbf A$, the q vectors are
+$\vec G=2\pi\vec n\mathbf A^{-\top}$ for integer triplets $\vec n$, excluding
+the origin. Values are averaged into shells by their magnitude. For a cubic
+cell, $q_{\min}=2\pi/L$; increasing the number of bins does not improve that
+limit. `n_per_bin` counts the sampled vectors, and empty shells return `NaN`.
+Gaussian smoothing weights each shell by its vector count and retains the
+unsmoothed total as `s_q_raw`.
 
-## Validation that drove the decision
+## Fourier transform of g(r)
 
-We benchmarked both methods on the published a-Ga₂O₃ DFT-PBE0 ensemble
-([Kaewmeechai, Strand & Shluger, *Phys. Rev. B* **111** (2025) 035203](https://doi.org/10.1103/PhysRevB.111.035203)).
-Comparing against the experimental X-ray S(Q) and the GAP_500 simulation
-from the same reference (Fig. S2b):
+The isotropic relation used by the FT method is
 
-| Method | FSDP intensity at q = 2.4 Å⁻¹ | Match to experiment (~1.8-2.0)? |
-|---|---|---|
-| FT-of-g(r), unweighted | 0.84 | no ~2× low |
-| FT-of-g(r), X-ray weighted | 0.84 | no ~2× low |
-| **Direct q-vector, X-ray weighted** | **2.00** | yes |
-| GAP_500 (Csányi group) | ~1.8 | yes |
-| Experiment (Fig. S2b) | ~1.8-2.0 | yes reference |
+$$S(q)-1=4\pi\rho\int_0^{r_{\max}}[g(r)-1]
+\frac{\sin(qr)}{qr}\,r^2\,\mathrm{d}r.$$
 
-The direct method matches both the experimental S(Q) and the GAP
-simulation from the same reference. The FT method positions peaks
-correctly but consistently under-shoots their height.
+The implementation transforms the unsmoothed RDF with 500 radial bins and
+uses $(N-1)/V$ from the first structure for its finite-system density
+prefactor. For ensembles with varying volumes, this is a single density
+applied to the averaged RDF. By default, `rmax`
+is half the shortest cell-vector length, rounded down to 0.1 Å. Truncation
+can change peak heights and introduce ripples. Its size and direction depend
+on the structure and chosen range; there is no general factor-of-two
+correction, nor a guarantee that truncation errors cancel between ensembles.
+The direct method avoids this integral's cutoff but retains its own cell-size
+and sampling limits.
 
-## Why the FT method is still in the package
+For a weighted total, the FT method first computes the partials and combines
+them as
 
-Even though the direct method is preferred for paper figures and
-experimental comparison, ``structure_factor()`` (FT-of-g(r)) remains
-useful for:
+$$S(q)=\frac{\sum_{\alpha,\beta}c_\alpha c_\beta f_\alpha(q)f_\beta(q)
+S_{\alpha\beta}(q)}{\langle f(q)\rangle^2}.$$
 
-- Ensemble-vs-ensemble comparisons: the systematic damping
-  cancels when comparing two ensembles computed the same way.
-- Quick sanity checks: seconds rather than tens of seconds.
-- Backwards compatibility: existing scripts and the JOSS paper
-  validation figures use the FT method; preserving the API avoids
-  silent behaviour changes.
+X-ray weights use q-dependent Waasmaier–Kirfel neutral-atom form factors;
+neutron weights use tabulated coherent scattering lengths. Unweighted
+scattering sets every factor to 1. Weighting changes the relative contribution
+of each partial; it cannot repair finite-cell or truncation errors.
 
-The default ``weighting="unweighted"`` of ``structure_factor()`` is
-fine for ensemble comparison and matches the historical AmorphGen
-behaviour. The Faber–Ziman weighted total (``weighting="xray"``) is
-available for users who want X-ray-like intensities from the fast
-method, with the caveat that the FSDP height will still be damped.
+## Checks and experimental comparison
 
-## A worked example of the FSDP cancellation in unweighted sums
+`TestSqNormalisation` in `test/test_analysis.py` checks the high-q limit, the
+$r^2$ FT integrand, selected scattering-table entries, q-dependent X-ray
+weights, smoothing and exact recombination of neutron partials. These tests
+verify implementation properties. They do not establish a fixed experimental
+accuracy or equivalence to another analysis package.
 
-For a-Ga₂O₃ at q = 2.5 Å⁻¹ (from the PRB ensemble):
-
-- $S_{\rm Ga-Ga}(2.5) \approx 1.23$ (the FSDP itself)
-- $S_{\rm Ga-O}(2.5) \approx 0.25$ (an anti-peak, Ga–O correlations
-  are anti-phase at this q)
-- $S_{\rm O-O}(2.5) \approx 1.25$
-
-Unweighted sum ($f_\alpha = 1$):
-
-$$S^{(\rm unwt)}(2.5) = c_{\rm Ga}^{2}(1.23) + 2 c_{\rm Ga} c_{\rm O}(0.25) + c_{\rm O}^{2}(1.25) \approx 0.84$$
-
-The Ga–O dip cancels the like-pair peaks, the FSDP disappears.
-
-X-ray weighted, using the $q \to 0$ values $f_{\rm Ga}(0) = 31$, $f_{\rm O}(0) = 8$ for the illustration (the code uses the $q$-dependent Waasmaier–Kirfel factors, which give the same picture at 2.5 Å⁻¹):
-
-$$S^{(\rm xray)}(2.5) = \frac{0.4^2 \cdot 961 \cdot 1.23 + 2\cdot 0.4\cdot 0.6\cdot 248\cdot 0.25 + 0.6^2\cdot 64\cdot 1.25}{17.2^{2}} \approx 2.0$$
-
-Heavy Ga–Ga dominates ($Z^2 = 961 \gg 64$). The FSDP survives, and
-matches experiment.
-
-This is why X-ray diffraction sees the FSDP that an unweighted total
-or a chemistry-blind "first-shell-only" analysis would miss.
-
-## References
-
-The methodology decision and the FT-vs-direct comparison are
-documented for the JCTC methods paper (in preparation). Primary
-references for the underlying physics are listed in the
-{doc}`/guides/analysis` "Physical validity" tab.
+Before comparing with a measured curve, match its normalization, weights,
+q range, temperature and resolution. A normalized `S(q)` must be converted
+back to coherent intensity before applying any instrument-specific model;
+see the simulated-XRD tab in {doc}`/guides/analysis`. Reference publications
+and software citation guidance are in {doc}`sq_xrd_credits`.

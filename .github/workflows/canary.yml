@@ -1,4 +1,4 @@
-# Weekly MLIP-backend canary (DESIGN_MLIP_OPTIONAL.md, D7).
+# Weekly MLIP-backend canary for upstream compatibility.
 #
 # Upstream backend breakage (API drift, dependency-pin conflicts like the e3nn
 # 0.4/0.5 split) lands with upstream releases, not with our pushes. Once a

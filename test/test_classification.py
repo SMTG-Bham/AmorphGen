@@ -333,9 +333,11 @@ def test_auto_cn_gaas():
 # ── default_minsep ───────────────────────────────────────────────
 
 def test_minsep_symmetric():
-    """A-B and B-A should give the same key."""
+    """Input order must not change pair keys or separation values."""
     ms = default_minsep({"Si": 16, "O": 32})
-    assert "O-Si" in ms or "Si-O" in ms
+    reversed_ms = default_minsep({"O": 32, "Si": 16})
+    assert set(ms) == {"O-O", "O-Si", "Si-Si"}
+    assert ms == reversed_ms
 
 
 def test_minsep_mm_capped():

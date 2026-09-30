@@ -10,8 +10,10 @@ from amorphgen.pipeline.random_gen import batch_random
 
 class TestRandomGenResume:
 
-    def test_resume_skips_existing(self, tmp_path):
+    def test_resume_skips_existing(self, tmp_path, monkeypatch):
         """Generate 5, delete 2, resume should produce 5 total."""
+        from unittest.mock import Mock
+        from amorphgen.pipeline import random_gen
         out = str(tmp_path / "structures")
         initial = os.path.join(out, "random_initial")   # v1.0.0rc2 subdir
         comp = {"Si": 8, "O": 16}
@@ -20,17 +22,20 @@ class TestRandomGenResume:
         paths1 = batch_random(comp, n_structures=5, output_dir=out, seed=42)
         assert len(paths1) == 5
 
-        # Read structure 0 and 1 for later comparison
-        atoms0_before = read(os.path.join(initial, "random_0000.xyz"))
-        atoms2_before = read(os.path.join(initial, "random_0002.xyz"))
+        existing = sorted((tmp_path / "structures" / "random_initial").glob("*.xyz"))[:3]
+        before = {path: path.read_bytes() for path in existing}
 
         # Delete structures 3 and 4
         os.remove(os.path.join(initial, "random_0003.xyz"))
         os.remove(os.path.join(initial, "random_0004.xyz"))
 
         # Resume: should regenerate 3 and 4, skip 0-2
+        generate = Mock(wraps=random_gen.generate_random)
+        monkeypatch.setattr(random_gen, "generate_random", generate)
         paths2 = batch_random(comp, n_structures=5, output_dir=out,
                               seed=42, resume=True)
+        assert sorted(paths2) == sorted(paths1)
+        assert generate.call_count == 2
 
         # Should have 5 paths total (3 existing + 2 new)
         all_files = sorted(f for f in os.listdir(initial)
@@ -39,10 +44,7 @@ class TestRandomGenResume:
         assert len(all_files) == 5
 
         # Existing structures should be unchanged
-        atoms0_after = read(os.path.join(initial, "random_0000.xyz"))
-        atoms2_after = read(os.path.join(initial, "random_0002.xyz"))
-        assert np.allclose(atoms0_before.positions, atoms0_after.positions)
-        assert np.allclose(atoms2_before.positions, atoms2_after.positions)
+        assert {path: path.read_bytes() for path in existing} == before
 
     def test_resume_regenerates_corrupted(self, tmp_path):
         """Corrupted (empty) file should be regenerated."""
@@ -75,8 +77,9 @@ class TestRandomGenResume:
                              seed=42, resume=True)
         assert len(paths) == 3
 
-    def test_resume_all_complete(self, tmp_path):
+    def test_resume_all_complete(self, tmp_path, monkeypatch):
         """Resume when all structures exist should skip everything."""
+        from amorphgen.pipeline import random_gen
         out = str(tmp_path / "structures")
         comp = {"Si": 8, "O": 16}
 
@@ -84,22 +87,90 @@ class TestRandomGenResume:
         batch_random(comp, n_structures=3, output_dir=out, seed=42)
 
         # Resume: everything exists
+        def unexpected_generation(*args, **kwargs):
+            pytest.fail("Completed structures must not be regenerated")
+
+        monkeypatch.setattr(random_gen, "generate_random", unexpected_generation)
         paths = batch_random(comp, n_structures=3, output_dir=out,
                              seed=42, resume=True)
         assert len(paths) == 3
 
-    def test_resume_composition_mismatch_warns(self, tmp_path):
-        """Changing composition on resume should warn."""
+    def test_resume_composition_mismatch_fails_without_writes(self, tmp_path):
+        """Equal atom counts must not let SiO2 outputs stand in for GeO2."""
         out = str(tmp_path / "structures")
 
         # First run with SiO2
-        batch_random({"Si": 8, "O": 16}, n_structures=2,
+        batch_random({"Si": 4, "O": 8}, n_structures=2,
                      output_dir=out, seed=42)
+        before = {p: p.read_bytes() for p in (tmp_path / "structures").rglob("*")
+                  if p.is_file()}
 
         # Resume with different composition
-        with pytest.warns(UserWarning, match="composition changed"):
-            batch_random({"Al": 8, "O": 12}, n_structures=2,
+        with pytest.raises(ValueError, match="Cannot resume: composition changed"):
+            batch_random({"Ge": 4, "O": 8}, n_structures=2,
                          output_dir=out, seed=42, resume=True)
+        assert {p: p.read_bytes() for p in (tmp_path / "structures").rglob("*")
+                if p.is_file()} == before
+
+    @pytest.mark.parametrize("metadata", ["missing", "matching"])
+    @pytest.mark.parametrize("composition", [{"Ge": 4, "O": 8}, {"Si": 5, "O": 7}])
+    def test_resume_checks_saved_composition(self, tmp_path, metadata, composition):
+        """A readable checkpoint needs the correct elements and counts."""
+        import json
+        from ase import Atoms
+
+        initial = tmp_path / "random_initial"
+        initial.mkdir()
+        path = initial / "random_0000.xyz"
+        write(path, Atoms("Si4O8", cell=[8, 8, 8], pbc=True))
+        if metadata == "matching":
+            (tmp_path / "run_metadata.json").write_text(json.dumps({
+                "composition": composition, "output_format": "xyz", "relax": False,
+            }))
+        before = path.read_bytes()
+        with pytest.raises(ValueError, match="Cannot resume: composition of"):
+            batch_random(composition, output_dir=str(tmp_path), resume=True)
+        assert path.read_bytes() == before
+        assert not (tmp_path / "random_gen.log").exists()
+
+    def test_cli_resume_rejects_incompatible_formula(self, tmp_path):
+        import subprocess
+        import sys
+
+        batch_random({"Si": 4, "O": 8}, n_structures=2,
+                     output_dir=str(tmp_path), seed=42)
+        before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+        result = subprocess.run(
+            [sys.executable, "-m", "amorphgen.cli", "--random-gen",
+             "--composition", "GeO2*4", "-n", "2", "--resume", "-o", str(tmp_path)],
+            capture_output=True, text=True,
+        )
+        assert result.returncode != 0
+        assert "composition changed" in result.stdout + result.stderr
+        assert "already exist" not in result.stdout
+        assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+
+    @pytest.mark.parametrize("metadata", ["{", "[]", "{}"])
+    def test_resume_refuses_invalid_metadata(self, tmp_path, metadata):
+        path = tmp_path / "run_metadata.json"
+        path.write_text(metadata)
+        with pytest.raises(ValueError, match="Cannot resume: .*metadata"):
+            batch_random({"Si": 4, "O": 8}, output_dir=str(tmp_path), resume=True)
+        assert path.read_text() == metadata
+        assert not (tmp_path / "random_gen.log").exists()
+
+    @pytest.mark.parametrize("changed", [{"output_format": "cif"}, {"relax": True}])
+    def test_resume_checks_other_stored_settings(self, tmp_path, changed):
+        import json
+        metadata = {"composition": {"Si": 4, "O": 8},
+                    "output_format": "xyz", "relax": False}
+        path = tmp_path / "run_metadata.json"
+        path.write_text(json.dumps(metadata))
+        before = path.read_bytes()
+        with pytest.raises(ValueError, match=f"{next(iter(changed))} changed"):
+            batch_random(metadata["composition"], output_dir=str(tmp_path),
+                         resume=True, **changed)
+        assert path.read_bytes() == before
 
 
 class TestSeedReproducibility:
@@ -138,12 +209,12 @@ class TestSeedReproducibility:
             a = read(os.path.join(fresh, "random_initial", f"random_{i:04d}.xyz"))
             b = read(os.path.join(resumed, "random_initial", f"random_{i:04d}.xyz"))
             assert a.get_chemical_symbols() == b.get_chemical_symbols()
-            assert np.allclose(a.get_positions(), b.get_positions())
+            np.testing.assert_array_equal(a.get_positions(), b.get_positions())
+            np.testing.assert_array_equal(a.cell, b.cell)
 
 
-def test_batch_path_keeps_auto_cn_tolerance_and_cn_aware_minsep(tmp_path, monkeypatch):
-    """batch_random must forward the automatic CN tolerance and build the same
-    CN-aware minsep table as generate_random (regression for the CLI path)."""
+def test_batch_path_keeps_auto_cn_and_tolerance(tmp_path, monkeypatch):
+    """batch_random must forward the automatic CN targets and tolerance."""
     import amorphgen.pipeline.random_gen as rg
     from ase import Atoms
     captured = {}

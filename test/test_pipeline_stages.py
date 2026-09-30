@@ -8,11 +8,10 @@ No GPU or MACE model needed. EMT only supports Cu, Ag, Au, Ni, Pd, Pt.
 import os
 import pytest
 import numpy as np
-from ase.build import bulk
-from ase.calculators.emt import EMT
+from ase.md.langevin import Langevin
+from ase.md.nptberendsen import NPTBerendsen
 
-from amorphgen.utils.common import merge_config, build_md_dynamics
-from amorphgen.configs import DEFAULT_CONFIG
+from amorphgen.utils.common import build_md_dynamics
 
 
 class TestBuildMdDynamics:
@@ -21,12 +20,12 @@ class TestBuildMdDynamics:
     def test_nvt_creation(self, cu_supercell, emt_calc):
         cu_supercell.calc = emt_calc
         dyn = build_md_dynamics(cu_supercell, ensemble="NVT", T=300.0)
-        assert dyn is not None
+        assert isinstance(dyn, Langevin)
 
     def test_npt_creation(self, cu_supercell, emt_calc):
         cu_supercell.calc = emt_calc
         dyn = build_md_dynamics(cu_supercell, ensemble="NPT", T=300.0)
-        assert dyn is not None
+        assert isinstance(dyn, NPTBerendsen)
 
     def test_invalid_ensemble_raises(self, cu_supercell, emt_calc):
         cu_supercell.calc = emt_calc
@@ -42,6 +41,9 @@ class TestOptCell:
 
         # Slightly distort the cell
         cu_bulk.positions[0] += [0.1, 0.0, 0.0]
+        cu_bulk.calc = emt_calc
+        initial_fmax = np.linalg.norm(cu_bulk.get_forces(), axis=1).max()
+        assert initial_fmax > 0.1
 
         override = {
             "model": "mace-mpa-0",  # won't be used since calc is passed
@@ -49,6 +51,7 @@ class TestOptCell:
                 "fmax": 0.1,
                 "max_steps": 50,
                 "optimizer": "LBFGS",
+                "cell_filter": "none",
                 "logfile": "test_opt.log",
                 "traj_file": "test_opt.traj",
                 "output_cif": "test_opt.cif",
@@ -59,13 +62,16 @@ class TestOptCell:
         result = run(cu_bulk, cfg_override=override, calc=emt_calc)
         assert result is not None
         assert len(result) == len(cu_bulk)
+        final_fmax = np.linalg.norm(result.get_forces(), axis=1).max()
+        assert final_fmax < initial_fmax
+        assert final_fmax <= override["opt"]["fmax"]
         assert os.path.isfile("test_opt.log")
 
-    def test_optimizer_choices(self, cu_bulk, emt_calc, tmp_work_dir):
+    @pytest.mark.parametrize("name", ["LBFGS", "FIRE", "BFGS"])
+    def test_optimizer_choices(self, name):
+        import ase.optimize
         from amorphgen.pipeline.opt_cell import _get_optimizer
-        for name in ["LBFGS", "FIRE", "BFGS"]:
-            cls = _get_optimizer(name)
-            assert cls is not None
+        assert _get_optimizer(name) is getattr(ase.optimize, name)
 
     def test_invalid_optimizer_raises(self):
         from amorphgen.pipeline.opt_cell import _get_optimizer
@@ -141,6 +147,7 @@ class TestResume:
         stages = [1, 4, 5, 6, 7]
         remaining, resume_input = pipe._find_resume_point(stages)
         assert remaining == []
+        assert resume_input == str(work / "stage7_opt.xyz")
 
     def test_run_resume_skips_completed(self, cu_bulk, tmp_work_dir):
         """run(resume=True) should return atoms when all stages are done."""
@@ -176,8 +183,9 @@ class TestMDStages:
         from amorphgen.utils.common import thermalize_momenta
 
         cu_supercell.calc = emt_calc
-        thermalize_momenta(cu_supercell, temperature_K=300)
-        dyn = build_md_dynamics(cu_supercell, ensemble="NVT", T=300.0)
+        rng = np.random.default_rng(0)
+        thermalize_momenta(cu_supercell, temperature_K=300, rng=rng)
+        dyn = build_md_dynamics(cu_supercell, ensemble="NVT", T=300.0, rng=rng)
         dyn.run(10)
 
         # System should still be physically reasonable
@@ -226,7 +234,8 @@ class TestGlobalSeedReproducibility:
             os.chdir(cwd)
 
     def test_same_seed_same_trajectory(self, tmp_path):
-        assert np.allclose(self._eq(7, tmp_path / "a"), self._eq(7, tmp_path / "b"))
+        np.testing.assert_array_equal(self._eq(7, tmp_path / "a"),
+                                      self._eq(7, tmp_path / "b"))
 
     def test_different_seed_or_run_differs(self, tmp_path):
         p = self._eq(7, tmp_path / "a")
@@ -249,7 +258,7 @@ class TestGlobalSeedReproducibility:
                 res.append(out.get_positions().copy())
             finally:
                 os.chdir(cwd)
-        assert np.allclose(res[0], res[1])
+        np.testing.assert_array_equal(res[0], res[1])
 
     def test_cli_seed_flag_reaches_override(self):
         from amorphgen.cli import _get_parser, _build_override
@@ -265,7 +274,7 @@ def test_run_seed_index_bands_and_stability(tmp_path, monkeypatch):
     runs collide only within one source. Snapshot numbers here are deliberately
     not equal to the loop positions."""
     from amorphgen.pipeline.batch_quench import _run_seed_index as idx
-    from amorphgen.utils.common import scoped_run_index, _INDEX_BAND, _INDEX_STRIDE
+    from amorphgen.utils.common import _INDEX_BAND
     monkeypatch.delenv("SLURM_ARRAY_TASK_ID", raising=False)
     # local identity: the filename number, not the loop position
     assert idx("snapshot_0007_frame01.xyz", 0) == 7

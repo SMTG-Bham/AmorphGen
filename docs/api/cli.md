@@ -14,8 +14,15 @@ amorphgen --batch-opt --input-dir DIR             # Batch optimisation mode
 amorphgen --analyse --input-dir DIR               # Structure analysis mode
 amorphgen --extract-snapshots TRAJ                # Extract N snapshots from a trajectory
 amorphgen --rank-from-log LOG                     # Energy ranking from log file
+amorphgen --convert PATH --format vasp            # Structure format conversion
 amorphgen --list-models                           # Show available models
 ```
+
+Run `amorphgen --help` for all flags and `amorphgen --examples` for built-in
+command examples. Commands below run from a repository checkout when they
+refer to files under `examples/`. Supply your own input structures, and save
+the configurations from {doc}`/guides/mq-ensemble` and
+{doc}`/guides/hybrid-workflow` as `mq.yaml` and `hybrid.yaml` before using them.
 
 ## CLI reference
 
@@ -35,15 +42,17 @@ amorphgen POSCAR --model mace-mpa-0 --device cuda
 ### Full pipeline with YAML config
 
 ```bash
-amorphgen POSCAR --config full_pipeline.yaml
+amorphgen POSCAR --config examples/full_pipeline.yaml
 ```
 
-### MQ-ensemble (full pipeline + N independent quenches in one command)
+### MQ-ensemble (full pipeline + N quenches in one command)
 
-The cleanest way to generate an ensemble of amorphous structures from a crystalline input. Internally runs stages 1–4 once, extracts N uniform snapshots from the stage-4 trajectory, and runs stages 5–7 on each snapshot. Resume-aware at every step.
+Runs stages 1–4 once, extracts N uniformly spaced snapshots from the stage-4
+trajectory, and runs stages 5–7 on each snapshot. Snapshot spacing and liquid
+equilibration determine whether the resulting samples are independent.
 
 ```bash
-amorphgen GaO.xyz --mq-ensemble --n-structures 20 \
+amorphgen Ga2O3_supercell.xyz --mq-ensemble --n-structures 20 \
     --config mq.yaml --device cuda --model chgnet \
     -o ga2o3_mq/
 ```
@@ -79,7 +88,9 @@ amorphgen --extract-snapshots stage4_eq_traj.xyz \
     -n 20 --select uniform -o snapshots/
 ```
 
-`-n` (or `--n-structures`) and the legacy `--n-runs` both control the snapshot count. Use `--format vasp` (or `cif`) to write POSCAR-style output instead of the default extxyz `.xyz`:
+`-n` (or `--n-structures`) and the legacy `--n-runs` both control the snapshot
+count. Use `--format vasp` for POSCAR-style output or `--format cif` for CIF
+instead of the default extxyz `.xyz`:
 
 ```bash
 amorphgen --extract-snapshots stage4_eq_traj.xyz \
@@ -91,7 +102,7 @@ amorphgen --extract-snapshots stage4_eq_traj.xyz \
 ```bash
 amorphgen --batch-quench --snapshot-dir stage4_eq_traj.xyz \
     --n-runs 20 --batch-stages 5 6 7 \
-    --config mq_quench.yaml -o quench_runs/
+    --config mq.yaml -o quench_runs/
 ```
 
 ### Hybrid workflow (skip heating)
@@ -106,7 +117,10 @@ amorphgen structure.xyz --stages 1 4 5 6 7 --config hybrid.yaml
 amorphgen POSCAR --stages 1 4 5 6 7 --config config.yaml --resume
 ```
 
-The `--resume` flag scans the work directory for completed stage checkpoints and skips them. Safe to resubmit HPC jobs without losing progress.
+The `--resume` flag skips completed stage checkpoints and continues an
+interrupted MD stage from its last saved trajectory frame. Unfinished
+optimisation stages restart; optimiser state is not checkpointed. Resume the
+same protocol and work directory.
 
 ### Random generation
 
@@ -140,7 +154,7 @@ amorphgen --batch-opt --input-dir random_structures/random_initial/ \
 amorphgen --batch-quench \
     --snapshot-dir snapshots/ \
     --model mace-mpa-0 \
-    --stages 5 6 7 \
+    --batch-stages 5 6 7 \
     --resume
 ```
 
@@ -155,7 +169,7 @@ amorphgen --analyse --input-dir optimised/ \
     --cutoff auto-rdf --per-structure --total-rdf --smearing 0.05 \
     --save-report report.txt --save-plot plots/
 
-# Publication-quality plots (300 DPI, vector PDF)
+# Publication-quality plots (600 DPI, vector PDF)
 amorphgen --analyse --input-dir optimised/ \
     --save-plot figs/ --save-pdf --dpi 600
 
@@ -163,11 +177,12 @@ amorphgen --analyse --input-dir optimised/ \
 amorphgen --analyse --input-dir optimised/ \
     --reference examples/reference_a_Ga2O3.yaml
 
-# Structure factor S(q): direct (Debye) method, neutron weighting, saved as PNG + CSV
+# Structure factor S(q): direct reciprocal-space sum, neutron weighting, PNG + CSV
 amorphgen --analyse --input-dir optimised/ --sq --sq-weighting neutron --save-plot plots/
 
-# Same, but the Fourier-transform-of-g(r) route and no re-binning
-amorphgen --analyse --input-dir optimised/ --sq --sq-method ft --sq-smooth 0 --save-plot plots/
+# Same neutron weighting, using the Fourier-transform-of-g(r) route
+amorphgen --analyse --input-dir optimised/ --sq --sq-method ft \
+    --sq-weighting neutron --save-plot plots/
 ```
 
 ### Rank structures by energy (from a random-gen log)
@@ -195,10 +210,14 @@ amorphgen --list-models
 | Mode | Default `--work-dir` |
 |------|---------------------|
 | Pipeline | `melt_quench_run/` |
-| `--mq-ensemble` | `mq_ensemble/` |
-| `--hybrid-ensemble` | `hybrid_ensemble/` |
-| `--random-gen --composition X=n,Y=m` | `random_XnYm/` (auto from composition) |
+| `--mq-ensemble` | `mq_ensemble_run/` |
+| `--hybrid-ensemble` | `hybrid_run/` |
+| `--random-gen --composition Si=16,O=32` | `random_O32Si16/` (Hill-order formula) |
+| `--random-gen --composition "SiO2*16"` | `random_structures/` |
 | `--batch-quench` | `batch_quench/` |
 | `--batch-opt` | `batch_opt/` |
+| `--extract-snapshots` | `snapshots/` |
+| `--convert DIR --format FMT` | `<DIR>_<FMT>/` |
+| `--convert FILE --format FMT` | Input file's directory |
 
 Override any default with `--work-dir my_dir/`.

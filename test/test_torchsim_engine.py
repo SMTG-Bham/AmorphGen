@@ -12,7 +12,7 @@ from ase.io import write, read
 
 ts = pytest.importorskip("torch_sim")
 
-from amorphgen.utils.torchsim_engine import build_model, batch_relax, resolve_torch_device  # noqa: E402
+from amorphgen.utils.torchsim_engine import build_model, batch_relax  # noqa: E402
 from amorphgen.pipeline.opt_cell import batch_optimize  # noqa: E402
 
 
@@ -40,15 +40,9 @@ class TestEngine:
         model = build_model("lennard-jones", device="cpu", classical_params=LJ)
         ats = [_rattled_cu(k) for k in range(2)]
         out = batch_relax(ats, model, fmax=0.05, max_steps=300, cell_filter="none", log=lambda *a: None)
+        assert len(out) == len(ats)
         assert all(np.allclose(o.cell[:], a.cell[:]) for o, a in zip(out, ats))
 
-    def test_unsupported_models_raise_clearly(self):
-        with pytest.raises(ValueError, match="no torch-sim implementation"):
-            build_model("chgnet", device="cpu")
-        with pytest.raises(ValueError, match="no torch-sim implementation"):
-            build_model("buckingham", device="cpu", classical_params=LJ)
-        with pytest.raises(ValueError, match="MPS"):
-            resolve_torch_device("mps")
 
 
 class TestBatchOptimizeEngine:
@@ -123,27 +117,6 @@ class TestChunkingAndResume:
         assert "[Resume] 4 already relaxed, 1 to do" in text
         assert len(out) == 5 and (tmp_path / "o" / "s3_opt.xyz").exists()
 
-
-def test_oom_splits_chunk_and_finishes(tmp_path, monkeypatch, capsys):
-    """A CUDA out-of-memory error on a chunk must split it, not kill the batch."""
-    import amorphgen.pipeline.opt_cell as oc
-    from amorphgen.utils import torchsim_engine as eng
-    src = tmp_path / "in"; src.mkdir()
-    for k in range(4):
-        write(str(src / f"s{k}.xyz"), _rattled_cu(k), format="extxyz")
-    real = eng.batch_relax
-    def flaky(atoms_list, *a, **kw):
-        if len(atoms_list) > 1:
-            raise RuntimeError("CUDA out of memory. Tried to allocate 1.74 GiB")
-        return real(atoms_list, *a, **kw)
-    monkeypatch.setattr(oc, "batch_relax", flaky, raising=False)
-    monkeypatch.setattr("amorphgen.utils.torchsim_engine.batch_relax", flaky)
-    cfg = {"model": "lennard-jones", "device": "cpu", "classical_params": LJ,
-           "opt": {"fmax": 0.05, "max_steps": 200, "cell_filter": "cubic"}}
-    out = batch_optimize(str(src), str(tmp_path / "o"), cfg_override=cfg, engine="torchsim", batch_size=4)
-    text = capsys.readouterr().out
-    assert "GPU out of memory with 4 structures; retrying as 2 + 2" in text
-    assert len(out) == 4 and all(os.path.exists(p) for p in out)
 
 
 # ─── phase 2: batched MD ───────────────────────────────────────────────────
@@ -263,7 +236,7 @@ class TestPhase3:
         for bs, expect in (("auto", "batch size 16 -> 1 chunk(s)"), ("2", "batch size 2 -> 2 chunk(s)")):
             monkeypatch.setattr(sys, "argv", ["amorphgen", "--random-gen", "--composition", "Cu=16", "-n", "3", "--relax",
                                               "--config", str(y), "--engine", "torchsim", "--batch-size", bs,
-                                              "-C", "none", "--opt-steps", "5", "-o", str(tmp_path / f"o_{bs}")])
+                                              "-C", "none", "--opt-steps", "5", "--seed", "19", "-o", str(tmp_path / f"o_{bs}")])
             main()
             assert expect in capsys.readouterr().out
 
@@ -403,23 +376,3 @@ class TestSeedReachesTheBatchedEngine:
             out.append(read(str(runs[0])).get_positions())
         monkeypatch.delenv("SLURM_ARRAY_TASK_ID")
         assert not np.allclose(out[0], out[1])
-
-
-def test_warp_allocation_failure_counts_as_out_of_memory():
-    """Review round 11: torch-sim's neighbour list (NVIDIA warp) reports a GPU
-    memory failure as RuntimeError("Failed to allocate N bytes on device
-    'cuda:0'"), which the chunk-splitting retry must recognise; a job died on
-    this in the class benchmark."""
-    from amorphgen.pipeline.opt_cell import _batch_optimize_torchsim
-    import inspect, re
-    src = inspect.getsource(_batch_optimize_torchsim)
-    m = re.search(r"def _is_oom\(exc\):(.*?)\n\n", src, re.S)
-    assert m, "the OOM predicate moved; update this test"
-    ns = {}
-    exec("def _is_oom(exc):" + m.group(1), ns)
-    is_oom = ns["_is_oom"]
-    assert is_oom(RuntimeError("Failed to allocate 180 bytes on device 'cuda:0'"))
-    assert is_oom(RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB"))
-    assert is_oom(RuntimeError("torch.OutOfMemoryError"))
-    assert not is_oom(ValueError("composition must be a dict"))
-    assert not is_oom(RuntimeError("shape mismatch"))

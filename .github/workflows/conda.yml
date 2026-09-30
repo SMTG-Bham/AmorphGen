@@ -64,6 +64,11 @@ jobs:
         python -c "from mace.calculators import mace_mp; import chgnet.model"
         amorphgen --list-models
 
+    # The suite skips torch-sim tests when the import is unavailable.
+    - name: Check the development engine import
+      if: matrix.env-name == 'amorphgen-dev'
+      run: python -c "import torch_sim"
+
     - name: Run the full suite
       if: matrix.env-name == 'amorphgen-dev'
       run: |

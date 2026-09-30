@@ -79,7 +79,6 @@ class TestStructureAnalyser:
         """--save-report into a not-yet-existing folder must not abort the
         run (regression: FileNotFoundError; --save-plot already created its
         directory, save_report did not)."""
-        import os
         from amorphgen.analysis import StructureAnalyser
         sa = StructureAnalyser(sio2_dir)
         target = tmp_path / "new" / "nested" / "report.txt"
@@ -110,7 +109,7 @@ class TestStructureAnalyser:
         from amorphgen.analysis import StructureAnalyser
         sa = StructureAnalyser(sio2_dir, cutoff=2.5)
         cn = sa.coordination()
-        assert isinstance(cn, dict)
+        assert set(cn) == {"O-O", "O-Si", "Si-O", "Si-Si"}
         for pair, data in cn.items():
             assert "mean" in data
             assert "distribution" in data
@@ -120,7 +119,7 @@ class TestStructureAnalyser:
         from amorphgen.analysis import StructureAnalyser
         sa = StructureAnalyser(sio2_dir, cutoff=2.5)
         bd = sa.bond_distances()
-        assert isinstance(bd, dict)
+        assert bd
         for pair, data in bd.items():
             assert data["mean"] > 0
             assert data["count"] > 0
@@ -129,7 +128,7 @@ class TestStructureAnalyser:
         from amorphgen.analysis import StructureAnalyser
         sa = StructureAnalyser(sio2_dir, cutoff=2.5)
         ba = sa.bond_angles()
-        assert isinstance(ba, dict)
+        assert ba
         for triplet, data in ba.items():
             assert 0 < data["mean"] < 180
             assert data["count"] > 0
@@ -232,16 +231,18 @@ class TestRDFNormalisation:
         np.testing.assert_allclose(g_total, g_partial, atol=0.01)
 
     def test_rdf_converges_to_one(self):
-        """g(r) should converge to ~1 at large r for a bulk structure."""
+        """An ideal gas has g(r) = 1 away from sparsely sampled inner bins."""
         from amorphgen.analysis import StructureAnalyser
-        atoms = bulk("Cu", "fcc", a=3.6, cubic=True) * (3, 3, 3)
+        rng = np.random.default_rng(42)
+        atoms = Atoms("Ar600", positions=rng.uniform(0, 24.0, (600, 3)),
+                      cell=[24.0] * 3, pbc=True)
         sa = StructureAnalyser([atoms], cutoff=3.0)
-        rdf = sa.rdf(rmax=5.0)
+        rdf = sa.rdf(rmax=6.0, nbins=60, sigma=0.0)
         r = np.array(rdf["r"])
         g = np.array(rdf["g_r"])
-        mask = (r > 4.0) & (r < 5.0)
-        if np.any(mask):
-            assert abs(np.mean(g[mask]) - 1.0) < 0.3
+        mask = (r > 3.0) & (r < 6.0)
+        assert np.count_nonzero(mask) == 30
+        assert np.mean(g[mask]) == pytest.approx(1.0, abs=0.05)
 
 
 # ─── Dimer detection ────────────────────────────────────────────────────────

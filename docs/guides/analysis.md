@@ -10,8 +10,14 @@ amorphgen --analyse --input-dir my_structures/ --save-plot plots/
 
 That single command computes density, partial radial distribution
 functions, coordination distributions, bond-angle distributions, and a
-per-structure density violin, saved as four PNG figures plus CSV
-companions.
+per-structure density violin, saved as up to four PNG figures plus CSV
+companions. The density plot and CSV require at least two structures;
+angle output requires valid bond-angle triplets.
+
+Directory input reads `.xyz`, `.extxyz`, `.vasp` and `.cif` files in that
+directory. Files with the same stem count once, in that format priority
+order. Each file contributes its last frame; to analyse a trajectory as an
+ensemble, first extract snapshots or pass a list of frames to the Python API.
 
 ## Recipes
 
@@ -21,12 +27,12 @@ Common cases:
 
 :::::{tab-item} Quick start
 
-The minimum command, four standalone figures (no comparison, no
-validation against literature):
+For an ensemble with at least two structures and valid angle triplets,
+this writes four standalone figures:
 
 ```bash
 amorphgen --analyse \
-    --input-dir hybrid_ga2o3/random_opt/ \
+    --input-dir hybrid_ga2o3/final/ \
     --save-plot plots/ \
     --save-pdf
 ```
@@ -41,8 +47,8 @@ plots/
 └── analysis_density.{png,pdf,csv}    # per-structure density violin
 ```
 
-The CSV files contain the raw numbers (r, g(r), CN counts, angle
-histograms, per-structure densities) so you can re-plot in any tool.
+The CSV files contain RDF values, coordination percentages, raw angle
+observations and per-structure densities so you can re-plot in any tool.
 
 :::::
 
@@ -54,7 +60,7 @@ One command reports and plots all of it:
 ```bash
 amorphgen --analyse \
     --input-dir igzo_final/ \
-    --sq --sq-partials --pair-panels \
+    --sq --sq-partials --pair-panels --save-pdf \
     --total-cn O --total-cn "O:In+Ga" \
     --save-report report.txt \
     --save-plot plots/
@@ -130,9 +136,12 @@ from amorphgen.analysis import StructureAnalyser
 sa = StructureAnalyser("igzo_final/", cutoff="In-O=2.6")       # rest auto-rdf
 sa.summary()
 sa.total_coordination(centre="O", partners=["In", "Ga"])
-sq = sa.structure_factor_direct(weighting="xray", partials=True)
+sq = sa.structure_factor_direct(weighting="xray", sigma_q=0.05, partials=True)
 sq["partials"]["In-O"]
-sa.plot(output_dir="plots/", pair_panels=True, total_cn=["O", "O:In+Ga"])
+sa.plot(output_dir="plots/", save_pdf=True,
+        pair_panels=True, total_cn=["O", "O:In+Ga"])
+from amorphgen.analysis.plotting import plot_sq
+plot_sq(sq, output_dir="plots/", save_pdf=True, pair_panels=True)
 ```
 
 :::::
@@ -143,7 +152,7 @@ Add a full text report alongside the plots:
 
 ```bash
 amorphgen --analyse \
-    --input-dir hybrid_ga2o3/random_opt/ \
+    --input-dir hybrid_ga2o3/final/ \
     --save-report report.txt \
     --save-plot plots/ \
     --save-pdf
@@ -158,13 +167,14 @@ density, energy, CN), add ``--per-structure``:
 
 ```bash
 amorphgen --analyse \
-    --input-dir hybrid_ga2o3/random_opt/ \
+    --input-dir hybrid_ga2o3/final/ \
     --per-structure
 ```
 
-If the structure files don't carry per-atom energies in their headers
-(VASP, CIF), AmorphGen automatically reads ``random_gen.log`` in the
-parent directory (when present) to fill in the E/atom column.
+If the structure files don't carry energies (VASP, CIF), AmorphGen looks
+for ``random_gen.log`` alongside the files and in their parent directory
+to fill in the E/atom column. Keep the original ``random_NNNN`` filenames
+so the log entries can be matched to the correct structures.
 
 :::::
 
@@ -175,7 +185,7 @@ match/concern/fail scoring:
 
 ```bash
 amorphgen --analyse \
-    --input-dir hybrid_ga2o3/random_opt/ \
+    --input-dir hybrid_ga2o3/final/ \
     --reference examples/reference_a_Ga2O3.yaml \
     --save-report report.txt \
     --save-plot plots/ \
@@ -218,7 +228,7 @@ compare_ensembles(
     ensembles=[
         EnsembleSpec("DFT-PBE0", "prb_ensemble/*.cif"),
         EnsembleSpec("Random",   "random_inputs/*.vasp"),
-        EnsembleSpec("Hybrid",   "hybrid_run/*.xyz"),
+        EnsembleSpec("Hybrid",   "hybrid_run/final/*.xyz"),
     ],
     rdf_pairs=[("Ga-O", "-"), ("Ga-Ga", "--"), ("O-O", ":")],
     cn_top_key="Ga-O",
@@ -237,18 +247,37 @@ Output: `comparison/ga2o3_rdf.{png,pdf,csv}`,
 --save-plot`, but each figure overlays all listed ensembles with
 distinct colours from the Okabe-Ito palette.
 
-See {doc}`/validation/index` for fully-worked examples of this on four
-material systems.
+See {doc}`/validation/index` for a Ga₂O₃ comparison and the available
+reference data.
 
 :::::
 
 ::::::
 
+## Which contacts count as bonds?
+
+The bonding coordination report, total coordination, bond angles and CN
+plot share the same bonding rule. In compounds with anions, only
+cation–anion pairs count as bonds; charge balance determines the anions.
+Without anions, the radii classification decides: same-element pairs
+count in a single-element system or a metal-rich alloy (at least 70 %
+metal atoms), and unlike-element pairs count when classified as ionic,
+covalent or metallic.
+
+Hydrogenated group-IV networks contain only C, Si and/or Ge plus H, with
+at most one H per host atom. Their host keeps the bonding rules of the
+H-free composition: Si–Si in a-Si:H, Ge–Ge in a-Ge:H and C–C in a-C:H
+count as bonds. In a-SiC:H only Si–C host pairs count, and in a-SiGe:H
+only Si–Ge host pairs count. Every host–H pair counts as a bond; H–H
+never does. These pairs still have to lie within their distance cutoffs.
+Metal hydrides, hydroxides, compositions with other elements and those
+with more H than host atoms retain the usual rules.
+
 ## Cutoff
 
 The cutoff defines what counts as a "first-shell" bond and affects
-coordination, bond-length statistics, and bond-angle triplets. Default
-in v1.0.0+ is `auto-rdf`, which finds the first minimum of each partial
+coordination, bond-length statistics, and bond-angle triplets. The default
+is `auto-rdf`, which finds the first minimum of each partial
 RDF, the standard convention in neutron-diffraction analysis of
 glasses. The minimum is read at a resolution of 0.25 Å, so a flat step
 or a noise dip on the falling side of the first peak, common in small
@@ -263,13 +292,14 @@ cutoff goes in the middle of it.
 | Per-pair overrides, e.g. `--cutoff "In-O=2.6,Zn-O=2.3"` | Fix the pairs you name and keep `auto-rdf` for the rest. Prefix a base rule to change the rest: `"auto,In-O=2.6"` or `"2.4,In-O=2.6"`. |
 | Dict via YAML or API | `cutoff: {In-O: 2.6}` completes the unlisted pairs from `auto-rdf`; add `default: 2.4` (or a mode name) to change that. |
 
-Setting an explicit cutoff is rarely needed; `auto-rdf` handles
-practically every amorphous system AmorphGen targets. One number for every
+Inspect the RDF and the reported cutoffs before interpreting coordination.
+An explicit cutoff can help when a first minimum is ambiguous. One number for every
 pair is the option to avoid in a multi-cation oxide: for a-IGZO the In–O
 first minimum sits at 2.47 Å and Ga–O at 2.03 Å, and a single 2.47 Å
 cutoff raises the Ga–O coordination from 3.9 to 4.2 by admitting
 second-shell oxygens. The report header lists the cutoff in force for
-every pair, so a per-pair override is easy to check.
+every pair, so a per-pair override is easy to check. These numerical values are an
+example, not fixed cutoffs for every IGZO ensemble.
 
 For elements bonded to more than one partner type (O in IGZO, bonded to
 Ga, In and Zn) the report adds a `Total coordination` block with the
@@ -289,23 +319,15 @@ returns the same statistics.
 
 ## Structure factor S(q) and simulated XRD
 
-AmorphGen computes the structure factor S(q) directly from atomic
-positions using the Debye scattering equation evaluated at the
-reciprocal-lattice vectors of the simulation cell, and converts it
-to a simulated X-ray diffraction pattern I(2θ) through Bragg's law
-plus the standard Lorentz–polarization correction. Pick the tab that
-matches your workflow.
+AmorphGen provides two structure-factor methods: a direct sum over the
+reciprocal-lattice vectors of a periodic cell, and a Fourier transform of
+the radial distribution function. The CLI uses the direct method by
+default. Both support X-ray, neutron and unweighted totals.
 
-```{note}
-A legacy fast method ``structure_factor()`` based on the
-Fourier transform of g(r) is also available. It is kept for
-ensemble-vs-ensemble comparisons but **under-shoots peak intensities
-by ~2×** in typical amorphous-MD cells due to the finite-``rmax``
-truncation. For all paper figures and experimental comparisons use
-``structure_factor_direct()`` as described below. The methodology
-comparison and the reason the two methods differ is documented in
-the {doc}`/notes/sq_xrd_methodology` note.
-```
+The direct method avoids truncating g(r), but still has finite-cell and
+sampling limits. The FT method can show termination ripples and altered
+peak heights; there is no universal correction factor between the two.
+See {doc}`/notes/sq_xrd_methodology` for the conventions and limitations.
 
 ::::{tab-set}
 
@@ -318,381 +340,181 @@ From the CLI:
 amorphgen --analyse --input-dir DIR --sq --sq-weighting neutron --save-plot plots/
 ```
 
-writes ``analysis_sq.png`` and ``analysis_sq.csv`` (columns ``q_invA``,
-``s_q``, ``s_q_raw`` and ``n_per_bin``). Add ``--sq-partials`` to also get
-the Faber-Ziman partials S_ab(q) for every element pair: their first-peak
-positions are printed, ``s_<A-B>`` columns are appended to the CSV and
-``analysis_sq_partials.png`` is written. The partials do not depend on
-``--sq-weighting``; the weighting only decides how they are combined into
-the total, so the same partials underlie the X-ray and the neutron total.
-From Python:
+This writes `analysis_sq.png` and `analysis_sq.csv`. With the default
+smoothing, the CSV contains `q_invA`, `s_q`, `s_q_raw` and `n_per_bin`.
+Add `--sq-partials` to print the first peak of each Faber–Ziman partial,
+append `s_<A-B>` columns to the CSV and write `analysis_sq_partials.png`.
+The partials describe the geometry and do not depend on the weighting.
+
+From Python, for an ensemble of GeO₂ structures:
 
 ```python
-sq = sa.structure_factor_direct(weighting="xray")                 # total S(q)
+from amorphgen.analysis import StructureAnalyser
+
+sa = StructureAnalyser("geo2_ensemble/")
 sq = sa.structure_factor_direct(weighting="neutron", sigma_q=0.05,
-                                partials=True)                    # + Faber-Ziman partials
-sq["partials"]["Ge-O"]                                            # S_GeO(q)
+                                partials=True)
+sq["partials"]["Ge-O"]
 ```
 
-It evaluates the Debye scattering equation
-([Debye, *Ann. Phys.* **351** (1915) 809](https://doi.org/10.1002/andp.19153510606))
-at the **reciprocal-lattice vectors** of the simulation cell. For a
-single q-vector,
+For each nonzero reciprocal-lattice vector, the implementation returns
+Faber–Ziman-normalized scattering:
 
-$$S(\vec q) \;=\; \frac{1}{N\,\langle f\rangle^2}
-\,\Bigl|\sum_{i=1}^{N} f_i\,\mathrm{e}^{\mathrm{i}\vec q\cdot\vec r_i}\Bigr|^{2}$$
+$$S(\vec q) = 1 + \frac{I(\vec q)/N - \langle f^2(q)\rangle}
+{\langle f(q)\rangle^2}, \qquad
+I(\vec q) = \left|\sum_i f_i(q)e^{i\vec q\cdot\vec r_i}\right|^2.$$
 
-where $f_i$ is the scattering factor of atom $i$ and
-$\langle f\rangle = \sum_{\alpha} c_{\alpha} f_{\alpha}$ is the
-composition-weighted average. Expanding the square and taking the
-real part:
+Here $c_\alpha=N_\alpha/N$,
+$\langle f\rangle=\sum_\alpha c_\alpha f_\alpha$ and
+$\langle f^2\rangle=\sum_\alpha c_\alpha f_\alpha^2$.
+Subtracting the self-scattering term gives the high-q limit $S(q)\to1$
+for uncorrelated positions. The raw intensity divided by
+$N\langle f\rangle^2$ has a different limit for mixtures.
 
-$$S(\vec q) \;=\; \frac{1}{N\langle f\rangle^{2}}
-\Bigl[\sum_{i} f_{i}^{2}
-\;+\; 2\sum_{i<j} f_{i}f_{j}\cos\bigl(\vec q\cdot(\vec r_{i}-\vec r_{j})\bigr)\Bigr].$$
+With cell vectors as rows of $\mathbf A$, the sampled vectors are
 
-For a periodic system the natural q-grid is the **reciprocal lattice**
+$$\vec G = 2\pi\,\vec n\mathbf A^{-\top}, \qquad
+\vec n\in\mathbb Z^3, \quad 0<|\vec G|\le q_{\max}.$$
 
-$$\vec G_{n_1 n_2 n_3} \;=\; 2\pi (n_1\, \vec b_1 + n_2\, \vec b_2 + n_3\, \vec b_3),
-\qquad \vec b_i = (\mathbf{A}^{-\top})_{i},$$
+Values are averaged into shells by $|\vec G|$, pooling vectors across
+structures with the same composition. `n_per_bin` records their count;
+empty shells contain `NaN`. For a cubic cell of side $L$, the smallest
+nonzero q is $2\pi/L$. Increasing `nq` adds bins but cannot add independent
+low-q information.
 
-where $\mathbf A$ is the cell matrix. Each $\vec G$ exactly satisfies
-the Born–von Kármán boundary conditions, so $S(\vec G)$ is the
-**exact** discrete Fourier transform of the atomic distribution, no
-truncation, no minimum-image issues. AmorphGen enumerates all
-$\vec G$ with $|\vec G| \le q_{\max}$, computes $S(\vec G)$ for each,
-then **spherically averages** within bins $|q| \in [q_k, q_{k+1})$:
+`sigma_q` (`--sq-smooth`) applies Gaussian smoothing weighted by each
+shell's vector count. Smoothing can broaden features, so compare with
+`s_q_raw`. The CLI defaults to 0.05 Å⁻¹; the Python method
+defaults to 0 (no smoothing). Empty shells remain `NaN`.
 
-$$S(q_k) \;=\; \langle S(\vec G) \rangle_{|\vec G|\in[q_k,q_{k+1})}.$$
+With `partials=True`, partials are averaged over the same shells. Their
+weighted sum reproduces the total exactly for q-independent weights
+(such as neutron scattering lengths). For X-rays the weights vary
+within a shell, so recombining the binned partials using weights at bin
+centres is approximate.
 
-The dictionary returned by ``structure_factor_direct`` contains
-``"n_per_bin"``, the number of reciprocal-lattice vectors in each
-shell, so you can mask poorly-sampled low-q bins (typically those
-with fewer than ~5 vectors).
-
-Because the low-q shells hold only a few vectors, the raw direct-method
-curve is speckled below about 2 Å⁻¹. ``sigma_q`` (CLI ``--sq-smooth``)
-re-bins it with a Gaussian of that width, weighting each shell by its
-number of vectors, which removes the speckle without moving or
-broadening the peaks as long as ``sigma_q`` stays well below the FSDP
-width (about 0.3 Å⁻¹). The CLI and the plots use 0.05 Å⁻¹ by default
-and keep the raw values as ``s_q_raw``; the library default is 0.
-
-With ``partials=True`` the same reciprocal-lattice sum also returns the
-Faber–Ziman partial structure factors $S_{\alpha\beta}(q)$, computed
-from the per-species amplitudes, so the total is recovered exactly from
-the partials and the $q$-dependent weights. This is what you need to
-compare with neutron isotope-substitution data (a-GeO₂, Salmon et al.
-2005) partial by partial.
-
-The FT-of-g(r) route is available as ``--sq-method ft`` (or
-``structure_factor()``) for comparison with codes that work that way; it
-is smoother but damps the FSDP because g(r) stops at half the cell.
-
-This is the same reciprocal-lattice-sum approach used in the
-established amorphous-MD analysis packages ISAACS
-([Le Roux & Petkov, *J. Appl. Cryst.* **43** (2010) 181](https://doi.org/10.1107/S0021889809051929))
-and LiquidLib
-([Walter, Bian, Mendoza & Schweizer, *Comput. Phys. Commun.* **228**
-(2018) 209](https://doi.org/10.1016/j.cpc.2018.03.005)).
+Use `--sq-method ft` or `sa.structure_factor(weighting="xray")` for the
+FT method. Its Python default weighting is `"unweighted"`; the direct
+method and CLI default to `"xray"`.
 
 :::
 
 :::{tab-item} Simulated XRD I(2θ)
 :sync: xrdrecipe
 
-To produce a simulated XRD pattern that can be compared to a raw
-diffractometer trace, take the direct-method S(q) and apply the
-standard X-ray-scattering geometry corrections:
+The normalized structure factor is not a raw diffractometer intensity.
+For an X-ray coherent-scattering profile, first restore the self-scattering
+term and form-factor scale, then map momentum transfer to angle:
+
+$$I_{\mathrm{coh}}(q)/N = \langle f(q)\rangle^2[S(q)-1]
++\langle f^2(q)\rangle, \qquad q=\frac{4\pi\sin\theta}{\lambda}.$$
+
+The following post-processing example uses Cu-Kα wavelength and the
+composition of the first structure. It approximates the form factors
+at each bin centre; use narrow q bins when comparing intensities.
 
 ```python
 import numpy as np
-from scipy.ndimage import gaussian_filter1d
+from amorphgen.analysis import StructureAnalyser
+from amorphgen.analysis.rdf import xray_form_factor
 
-LAMBDA_CU_KA = 1.5406  # Å; switch to 0.7107 for Mo-Kα
-
-# 1. S(q) at appropriate qmax
+sa = StructureAnalyser("ga2o3_ensemble/")
 sq = sa.structure_factor_direct(weighting="xray", qmax=8.0, nq=400)
-q   = np.array(sq["q"]); s = np.array(sq["s_q"]); nb = np.array(sq["n_per_bin"])
-keep = nb >= 5
+q, s, counts = (np.asarray(sq[k]) for k in ("q", "s_q", "n_per_bin"))
+symbols = sa.atoms_list[0].get_chemical_symbols()
+fractions = {el: symbols.count(el) / len(symbols) for el in set(symbols)}
+f = {el: xray_form_factor(el, q) for el in fractions}
+f_mean = sum(fractions[el] * f[el] for el in fractions)
+f2_mean = sum(fractions[el] * f[el]**2 for el in fractions)
+coherent = f_mean**2 * (s - 1.0) + f2_mean
 
-# 2. 2θ grid, map q ↔ 2θ via Bragg's law
+wavelength = 1.5406  # Å, Cu-Kα
+keep = (counts >= 5) & np.isfinite(coherent)
+if np.count_nonzero(keep) < 2:
+    raise ValueError("Too few populated q bins; use more structures or wider bins")
 two_theta = np.linspace(20.0, 90.0, 1000)
-theta = np.deg2rad(two_theta / 2.0)
-q_at_2t = 4.0 * np.pi * np.sin(theta) / LAMBDA_CU_KA
-s_at_2t = np.interp(q_at_2t, q[keep], s[keep])
-
-# 3. Lorentz-polarization correction
-cos2t = np.cos(np.deg2rad(two_theta))
-lp = (1.0 + cos2t**2) / (np.sin(theta)**2 * np.cos(theta))
-intensity_raw = s_at_2t * lp
-
-# 4. Instrument broadening (Gaussian σ ≈ 1° typical lab Cu-Kα)
-d2t = two_theta[1] - two_theta[0]
-intensity = gaussian_filter1d(intensity_raw, sigma=1.0 / d2t)
-intensity = intensity / np.nanmax(intensity)
+q_at_angle = 4.0 * np.pi * np.sin(np.deg2rad(two_theta / 2)) / wavelength
+intensity = np.interp(q_at_angle, q[keep], coherent[keep],
+                      left=np.nan, right=np.nan)
 ```
 
-**Equations behind each step.**
+This gives a coherent-scattering profile before instrument and sample
+corrections. Polarization, geometry, absorption, background and resolution
+must match the measurement. A powder-diffraction Lorentz–polarization
+factor applied to `S(q)` alone is not a general prediction of an amorphous
+sample's measured trace. Any additional broadening should come from the
+instrument's resolution; the structural halo width is already present
+in the calculated profile.
 
-(1) **Bragg's law.** Wavelength $\lambda$, scattering angle $2\theta$:
-
-$$q = \frac{4\pi}{\lambda}\sin\theta, \qquad
-2\theta = 2\arcsin\!\left(\frac{q\lambda}{4\pi}\right).$$
-
-For Cu-Kα ($\lambda = 1.5406$ Å) the accessible q range up to
-$2\theta = 90^\circ$ is $q \in [0, 5.77]$ Å⁻¹. Mo-Kα ($\lambda =
-0.7107$ Å) extends to $q = 12.5$ Å⁻¹ over the same angular range.
-
-(2) **Lorentz–polarization correction.** The scattered intensity
-measured by a diffractometer is
-
-$$I(2\theta) \;\propto\; S(q)\;\cdot\;
-\underbrace{\frac{1 + \cos^{2}(2\theta)}{2}}_{\text{polarization}}
-\;\cdot\;
-\underbrace{\frac{1}{\sin^{2}\theta\,\cos\theta}}_{\text{Lorentz}}.$$
-
-The polarization factor $(1+\cos^2 2\theta)/2$ comes from averaging
-the Thomson differential cross-section over unpolarised incident
-X-rays. The Lorentz factor $1/(\sin^2\theta\cos\theta)$ accounts for
-the geometry of an ideally-aligned powder sample in a Bragg–Brentano
-parallel-beam diffractometer (rotation time of each crystallite
-through the diffraction condition); see Pecharsky & Zavalij,
-*Fundamentals of Powder Diffraction and Structural Characterization
-of Materials* (2nd ed., Springer 2009), §2.4 and §2.5. Their combined
-form is the no-monochromator default used in essentially every
-powder-diffraction analysis package (GSAS-II, FullProf, Topas):
-
-$$\mathrm{LP}(\theta) \;=\; \frac{1+\cos^{2}(2\theta)}{\sin^{2}\theta\,\cos\theta}.$$
-
-LP diverges as $\theta \to 0$. In real measurements the direct-beam
-stop hides 2θ ≲ 5°; in simulation we simply truncate the plot at
-2θ ≥ 20° (anything you'd see below that is dominated by the diverging
-LP, not by structural features).
-
-(3) **Instrument broadening.** A measured XRD profile is convolved
-with the instrumental resolution function, which for a well-aligned
-laboratory Cu-Kα system is approximately Gaussian with full-width
-at half maximum ~0.05–0.1° in 2θ for crystalline samples and ~1–3°
-for amorphous halos (see Klug & Alexander, *X-ray Diffraction
-Procedures*, Wiley 1974, Ch. 9; Cullity & Stock, *Elements of X-ray
-Diffraction*, 3rd ed., Prentice Hall 2001, §6.7). AmorphGen applies
-a 1D Gaussian convolution with $\sigma_{2\theta}$ as a user-tunable
-parameter. For amorphous halos σ ≈ 1° is a reasonable starting point;
-adjust to match the specific instrument and sample.
-
-The full simulated XRD intensity at $2\theta$ from a periodic
-amorphous cell is therefore
-
-$$I_{\text{sim}}(2\theta) \;=\; \bigl[S\bigl(q(2\theta)\bigr)\,\cdot\,
-\mathrm{LP}(\theta)\bigr] \;*\; G_{\sigma_{2\theta}}$$
-
-where $S(q(2\theta))$ is interpolated from the direct-method S(q),
-$\mathrm{LP}(\theta)$ is the formula above, and $G_{\sigma}$ is a
-Gaussian of width $\sigma_{2\theta}$.
-
-One caveat: the XRD peak position depends on whether LP is
-applied:
-
-| Plotted quantity | First peak for a-Ga₂O₃ | Comment |
-|---|---|---|
-| S(q) vs q | q = 2.5 Å⁻¹ | Real structural FSDP |
-| S(q(2θ)) without LP, vs 2θ | 2θ = 35° | Same feature, plotted in angle |
-| **S(q(2θ)) × LP vs 2θ** | **2θ = 23°** | What a diffractometer measures |
-
-The "23° peak" in raw experimental XRD is **the same physics** as the
-"35° peak" in non-LP-corrected plots; both are the FSDP, just viewed
-through different geometric corrections.
+AmorphGen currently has no `xrd_pattern()` convenience method; this is
+Python post-processing. For a comparison to an experimentally reduced
+Faber–Ziman `S(Q)`, compare directly to the calculated `S(q)` using matching
+weights and normalization.
 
 :::
 
 :::{tab-item} Weighting
 :sync: weighting
 
-Both methods accept the same ``weighting=`` argument. Behind it lies
-the Faber–Ziman partial-summation convention for the total
-structure factor
-([Faber & Ziman, *Philos. Mag.* **11** (1965) 153](https://doi.org/10.1080/14786436508211931)):
+Both methods combine partial structure factors using
 
-$$S(q) \;=\; \frac{\displaystyle\sum_{\alpha,\beta}
-c_\alpha c_\beta\, f_\alpha(q)\, f_\beta(q)\, S_{\alpha\beta}(q)}
-{\displaystyle\Bigl(\sum_\alpha c_\alpha f_\alpha(q)\Bigr)^{2}}$$
+$$S(q)=\frac{\sum_{\alpha,\beta}c_\alpha c_\beta f_\alpha(q)
+f_\beta(q)S_{\alpha\beta}(q)}
+{\left[\sum_\alpha c_\alpha f_\alpha(q)\right]^2}.$$
 
-where $c_\alpha = N_\alpha/N$ is the number fraction of element
-$\alpha$ and $f_\alpha(q)$ is its scattering factor (X-ray atomic
-form factor or neutron coherent scattering length). The Faber–Ziman
-partials $S_{\alpha\beta}(q)$ are the ones defined in the previous
-tab.
+The sum counts ordered pairs, so unlike-element pairs occur twice.
+Different weights change how the partial peaks and troughs contribute;
+they do not guarantee a particular peak height.
 
-For multi-element systems with $A \neq B$ pairs, the sum
-$\sum_{\alpha\beta}$ counts each ordered pair so the off-diagonal
-$AB$ and $BA$ terms together give a factor of 2:
-
-$$S(q) \;=\; \frac{1}{\langle f \rangle^{2}}
-\left[\sum_{\alpha} c_\alpha^{2} f_\alpha^{2} S_{\alpha\alpha}
-\;+\; 2\sum_{\alpha<\beta} c_\alpha c_\beta f_\alpha f_\beta
-S_{\alpha\beta}\right].$$
-
-The three ``weighting=`` options pick different per-element
-scattering factors $f_\alpha$:
-
-| ``weighting`` | Per-element factor $f_\alpha$ | When to use |
+| `weighting` | Per-element factor | Use |
 |---|---|---|
-| ``"xray"``       | $q$-dependent atomic form factor $f_\alpha(q)$ (Waasmaier–Kirfel 1995) | Comparing to X-ray diffraction |
-| ``"neutron"``    | Tabulated coherent neutron scattering length $b_\alpha$ | Comparing to neutron diffraction |
-| ``"unweighted"`` | $f_\alpha = 1$ for all species | Pure structure comparison; same as a single-species sum |
+| `"xray"` | q-dependent neutral-atom form factor | X-ray total scattering |
+| `"neutron"` | Tabulated coherent scattering length | Neutron total scattering |
+| `"unweighted"` | 1 for every species | Geometric structure comparisons |
 
-The X-ray weights use the $q$-dependent atomic form factors $f_\alpha(q)$
-of Waasmaier & Kirfel
-([*Acta Cryst. A* **51** (1995) 416](https://doi.org/10.1107/S0108767394013292)),
-a five-Gaussian fit
+X-ray form factors use the five-Gaussian parametrization of
+[Waasmaier & Kirfel (1995)](https://doi.org/10.1107/S0108767394013292):
 
-$$f_\alpha(q) = \sum_{i=1}^{5} a_i \exp\!\bigl(-b_i\,(q/4\pi)^{2}\bigr) + c$$
+$$f_\alpha(q)=\sum_{i=1}^5 a_i\exp[-b_i(q/4\pi)^2]+c.$$
 
-tabulated for 98 elements, with $f_\alpha(0) = Z_\alpha$. The
-Faber–Ziman weights $w_{\alpha\beta}(q)$ and the self-scattering term are
-therefore evaluated at every $q$ rather than with the $q \to 0$ value $Z$,
-which matters above about 3 Å⁻¹ where the heavy-atom weighting falls off.
+The table covers neutral atoms H–Cf. Its fitted values approach the
+atomic number at q = 0; the code uses the q-dependent values throughout.
+Anomalous scattering corrections are not included.
 
-For neutrons AmorphGen ships a built-in table of
-~50 common-element coherent scattering lengths from Sears
-([Sears, *Neutron News* **3** (1992) 26](https://doi.org/10.1080/10448639208218770)).
-Unlike X-ray scattering, neutron $b$ values do **not** scale with
-$Z$, they vary irregularly (e.g. $b_{\rm H} = -3.74$ fm but
-$b_{\rm D} = +6.67$ fm), which makes neutron diffraction sensitive to
-contrasts hidden in X-ray patterns. Use ``weighting="neutron"`` when
-comparing to neutron data.
-
-Why ``"unweighted"`` misses the FSDP in oxides: in an oxide
-like a-Ga₂O₃, the FSDP at $q \approx 2.5$ Å⁻¹ comes from medium-
-range Ga–Ga (peaks at ~2.5 Å⁻¹) and O–O (peaks at ~2.6 Å⁻¹) partial
-correlations. The Ga–O partial $S_{\rm GaO}(q)$ **dips** to ~0.25 at
-the same $q$. With $f = 1$ for all elements, the negative Ga–O
-contribution exactly cancels the positive like-pair contributions:
-
-$$S^{(\rm unwt)}(q\!=\!2.5) = c_{\rm Ga}^{2} (1.23) + 2c_{\rm Ga}c_{\rm O}(0.25) + c_{\rm O}^{2}(1.25) \approx 0.84$$
-
-With X-ray weighting ($Z_{\rm Ga} = 31 \gg Z_{\rm O} = 8$), the
-Ga–Ga partial gets multiplied by $31^2 = 961$, the O–O by $64$, the
-Ga–O by $248$, the heavy Ga–Ga dominates and the FSDP survives:
-
-$$S^{(\rm xray)}(q\!=\!2.5) \approx \frac{0.4^2\cdot 961\cdot 1.23 + 2\cdot 0.4\cdot 0.6\cdot 248\cdot 0.25 + 0.6^2\cdot 64\cdot 1.25}{17.2^{2}} \approx 2.0$$
-
-which is why X-ray experiments **see** the FSDP and the unweighted
-ensemble-comparison plots do not.
+Neutron weights use the built-in common-element table from
+[Sears (1992)](https://doi.org/10.1080/10448639208218770).
+Unsupported species raise an error. Scattering lengths can be negative
+and depend on isotope; the API chooses weights from element symbols,
+so changing an atom's mass does not select an isotope-specific length.
 
 :::
 
 :::{tab-item} Physical validity
 :sync: physics
 
-The direct S(q) method and the Bragg + LP simulated-XRD recipe both
-implement standard, well-established physics. Below: the master
-equations, who first wrote them down, and the spot-checks AmorphGen
-passes against published data.
+Use the same normalization, scattering weights, q range and smoothing
+when comparing calculations and experiments. A summary of the relevant
+conventions is [Keen (2001)](https://doi.org/10.1107/S0021889800019993).
+The direct reciprocal-space calculation and the FT of g(r) are described
+in {doc}`/notes/sq_xrd_methodology`.
 
-### Master equations and primary references
+The repository's `TestSqNormalisation` tests in `test/test_analysis.py`
+check the high-q limit, the FT integrand, scattering-table entries,
+q-dependent X-ray weighting, smoothing and neutron partial recombination.
+These are implementation checks; they do not establish universal accuracy
+bounds or validate every material against experiment.
 
-The Debye scattering equation for an isotropic ensemble:
+| Limitation | How to assess it |
+|---|---|
+| Finite cell and sparse low-q shells | Inspect `n_per_bin`; compare larger cells and more independent configurations. |
+| Finite-r truncation in the FT method | Vary `rmax` within the cell's useful range and compare with the direct method. |
+| Smoothing and finite q-bin width | Compare raw data and narrower bins; report `sigma_q` and `nq`. |
+| Neutral-atom X-ray weights; element-based neutron weights | Check whether anomalous or isotope-specific scattering matters for the experiment. |
+| Thermal motion | Use representative configurations at the comparison temperature; an extra Debye–Waller correction may double-count sampled motion. |
+| Instrument and sample effects | Apply corrections appropriate to the measured quantity and geometry. |
 
-$$S(q) \;=\; \frac{1}{N\langle f\rangle^{2}}
-\sum_{i=1}^{N}\sum_{j=1}^{N} f_i f_j\,\frac{\sin(q r_{ij})}{q r_{ij}}$$
-
-([Debye, *Ann. Phys.* **351** (1915) 809](https://doi.org/10.1002/andp.19153510606)).
-The discrete-Fourier-transform version
-$S(\vec G) = N^{-1}\langle f\rangle^{-2}|\sum_i f_i \mathrm{e}^{\mathrm{i}\vec G\cdot\vec r_i}|^{2}$
-follows by writing $\sin(qr)/(qr) = \langle \mathrm{e}^{\mathrm{i}\vec q\cdot\vec r}\rangle_{|\vec q|=q}$
-and the convolution theorem; it is the form most numerical
-implementations use for periodic systems.
-
-**Fourier-Bessel link to g(r):**
-
-$$S(q) - 1 \;=\; 4\pi\rho \int_0^\infty [g(r)-1]\,
-\frac{\sin(qr)}{qr}\,r^2\,\mathrm{d}r$$
-
-([Zernike & Prins, *Z. Phys.* **41** (1927) 184](https://doi.org/10.1007/BF01391926); textbook
-treatments in Egami & Billinge, *Underneath the Bragg Peaks*,
-Pergamon 2003, §3.2; Hansen & McDonald, *Theory of Simple Liquids*,
-4th ed., Elsevier 2013, Ch. 2).
-
-The Faber–Ziman partial-summation convention for multi-element
-totals:
-
-$$S(q) \;=\; \frac{\sum_{\alpha\beta} c_\alpha c_\beta f_\alpha f_\beta
-S_{\alpha\beta}(q)}{\bigl(\sum_\alpha c_\alpha f_\alpha\bigr)^{2}}$$
-
-([Faber & Ziman, *Philos. Mag.* **11** (1965) 153](https://doi.org/10.1080/14786436508211931)).
-
-Bragg's law, linking momentum transfer to scattering angle:
-
-$$q = \frac{4\pi}{\lambda}\sin\theta$$
-
-([Bragg & Bragg, *Proc. R. Soc. Lond. A* **88** (1913) 428](https://doi.org/10.1098/rspa.1913.0040)).
-
-The Lorentz–polarization correction for parallel-beam
-Bragg–Brentano powder diffraction with unpolarised X-rays:
-
-$$\mathrm{LP}(\theta) \;=\; \frac{1+\cos^{2}(2\theta)}{\sin^{2}\theta\,\cos\theta}$$
-
-(textbook derivation in Cullity & Stock, *Elements of X-ray
-Diffraction*, 3rd ed., Prentice Hall 2001, §4.10 and §4.12;
-Pecharsky & Zavalij, *Fundamentals of Powder Diffraction*, 2nd ed.,
-Springer 2009, §2.4–2.5). It is the no-monochromator default in
-essentially every powder-diffraction analysis program: GSAS-II
-([Toby & Von Dreele, *J. Appl. Cryst.* **46** (2013) 544](https://doi.org/10.1107/S0021889813003531)),
-FullProf
-([Rodríguez-Carvajal, *Physica B* **192** (1993) 55](https://doi.org/10.1016/0921-4526(93)90108-I)),
-and Topas
-([Coelho, *J. Appl. Cryst.* **51** (2018) 210](https://doi.org/10.1107/S1600576718000183)).
-
-The reciprocal-lattice-sum approach for amorphous MD has been
-established and benchmarked in the dedicated analysis packages
-ISAACS
-([Le Roux & Petkov, *J. Appl. Cryst.* **43** (2010) 181](https://doi.org/10.1107/S0021889809051929))
-and LiquidLib
-([Walter, Bian, Mendoza & Schweizer, *Comput. Phys. Commun.* **228** (2018) 209](https://doi.org/10.1016/j.cpc.2018.03.005));
-AmorphGen's ``structure_factor_direct`` is the same algorithm.
-
-### Spot-checks the implementation passes
-
-| Test | Expected (from literature) | AmorphGen | Agrees |
-|---|---|---|---|
-| Asymptotic S(q→∞), X-ray, a-Ga₂O₃ | $\langle f^{2}\rangle/\langle f\rangle^{2} = 1.43$ | S(q=7) = 1.44 | yes |
-| FSDP intensity, a-Ga₂O₃ | 1.8–2.0 (X-ray expt + GAP); [Kaewmeechai et al. PRB **111** (2025) 035203, Fig. S2b](https://doi.org/10.1103/PhysRevB.111.035203) | 2.0 | yes |
-| FSDP position, a-Ga₂O₃ | $q \approx 2.4$ Å⁻¹ (same reference) | 2.5 | yes |
-| FSDP position, a-SiO₂ | $q \approx 1.5$ Å⁻¹; [Wright, *J. Non-Cryst. Solids* **179** (1994) 84](https://doi.org/10.1016/0022-3093(94)90683-1) | 1.38 | ⚠️ ~10% low (96-atom cell artifact) |
-| XRD halo position, a-Ga₂O₃, Cu-Kα | $2\theta \approx 23°$ (Verlet *et al.* and various) | 22.7° | yes |
-
-### Known limitations and recommended workarounds
-
-| Limitation | Effect | Workaround |
-|---|---|---|
-| Cromer–Mann $f(q)$ not implemented: Z-approximation only ([Cromer & Mann, *Acta Cryst. A* **24** (1968) 321](https://doi.org/10.1107/S0567739468000550)) | < 5 % error for FSDP region (q < 3 Å⁻¹); ~20 % at high q (q > 5 Å⁻¹) | For high-q precision, post-process with external XRD analysis software |
-| **No Debye–Waller factor** | Static-snapshot S(q); no thermal attenuation | MD ensemble already samples thermal motion; for low-T multiply by $\exp(-q^{2}\langle u^{2}\rangle/3)$ |
-| **No sample-displacement / absorption corrections** | < 1 % effect for amorphous-halo positions | Use full Rietveld package (GSAS-II, FullProf) for crystalline-peak fitting |
-
-### Bottom line on physical correctness
-
-For glass-physics work where peak positions to ~0.1 Å⁻¹ and
-intensities to ~10 % are sufficient, AmorphGen's S(q) and XRD
-implementations are **physically correct and use standard textbook
-conventions** referenced above. The output is directly comparable to
-neutron / X-ray experimental data and to other MD-analysis packages
-(ISAACS, LiquidLib) within these accuracy tolerances. For
-milliÅngström-precision peak fitting and intensity ratios to better
-than 1 %, you would need to add Cromer–Mann $f(q)$, Debye–Waller, and
-instrument-specific corrections.
-
-```{admonition} Is the implementation novel?
-:class: note
-
-No. Every equation comes from primary literature published between
-1913 and 1992, and the algorithm is the same one used in ISAACS,
-LiquidLib, freud, OVITO and DL_POLY. AmorphGen contributes the
-Python wiring, not the physics. For details on what's "ours" vs
-what's standard, and how to cite the method in a paper, see
-{doc}`/notes/sq_xrd_credits`.
-```
+Cite AmorphGen for the software and the primary literature for the
+scattering conventions and tables; see {doc}`/notes/sq_xrd_credits`.
 
 :::
 
@@ -700,44 +522,33 @@ what's standard, and how to cite the method in a paper, see
 
 ### Example: a-Ga₂O₃
 
-The settings below reproduce the validation result against the
-DFT-PBE0 ensemble from
-[Kaewmeechai, Strand & Shluger, *Phys. Rev. B* **111** (2025) 035203](https://doi.org/10.1103/PhysRevB.111.035203)
-(FSDP at $q \approx 2.4$ Å⁻¹ with intensity ~2.0; XRD halo at
-$2\theta \approx 23°$ Cu-Kα):
+For a directory of Ga₂O₃ configurations with the same composition:
 
 ```python
-import numpy as np
-from scipy.ndimage import gaussian_filter1d
 from amorphgen.analysis import StructureAnalyser
 
-sa = StructureAnalyser("ga2o3_ensemble/*.cif", cutoff="auto-rdf")
-
-# X-ray S(q)
-sq = sa.structure_factor_direct(weighting="xray", qmax=12.0, nq=300)
-q, s, nb = (np.array(sq[k]) for k in ("q", "s_q", "n_per_bin"))
-mask = nb >= 5
-s_safe = np.where(np.isnan(s), 1.0, s)   # NaN-safe before smoothing
-s_smooth = gaussian_filter1d(s_safe, sigma=0.05 / (q[1] - q[0]))
-
-# Simulated XRD I(2θ)
-sq = sa.structure_factor_direct(weighting="xray", qmax=8.0, nq=400)
-# ... Bragg + LP + smearing as shown in the "Simulated XRD" tab
+sa = StructureAnalyser("ga2o3_ensemble/", cutoff="auto-rdf")
+sq = sa.structure_factor_direct(weighting="xray", qmax=12.0, nq=300,
+                                sigma_q=0.05, partials=True)
+# sq["s_q_raw"] retains the unsmoothed total for comparison.
 ```
 
-The same settings apply to other oxide glasses (a-SiO₂, a-HfO₂)
-and to a-Si; only the ``cutoff`` and the input file pattern need
-adjusting.
+Peak positions and intensities depend on the supplied structures, cell
+size and settings. The same API applies to other compositions; select
+weights and a q range appropriate to the reference data.
 
 ### Open issues / future work
 
-- Per-bin error bars from the spread of S(q) across structures
-- **`xrd_pattern()` convenience method** on ``StructureAnalyser``
-  bundling the Bragg + LP + smearing recipe
+- Per-bin uncertainty estimates from independent configurations.
+- An `xrd_pattern()` convenience method with explicit intensity conventions
+  and instrument settings.
 
 ## Full CLI flag reference
 
-```bash
+The brackets below denote optional arguments; omit the brackets when running
+the command.
+
+```text
 amorphgen --analyse \
     --input-dir DIR_OF_STRUCTURES \
     [--cutoff MODE_OR_NUMBER] \
@@ -750,32 +561,33 @@ amorphgen --analyse \
     [--total-rdf] \
     [--sq] [--sq-weighting {xray,neutron,unweighted}] \
     [--sq-method {direct,ft}] [--sq-smooth SIGMA_Q] [--sq-partials] \
-    [--pair-panels] [--total-cn SPEC ...] \
-    [--check-dimers] \
+    [--pair-panels] [--total-cn SPEC] \
+    [--tr] [--tr-qrange QMIN QMAX] [--tr-window {lorch,none}] [--tr-scan] \
+    [--check-dimers] [--rings [PAIR]] [--voronoi [ELEMENT]] [--connectivity] \
     [--dpi N] \
     [--show-title]
 ```
 
 | Flag | What it does |
 |---|---|
-| `--input-dir DIR` | Directory of structure files (``.xyz``, ``.extxyz``, ``.cif``, ``.vasp``). Globs everything matching these extensions. |
+| `--input-dir DIR` | Read structure files in this directory. Same-stem duplicates count once, preferring ``.xyz``, then ``.extxyz``, ``.vasp`` and ``.cif``. |
 | `--cutoff MODE` | `auto-rdf` (default: first minimum of each partial g(r)), `auto` (radii table), a number in Å, or per-pair overrides such as `"In-O=2.6,Zn-O=2.3"` that keep `auto-rdf` for the other pairs (`"auto,In-O=2.6"` or `"2.4,In-O=2.6"` change the base). |
 | `--per-structure` | Print a per-structure table (one row per file: density, E/atom, CN). |
 | `--save-report FILE` | Write the full text report (densities, bond distances, coordination, angles) to a file. |
-| `--save-plot DIR` | Save the four standard figures (RDF, CN, angles, density) plus CSV data into ``DIR``. |
+| `--save-plot DIR` | Save available standard figures (RDF, CN, angles, density) plus CSV data into ``DIR``. |
 | `--save-pdf` | Also save vector PDF copies alongside the PNGs. |
 | `--reference YAML` | Validate against the literature ranges in YAML, print a match/concern/fail table. |
 | `--smearing SIGMA` | Gaussian smearing of the RDF in Å (default 0.05, roughly thermal broadening; 0 for the raw histogram). |
 | `--total-rdf` | Overlay the total g(r) on the partial-RDF plot. |
 | `--sq` | Compute the total structure factor S(q) and save it as PNG + CSV under ``--save-plot``. |
 | `--sq-weighting` | `xray` (default, Waasmaier–Kirfel form factors), `neutron` (Sears scattering lengths) or `unweighted`. |
-| `--sq-method` | `direct` (default): Debye sum at the reciprocal-lattice q-vectors, resolves the FSDP. `ft`: Fourier transform of g(r), smoother but damps the FSDP. |
+| `--sq-method` | `direct` (default): reciprocal-lattice sum. `ft`: Fourier transform of g(r), with finite-r truncation effects. |
 | `--sq-smooth SIGMA_Q` | Gaussian re-binning width in Å⁻¹ for the direct S(q) (default 0.05; 0 = raw). Raw values are kept in the CSV. |
 | `--sq-partials` | With `--sq` (direct method): the Faber-Ziman partial structure factors S_ab(q) of every element pair. First peaks printed, `s_<pair>` columns in `analysis_sq.csv`, `analysis_sq_partials.png`. |
-| `--tr` | Total correlation function T(r) = 4πrρg(r), the curve diffraction papers plot beside S(q). The weighted S(q) is Fourier-transformed over the measured q range, so the result is directly comparable with published data, unlike the unweighted g(r) of `--total-rdf`. `analysis_tr.png` plus a CSV with r, the weighted g(r), T(r) and the reduced PDF G(r). |
+| `--tr` | Total correlation function T(r) = 4πrρg(r), obtained by transforming the direct S(q). Match the reference's scattering weights, normalization, q range and window before comparing. Writes `analysis_tr.png` and a CSV with r, the weighted g(r), T(r) and the reduced PDF G(r). |
 | `--tr-qrange QMIN QMAX` | Integration limits for `--tr` (default 0.3 20). Set them to the experiment's own range: qmax fixes the real-space resolution and the truncation ripple. |
 | `--tr-window {lorch,none}` | Window for the `--tr` transform. `lorch` damps the qmax truncation ripple at the cost of broader peaks; match whichever the paper used. |
-| `--tr-scan` | Sweep qmax and the window and report how far the first T(r) peak and its integrated count move. The q range belongs to the measurement rather than the model, so this is the honest error bar on a comparison. Without a window the truncation ripple narrows the integration window and the count drifts down, which the table makes visible. |
+| `--tr-scan` | With `--tr`, sweep qmax and the window and report changes in the first T(r) peak and its integrated scattering-weighted count. This measures sensitivity to transform settings, not a statistical error bar or a species-resolved coordination number. |
 | `--pair-panels` | One small panel per element pair for the partial g(r) (`analysis_rdf_panels.png`) and, with `--sq-partials`, for S_ab(q) (`analysis_sq_partials_panels.png`). |
 | `--total-cn SPEC` | Total first-shell coordination of one element over several partner types, repeatable: `O` counts every bonded partner, `O:In+Ga` only the named ones. Printed, and plotted as `analysis_cn_total.png` + CSV. |
 | `--check-dimers` | Report unphysical close contacts (O–O peroxide, N–N) per structure. |
@@ -787,7 +599,9 @@ amorphgen --analyse \
 
 ## Outputs explained
 
-For each ensemble, ``--analyse --save-plot DIR`` writes:
+For each ensemble, ``--analyse --save-plot DIR`` writes the applicable files
+below. PDF copies require ``--save-pdf``; optional descriptors require the
+listed flags.
 
 | File | What's in it |
 |---|---|
@@ -800,9 +614,10 @@ For each ensemble, ``--analyse --save-plot DIR`` writes:
 | `analysis_cn_total.png` / `.csv` | With ``--total-cn``: one panel per requested total (``O``, ``O:In+Ga``). |
 | `analysis_angles.png` / `.pdf` | Bond-angle histograms (normalised). One line per triplet. |
 | `analysis_angles.csv` | Raw angle values, one row per triplet observation. |
-| `analysis_density.png` / `.pdf` | Per-structure density violin with jittered scatter and mean ± std label. |
-| `analysis_density.csv` | One row per structure: ``structure_index, density_g_per_cm3``. |
-| `analysis_sq.png` / `.pdf`, `analysis_sq.csv` | With ``--sq``: S(q) and, for the direct method, the raw un-smoothed values and the number of q-vectors per bin. |
+| `analysis_density.png` / `.pdf` | Per-structure density violin with jittered scatter and mean ± std label (at least two structures). |
+| `analysis_density.csv` | One row per structure: ``structure_index, density_g_per_cm3`` (at least two structures). |
+| `analysis_sq.png` / `.pdf`, `analysis_sq.csv` | With ``--sq``: S(q) and, for the direct method, the number of q-vectors per bin; raw values are also saved when smoothing is enabled. |
+| `analysis_tr.png` / `.pdf`, `analysis_tr.csv` | With ``--tr``: the total correlation function and its scattering-weighted g(r) and reduced PDF G(r). |
 | `analysis_rings.png` / `.csv` | With ``--rings``: ring-size distribution (size, count, percent of edges). |
 | `analysis_voronoi.csv` | With ``--voronoi``: the ten most common Voronoi indices with counts and percentages. |
 | `analysis_connectivity.csv` | With ``--connectivity``: corner/edge/face link percentages and the edge-sharing cation fraction, overall and per structure. |
@@ -815,8 +630,8 @@ comparison workflow:
 ```python
 from amorphgen.analysis import StructureAnalyser
 
-sa = StructureAnalyser("hybrid_ga2o3/random_opt/")   # accepts a dir OR list of files
-sa.summary()                                         # print structural summary
+sa = StructureAnalyser("hybrid_ga2o3/final/")   # accepts a dir OR list of files
+sa.summary()                                # prints and returns the structural summary
 
 # Individual descriptors
 rho = sa.density()
@@ -837,7 +652,7 @@ print(sq["q"], sq["s_q"], sq["partials"]["Ga-Ga"])
 
 # Multi-ensemble comparison
 from amorphgen.analysis import EnsembleSpec, compare_ensembles
-compare_ensembles(...)        # see "Compare multiple ensembles" tab above
+# Call compare_ensembles with the arguments in "Compare multiple ensembles" above.
 
 # Validate against reference
 from amorphgen.analysis import validate_against_reference, format_validation_report
@@ -865,7 +680,7 @@ If your structures are in VASP or CIF format, they don't carry energy
 in their headers. AmorphGen falls back to reading ``random_gen.log``
 in the parent directory (the file written by ``amorphgen --random-gen
 --relax``). If you've moved the structures away from their original
-``--random-gen`` output, copy the log alongside them, or use
+``--random-gen`` output, place the log in their parent directory, or use
 ``--format xyz`` / ``--format extxyz`` (which embed energy in the
 comment line) when generating.
 
@@ -874,12 +689,14 @@ comment line) when generating.
 That's an analysis artifact. Same-element pairs in multi-element ionic
 compounds (Si–Si in SiO₂, Hf–Hf in HfO₂, Ga–Ga in Ga₂O₃) are
 **second-shell contacts mediated through the anion**, not first-shell
-bonds. From v1.0.0+ they're excluded from bond-angle triplets
-automatically. For coordination, you can ignore the X–X mean, the
-relevant CN for AB systems is A–B and B–A.
+bonds. They are listed under `Non-bonded contacts` and excluded from
+bonding coordination, total coordination, bond-angle triplets and the
+CN plot. For SiO₂, the relevant bonding CNs are Si–O and O–Si. In
+a-Si and a-Si:H, however, Si–Si is a host-network bond and is included.
 
 ### "RDF goes to zero suddenly at large r"
 
-That's the auto-detected ``rmax`` (half the smallest cell vector). RDFs
-beyond half the cell can't be computed correctly under periodic
-boundary conditions. To extend, generate with a larger cell.
+Check the plotted r range and the cell size. The default `rmax` is half
+the smallest cell-vector length, rounded down to 0.1 Å. Extending the
+range can introduce correlations from periodic replicas; use a larger
+cell to investigate longer-range structure.

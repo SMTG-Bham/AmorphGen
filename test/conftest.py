@@ -1,26 +1,13 @@
-"""
-tests/conftest.py
------------------
-Shared pytest fixtures for amorphgen tests.
+"""Shared fixtures and opt-in model tests.
 
-Tiers:
-  Tier 1 – Pure unit tests (no calculator needed)
-  Tier 2 – Integration tests with ASE's EMT calculator (no GPU)
-  Tier 3 – Full MACE/CHGNet/M3GNet tests (@pytest.mark.mace, etc.)
-
-Usage:
-    pytest                        # Tiers 1 + 2
-    pytest -m mace --run-mace     # Tier 3 MACE tests
+The default suite runs core tests and any installed optional CPU backends.
+CUDA tests require suitable hardware; real MACE tests additionally require
+``--run-mace`` because they can download a foundation model.
 """
 
-import os
-import shutil
-import tempfile
-import pytest
-import numpy as np
 import matplotlib
+import pytest
 
-from ase import Atoms
 from ase.build import bulk
 from ase.calculators.emt import EMT
 
@@ -34,7 +21,7 @@ matplotlib.use("Agg")
 
 def pytest_addoption(parser):
     parser.addoption("--run-mace", action="store_true", default=False,
-                     help="Run tests requiring real MACE model (GPU + internet)")
+                     help="Run real MACE tests (may download models; GPU recommended)")
 
 
 def pytest_configure(config):
@@ -45,19 +32,17 @@ def pytest_collection_modifyitems(config, items):
     if not config.getoption("--run-mace"):
         skip = pytest.mark.skip(reason="Pass --run-mace to run")
         for item in items:
-            if "mace" in item.keywords:
+            if item.get_closest_marker("mace") is not None:
                 item.add_marker(skip)
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture
-def tmp_work_dir(tmp_path):
+def tmp_work_dir(tmp_path, monkeypatch):
     """Provide a clean temporary working directory."""
-    old = os.getcwd()
-    os.chdir(tmp_path)
-    yield tmp_path
-    os.chdir(old)
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
 
 
 @pytest.fixture

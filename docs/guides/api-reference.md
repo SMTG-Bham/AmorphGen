@@ -1,6 +1,7 @@
 # CLI & Python API Reference
 
-Complete reference for all AmorphGen commands and Python API.
+Common CLI workflows and Python API examples. Use `amorphgen --help` for
+all CLI options and the {doc}`/api/cli` page for generated API documentation.
 
 ## CLI Commands
 
@@ -49,14 +50,14 @@ amorphgen --batch-opt --input-dir random_structures/random_initial/ \
 amorphgen --batch-opt --input-dir random_structures/random_initial/ \
           --cell-filter cubic
 
-# Cell filter options: FrechetCellFilter (default), UnitCellFilter,
-#                      ExpCellFilter, StrainFilter, cubic, none
+# Cell filter options: cubic (batch-opt CLI default), FrechetCellFilter,
+#                      UnitCellFilter, ExpCellFilter, StrainFilter, none
 ```
 
 ### Batch Quench
 
 ```bash
-# Extract snapshots from high-T trajectory and quench each independently
+# Select existing snapshots and quench each independently
 amorphgen --batch-quench \
           --snapshot-dir snapshots/ \
           --n-runs 20 \
@@ -100,11 +101,11 @@ amorphgen POSCAR --model chgnet --device cpu \
 ### Structure Analysis
 
 ```bash
-# Auto cutoff (default, fast)
+# RDF-based auto cutoff (default)
 amorphgen --analyse --input-dir optimised/
 
-# RDF-based auto cutoff (more accurate)
-amorphgen --analyse --input-dir optimised/ --cutoff auto-rdf
+# Radii-based auto cutoff (faster heuristic)
+amorphgen --analyse --input-dir optimised/ --cutoff auto
 
 # Manual cutoff
 amorphgen --analyse --input-dir optimised/ --cutoff 2.2
@@ -141,7 +142,7 @@ atoms = generate_random(
     composition={"Si": 16, "O": 32},  # atom counts (use CLI for formula format)
     target_density=2.2,             # g/cm3 (optional, auto-estimated if omitted)
     target_cn={"Si": 4, "O": 2},    # coordination-aware placement + CN-aware radii (optional)
-    cn_tolerance=0,                  # 0=strict (default), 1=allow +1 over-CN
+    cn_tolerance=0,                  # 0=no over-CN, 1=allow +1 (not a lower bound)
     seed=42,
     # minsep={"Si-O": 1.6},         # custom minsep (overrides auto if given)
     # dmax={"Si-O": 2.1},           # custom bonding shell (auto if None)
@@ -158,7 +159,7 @@ paths = batch_random(
     output_format="xyz",            # xyz (.xyz, extxyz format), vasp, cif
     target_density=2.2,
     target_cn={"Si": 4, "O": 2},
-    cn_tolerance=1,                  # allow +1 for tighter CN matching
+    cn_tolerance=1,                  # allow +1 over the target during placement
     seed=42,
     relax=True,
     calc=calc,
@@ -301,7 +302,7 @@ calc = get_calculator(model="chgnet", device="cpu")
 
 batch_quench.run(
     snapshot_files=["snap_0.xyz", "snap_1.xyz"],
-    n_runs=20,
+    n_runs=2,
     select="uniform",
     work_dir="batch_run",
     stages=[5, 6, 7],
@@ -330,6 +331,9 @@ list_models()
 ---
 
 ## YAML Config Reference
+
+This is an example configuration, not a dump of all package defaults.
+See {doc}`yaml-config` for merging rules and per-stage overrides.
 
 ```yaml
 # -- Model --
@@ -399,14 +403,14 @@ random_gen:
   target_cn:                 # optional, enables coordination-aware placement
     Si: 4
     O: 2
-  cn_tolerance: 0            # 0=strict (default), 1=allow +1 over-coordination
+  cn_tolerance: 0            # strict upper target; 1 allows +1 over-coordination
   output_format: xyz         # xyz (.xyz, extxyz format), vasp, cif
   relax: true                # optimise after generation
   cell_filter: cubic         # cell constraint for relaxation
 
 # -- Analysis (used with --analyse) --
 analysis:
-  cutoff: auto               # auto, auto-rdf, or float
+  cutoff: auto-rdf           # default; auto, float or per-pair overrides also accepted
   save_report: report.txt
   save_plot: plots/
   rdf_pairs:
@@ -425,89 +429,59 @@ analysis:
 |:---:|--------|-------------|-------------|
 | 1 | `opt_cell.py` | Structure optimisation | `stage1_opt.{log,cif,xyz}` |
 | 2 | `equilibrate.py` | Pre-melt equilibration | `stage2_eq.{log,xyz}` |
-| 3 | `melt_cell.py` | Heating ramp | `stage3_melt.{log,xyz}` |
+| 3 | `melt_cell.py` | Heating ramp | `stage3_melt.log`, `stage3_melted.xyz` |
 | 4 | `equilibrate.py` | High-T equilibration | `stage4_eq.{log,xyz}` |
-| 5 | `quench.py` | Cooling ramp | `stage5_quench.{log,xyz}` |
+| 5 | `quench.py` | Cooling ramp | `stage5_quench.log`, `stage5_quenched.xyz` |
 | 6 | `equilibrate.py` | Low-T equilibration | `stage6_eq.{log,xyz}` |
 | 7 | `final_opt.py` | Final optimisation | `stage7_opt.{log,cif,xyz}` |
 
-Additional output: `pipeline_summary.log` with per-stage timing.
+MD stages also write `stage2_eq_traj.xyz`, `stage3_melt_traj.xyz`,
+`stage4_eq_traj.xyz`, `stage5_quench_traj.xyz` and `stage6_eq_traj.xyz`.
+The pipeline writes `pipeline_summary.log` with per-stage timing.
 
 ## Default Output Directories
 
 | Mode | Default `--work-dir` |
 |------|---------------------|
 | Pipeline | `melt_quench_run/` |
-| `--random-gen --composition X=n,Y=m` | `random_XnYm/` (auto from formula) |
+| `--random-gen --composition X=n,Y=m` | `random_<Hill formula>/` (derived from atom counts) |
+| `--random-gen` with formula syntax or YAML composition | `random_structures/` |
 | `--batch-quench` | `batch_quench/` |
 | `--batch-opt` | `batch_opt/` |
+| `--mq-ensemble` | `mq_ensemble_run/` |
+| `--hybrid-ensemble` | `hybrid_run/` |
 
 ## Random Generation: Automated Defaults
 
-All parameters are auto-detected from the composition. No manual tuning needed.
+Composition-derived defaults provide a starting point; they do not guarantee
+a validated density or coordination distribution.
 
-### Minsep (minimum interatomic distances)
+- **Minimum separations:** bond classification selects Shannon ionic, Cordero
+  covalent or metallic radii, with separate handling for anion packing and
+  cation–cation contacts. Explicit `--target-cn` also selects CN-aware radii.
+- **Density:** material classes select a radius source and packing factor. For
+  example, `group_iv` uses Cordero radii at packing factor 0.30, `metal_oxide`
+  uses Shannon CN6 at 0.52, and `rutile_dioxide` uses Shannon CN6 at 0.66.
+  Set `--target-density` when a validated density is available.
+- **Coordination:** targets and over-coordination tolerance are derived from
+  the material class unless overridden. SC biases placement toward those
+  targets; under-coordinated sites can remain. Use `--no-sc` to disable it.
+- **Placement stalls:** `--retry-mode expand` (default) first attempts soft
+  packing, then expands the cell if needed. `reduce-minsep` preserves the cell
+  while softening non-bonded separations; `none` preserves both. A batch can
+  retry with other seeds and ultimately skip structures that cannot be placed.
 
-| Bond type | Scale factor | Radius source |
-|-----------|-------------|---------------|
-| Ionic (M-O, M-Cl) | 0.80 | Shannon ionic (CN from auto SC) |
-| Covalent (Si-Si) | 0.80 | Metallic radii |
-| Metallic (M-M) | 0.85 | max(metallic, sqrt(2)*d(M-X)*0.85), cap 2.80 A |
-| Small anion (O-O, F-F) | 0.80 | Shannon ionic |
-| Large anion (Cl-Cl, Br-Br) | 0.70 | Shannon ionic |
-
-### Density estimation
-
-| Material class | Method | Packing factor |
-|----------------|--------|----------------|
-| Group IV (Si, Ge, SiGe) | Elemental density * 0.80 | -- |
-| Pnictide (GaAs, InP) | Elemental density * 0.80 | -- |
-| Chalcogenide (ZnS, CdTe, GeTe) | Elemental density * 0.80 | -- |
-| Carbide (SiC, TiC) | Elemental density * 0.80 | -- |
-| Boride (TiB2, LaB6) | Elemental density * 0.80 | -- |
-| Alloy (NiTi, CuZn) | Elemental density * 0.80 | -- |
-| Covalent oxide (SiO2, GeO2, B2O3) | Shannon CN=6 sphere packing | 0.50 |
-| Metal oxide (In2O3, TiO2, Al2O3) | Shannon CN=6 sphere packing | 0.52 |
-| Halide (Li2ZrCl6, LiF, NaCl) | Shannon CN=6 sphere packing | 0.58 |
-| Nitride (AlN, GaN, Si3N4) | Shannon CN=6 sphere packing | 0.52 |
-| Hydride (LiH, MgH2) | Shannon CN=6 sphere packing | 0.55 |
-| Hydrogenated network (a-Si:H, a-C:H, a-SiC:H) | Cordero sphere packing, H 0.90 A | H-free host's (0.28-0.32) |
-
-### Coordination-aware placement (auto coordination targeting)
-
-| Material class | Target CN | Tolerance | Accepts |
-|----------------|-----------|-----------|---------|
-| Covalent oxide (Si, Ge, B) | 4 | 0 | 4 only |
-| Metal oxide (In, Ti, Al, Zn) | 5 | 1 | 4-6 |
-| Nitride (AlN, GaN) | 4 | 0 | 4 only |
-| Halide (NaCl, LiF) | 6 | 0 | 6 only |
-| Chalcogenide (ZnS, CdTe) | 4-6 | 0 | tetrahedral or octahedral |
-| Carbide (SiC, TiC) | 4-6 | 0 | metalloid=4, metal=6 |
-| Hydride (LiH, MgH2) | 6 | 0 | 6 only |
-| Hydrogenated network (a-Si:H, a-C:H) | host 4, H 1 | 0 | 4 / 1 only |
-| Boride (TiB2) | 6 | 0 | 6 only |
-| Pnictide (GaAs, InP) | 4 | 0 | 4 only |
-| Group IV (Si, Ge) | 4 | 0 | 4 only |
-| Alloy (NiTi, CuZn) | -- | -- | no SC |
-
-### Auto-retry on placement failure
-
-1. Reduce M-M minsep by 5% (retry)
-2. Reduce M-M minsep by 10% (retry)
-3. Reduce M-M minsep by 15% (retry)
-4. Reduce M-M minsep by 20% (retry)
-5. Skip and warn
-
-All defaults can be overridden via CLI flags (`--target-cn`, `--cn-tolerance`,
-`--minsep`, `--target-density`) or YAML config.
+See {doc}`random-generation` for the material-class tables, per-pair rules
+and retry policies. Override them through `--target-cn`, `--cn-tolerance`,
+`--minsep`, `--target-density`, `--retry-mode` or the `random_gen:` YAML block.
 
 ## Cell Filter Options
 
 | Value | Description |
 |-------|-------------|
-| `FrechetCellFilter` | Default. Riemannian metric, best convergence for non-cubic cells |
+| `FrechetCellFilter` | Full cell and position relaxation; default for the melt-quench pipeline |
 | `UnitCellFilter` | Classic ASE filter, relaxes full cell in Cartesian |
 | `ExpCellFilter` | Exponential cell filter; deprecated in ASE 3.23 in favour of `FrechetCellFilter`, which corrects its cell gradients |
 | `StrainFilter` | Relaxes cell via strain tensor only (no positions) |
-| `cubic` | Isotropic volume only (keeps a=b=c, 90 deg angles) |
+| `cubic` | Isotropic volume relaxation that preserves the input cell shape; a cubic input stays cubic. Default for the random-gen, batch-opt and hybrid CLI modes |
 | `none` | Fixed cell, positions only |

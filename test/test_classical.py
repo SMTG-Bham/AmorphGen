@@ -32,6 +32,7 @@ class TestLennardJonesCalculator:
         )
         e = a.get_potential_energy()
         assert e == pytest.approx(-eps, abs=1e-3)
+        np.testing.assert_allclose(a.get_forces(), 0.0, atol=1e-12)
 
     def test_dimer_at_sigma_is_zero_energy(self):
         """Two atoms at r = sigma → V = 0 (LJ crosses zero)."""
@@ -120,8 +121,7 @@ class TestBuckinghamCalculator:
         f_numeric = -(e_plus - e_minus) / (2 * delta)
         a.positions[1, 0] += delta   # restore
 
-        # Should agree to ~3 decimal places for this finite-difference step.
-        assert f_analytic == pytest.approx(f_numeric, rel=0.05, abs=1e-2)
+        assert f_analytic == pytest.approx(f_numeric, rel=1e-5, abs=1e-4)
 
     def test_zero_charge_atom_pair_is_buckingham_only(self):
         """If both atoms have charge=0, only Buckingham contributes (no Coulomb)."""
@@ -135,9 +135,15 @@ class TestBuckinghamCalculator:
         a = Atoms("Ar2", positions=[(0, 0, 0), (3.0, 0, 0)],
                    cell=[20, 20, 20], pbc=True)
         a.calc = calc
-        e = a.get_potential_energy()
-        # Only Buckingham term active; should still be a finite real number.
-        assert np.isfinite(e)
+        # Analytic Buckingham pair energy and force at r = 3 A.
+        r = 3.0
+        expected_energy = 1000.0 * np.exp(-r / 0.3) - 50.0 / r**6
+        expected_force = 1000.0 / 0.3 * np.exp(-r / 0.3) - 6 * 50.0 / r**7
+        assert a.get_potential_energy() == pytest.approx(expected_energy)
+        np.testing.assert_allclose(
+            a.get_forces(), [[-expected_force, 0, 0], [expected_force, 0, 0]],
+            atol=1e-12,
+        )
 
     def test_coulomb_disabled_by_flag(self):
         """coulomb=False suppresses Coulomb regardless of charges."""
@@ -154,6 +160,8 @@ class TestBuckinghamCalculator:
                    cell=[20, 20, 20], pbc=True)
         a.calc = calc
         e_no_coul = a.get_potential_energy()
+        expected_buckingham = 18003.76 * np.exp(-1.6 / 0.2052) - 133.54 / 1.6**6
+        assert e_no_coul == pytest.approx(expected_buckingham)
 
         calc2 = BuckinghamCalculator(
             params={("Si", "O"): {"A": 18003.76, "rho": 0.2052, "C": 133.54},

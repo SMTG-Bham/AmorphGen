@@ -4,10 +4,28 @@ tests/test_equilibration.py
 Tests for equilibration convergence analysis.
 """
 
-import os
 import pytest
 import numpy as np
-import tempfile
+
+
+@pytest.fixture
+def write_energy_log(tmp_path):
+    """Write deterministic energy samples in the stage log format."""
+    def write_log(energies):
+        logfile = tmp_path / "energy.log"
+        rows = [
+            "Step Time_ps T_K Epot_eV Ekin_eV Etot_eV Vol_A3",
+            "-" * 80,
+        ]
+        rows.extend(
+            f"{i * 100} {i * 0.1:.4f} 3000.0 {energy:.8f} "
+            f"10.0 {energy + 10:.8f} 500.0"
+            for i, energy in enumerate(energies)
+        )
+        logfile.write_text("\n".join(rows) + "\n")
+        return str(logfile)
+
+    return write_log
 
 
 class TestParseMdLog:
@@ -41,12 +59,6 @@ class TestParseMdLog:
         assert data["Epot_eV"][0] == -200.0
         assert data["T_K"][0] == 3000.0
 
-    def test_parse_skips_headers(self, sample_log):
-        from amorphgen.utils.equilibration import parse_md_log
-        data = parse_md_log(sample_log)
-        # Should not include header or separator lines
-        assert len(data["step"]) == 6
-
     def test_parse_with_temperature_markers(self, tmp_path):
         """Log with '-> T = ...' lines (from quench stage)."""
         logfile = tmp_path / "quench.log"
@@ -59,71 +71,34 @@ class TestParseMdLog:
         )
         from amorphgen.utils.equilibration import parse_md_log
         data = parse_md_log(str(logfile))
-        assert len(data["step"]) == 2
+        np.testing.assert_array_equal(data["step"], [0, 100])
+        np.testing.assert_allclose(data["T_K"], [3000.0, 2800.0])
 
 
 class TestBlockAverage:
 
-    def test_equilibrated_signal(self):
-        """Constant energy should pass block average test."""
+    def test_equilibrated_signal(self, write_energy_log):
+        """Equal block means with finite fluctuations should pass."""
         from amorphgen.utils.equilibration import block_average_test
-        # Create a fake log with constant energy
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.log', delete=False) as f:
-            f.write("    Step     Time_ps       T_K       Epot_eV       Ekin_eV       Etot_eV      Vol_A3\n")
-            f.write("-" * 80 + "\n")
-            for i in range(100):
-                e = -200.0 + np.random.normal(0, 0.1)
-                f.write(f"  {i*100:6d}  {i*0.1:10.4f}  3000.0  {e:12.4f}  10.0000  {e+10:12.4f}  500.00\n")
-            logfile = f.name
+        logfile = write_energy_log(-200.0 + np.tile([-0.1, 0.1], 40))
+        is_eq, bd = block_average_test(
+            logfile, n_atoms=40, n_blocks=4, discard_fraction=0.0,
+        )
+        assert is_eq is True
+        assert bd["is_equilibrated"] is True
+        np.testing.assert_allclose(bd["block_means"], [-5.0] * 4)
+        assert bd["overall_mean"] == pytest.approx(-5.0)
+        assert bd["max_deviation"] < bd["threshold"]
 
-        try:
-            is_eq, bd = block_average_test(logfile, n_atoms=40, n_blocks=4)
-            # With random noise around a constant, should pass
-            assert isinstance(is_eq, bool)
-            assert "block_means" in bd
-            assert "overall_mean" in bd
-            assert len(bd["block_means"]) == 4
-        finally:
-            os.unlink(logfile)
-
-    def test_drifting_signal_fails(self):
+    def test_drifting_signal_fails(self, write_energy_log):
         """Linearly drifting energy should fail block average test."""
         from amorphgen.utils.equilibration import block_average_test
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.log', delete=False) as f:
-            f.write("    Step     Time_ps       T_K       Epot_eV       Ekin_eV       Etot_eV      Vol_A3\n")
-            f.write("-" * 80 + "\n")
-            for i in range(100):
-                e = -200.0 - i * 0.5  # strong drift
-                f.write(f"  {i*100:6d}  {i*0.1:10.4f}  3000.0  {e:12.4f}  10.0000  {e+10:12.4f}  500.00\n")
-            logfile = f.name
-
-        try:
-            is_eq, bd = block_average_test(logfile, n_atoms=40, n_blocks=4)
-            assert is_eq is False
-        finally:
-            os.unlink(logfile)
-
-
-class TestEnergyConvergence:
-
-    def test_plot_from_log(self, tmp_path):
-        from amorphgen.utils.equilibration import plot_energy_convergence
-        logfile = tmp_path / "test.log"
-        logfile.write_text(
-            "    Step     Time_ps       T_K       Epot_eV       Ekin_eV       Etot_eV      Vol_A3\n"
-            "------------------------------------------------------------------------------------\n"
-        )
-        with open(logfile, "a") as f:
-            for i in range(50):
-                e = -200.0 + np.random.normal(0, 0.1)
-                f.write(f"  {i*100:6d}  {i*0.1:10.4f}  3000.0  {e:12.4f}  10.0000  {e+10:12.4f}  500.00\n")
-
-        fig, drift = plot_energy_convergence(str(logfile), n_atoms=40)
-        assert isinstance(drift, float)
-        import matplotlib.pyplot as plt
-        plt.close(fig)
+        logfile = write_energy_log(-200.0 - np.arange(100) * 0.5)
+        is_eq, bd = block_average_test(logfile, n_atoms=40, n_blocks=4)
+        assert is_eq is False
+        assert bd["is_equilibrated"] is False
+        assert bd["max_deviation"] > bd["threshold"]
+        assert np.all(np.diff(bd["block_means"]) < 0)
 
 
 class TestRunningAverage:
@@ -132,10 +107,7 @@ class TestRunningAverage:
         from amorphgen.utils.equilibration import running_average
         data = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
         avg = running_average(data, 3)
-        assert len(avg) == len(data)
-        # Window of 3 on [1,2,3,4,5]: valid results are [2,3,4]
-        # With edge padding, middle value should be 3.0
-        assert abs(avg[2] - 3.0) < 0.01
+        np.testing.assert_allclose(avg, [2.0, 2.0, 3.0, 4.0, 4.0])
 
     def test_window_larger_than_data(self):
         from amorphgen.utils.equilibration import running_average
@@ -173,8 +145,9 @@ class TestMSD:
             frames.append(atoms)
 
         time_ps, msd = compute_msd(frames, timestep_fs=1.0)
-        # MSD should increase over time
-        assert msd["all"][-1] > msd["all"][0]
+        # Half the equal-mass atoms move by d, so each is displaced by d/2
+        # relative to the centre of mass.
+        np.testing.assert_allclose(msd["all"], (np.arange(20) * 0.05) ** 2)
 
     def test_rigid_drift_is_not_diffusion(self):
         """A drift of the whole system (the Langevin thermostat leaves the
@@ -240,59 +213,76 @@ class TestPartialRdfNormalisation:
 # ─── Extra coverage: plot helpers + compute_cn_vs_time + convergence_report
 
 class TestPlotEnergyConvergence:
-    """Plot helpers should run without raising — even if no display backend."""
-    def test_runs_on_log(self, tmp_path):
+    """Log times and atom counts set the units of the reported drift."""
+
+    @pytest.mark.parametrize("per_atom, expected_drift", [(True, -0.125), (False, -5.0)])
+    def test_drift_from_log(self, write_energy_log, per_atom, expected_drift):
+        import matplotlib.pyplot as plt
         from amorphgen.utils.equilibration import plot_energy_convergence
-        log = tmp_path / "stage_eq.log"
-        log.write_text(
-            "Step  Time(ps)  T(K)  Epot(eV)  Ekin(eV)  Etot(eV)  Vol(A^3)\n"
-            + "\n".join(f"  {k:3d}  {k*0.001:.3f}  300  {-50.0 - 0.01*k:.4f}  10.0  -40.0  500"
-                       for k in range(40))
+        energies = -200.0 - np.arange(50) * 0.5
+        log = write_energy_log(energies)
+        fig, drift = plot_energy_convergence(
+            log, timestep_fs=1.0, window_ps=0.5, n_atoms=40,
+            per_atom=per_atom,
         )
-        ax = plot_energy_convergence(str(log), timestep_fs=1.0,
-                                      window_ps=0.005, n_atoms=8)
-        assert ax is not None
+        try:
+            assert drift == pytest.approx(expected_drift)
+            raw = fig.axes[0].lines[0]
+            np.testing.assert_allclose(raw.get_xdata(), np.arange(50) * 0.1)
+            np.testing.assert_allclose(raw.get_ydata(), energies / (40 if per_atom else 1))
+        finally:
+            plt.close(fig)
 
 
 class TestPlotBlockAverages:
     def test_renders_without_error(self):
+        import matplotlib.pyplot as plt
         from ase import Atoms
+        from ase.calculators.singlepoint import SinglePointCalculator
         from amorphgen.utils.equilibration import plot_block_averages
 
-        # Reuse the FakeAtoms-style construction inline:
-        class _FA(Atoms):
-            def __init__(self, e):
-                super().__init__("Si4",
-                                 positions=[[0,0,0],[1,0,0],[0,1,0],[0,0,1]],
-                                 cell=[5,5,5], pbc=True)
-                self.info["energy"] = e
-            def get_potential_energy(self, *a, **kw):
-                return self.info["energy"]
-
-        import numpy as _np
-        rng = _np.random.default_rng(0)
-        atoms = [_FA(-50 + rng.normal(0, 0.05)) for _ in range(60)]
-        ax = plot_block_averages(atoms, n_blocks=4, discard_fraction=0.1,
-                                  timestep_fs=1.0, n_atoms=4)
-        assert ax is not None
+        frames = []
+        for energy in -50.0 + np.tile([-0.1, 0.1], 40):
+            atoms = Atoms("Si4", positions=[[0,0,0],[1,0,0],[0,1,0],[0,0,1]],
+                          cell=[5,5,5], pbc=True)
+            atoms.calc = SinglePointCalculator(atoms, energy=energy)
+            frames.append(atoms)
+        fig, is_eq, data = plot_block_averages(
+            frames, n_blocks=4, discard_fraction=0.0, timestep_fs=1.0,
+        )
+        try:
+            assert is_eq is True
+            np.testing.assert_allclose(data["block_means"], [-12.5] * 4)
+            assert fig.axes[0].get_title() == "Block average test: EQUILIBRATED"
+            assert len(fig.axes[0].collections) == 4
+        finally:
+            plt.close(fig)
 
 
 class TestPlotMsd:
     def test_runs_on_drifting_traj(self):
+        import matplotlib.pyplot as plt
         from ase import Atoms
-        import numpy as _np
         from amorphgen.utils.equilibration import plot_msd
 
         frames = []
-        for k in range(15):
-            pos = _np.array([[0,0,0],[2,0,0],[0,2,0],[0,0,2]], dtype=float) + 0.1 * k
+        for k in range(30):
+            pos = np.array([[0,0,0],[2,0,0],[0,2,0],[0,0,2]], dtype=float) + 0.1 * k
             frames.append(Atoms("Si4", positions=pos, cell=[10,10,10], pbc=True))
-        ax = plot_msd(frames, timestep_fs=1.0)
-        assert ax is not None
+        fig, diffusion = plot_msd(frames, timestep_fs=1.0)
+        try:
+            assert set(diffusion) == {"all", "Si"}
+            assert diffusion == pytest.approx({"all": 0.0, "Si": 0.0}, abs=1e-12)
+            assert {line.get_label() for line in fig.axes[0].lines} == {"all", "Si"}
+            for line in fig.axes[0].lines:
+                np.testing.assert_allclose(line.get_ydata(), 0.0, atol=1e-12)
+        finally:
+            plt.close(fig)
 
 
 class TestPlotTemperature:
     def test_runs_on_log(self, tmp_path):
+        import matplotlib.pyplot as plt
         from amorphgen.utils.equilibration import plot_temperature
         log = tmp_path / "tlog.log"
         log.write_text(
@@ -300,8 +290,14 @@ class TestPlotTemperature:
             + "\n".join(f"  {k:3d}  {k*0.001:.3f}  {300+k*5}  -50.0  10.0  -40.0  500"
                        for k in range(20))
         )
-        ax = plot_temperature(str(log), timestep_fs=1.0, T_target=400)
-        assert ax is not None
+        fig = plot_temperature(str(log), timestep_fs=1.0, T_target=400)
+        try:
+            raw, _, target = fig.axes[0].lines
+            np.testing.assert_allclose(raw.get_xdata(), np.arange(20) * 0.001)
+            np.testing.assert_allclose(raw.get_ydata(), 300 + np.arange(20) * 5)
+            np.testing.assert_allclose(target.get_ydata(), [400, 400])
+        finally:
+            plt.close(fig)
 
 
 class TestComputeCnVsTime:
@@ -347,12 +343,20 @@ class TestConvergenceReport:
         )
 
         out_dir = tmp_path / "report"
-        convergence_report(
+        report = convergence_report(
             str(log),
             timestep_fs=1.0,
             T_target=300,
             n_atoms=6,
             output_dir=str(out_dir),
         )
-        assert out_dir.exists()
-        assert any(out_dir.iterdir())
+        assert report["n_frames"] == 80
+        assert report["n_atoms"] == 6
+        assert report["total_time_ps"] == pytest.approx(0.079)
+        assert report["energy_drift_eV_per_atom_per_ps"] == pytest.approx(-5.0 / 6)
+        assert report["block_test_passed"] is False
+        assert {path.name for path in out_dir.iterdir()} == {
+            "convergence_energy.png", "convergence_blocks.png",
+            "convergence_temperature.png", "convergence_report.txt",
+        }
+        assert (out_dir / "convergence_report.txt").read_text() == report["summary_text"]

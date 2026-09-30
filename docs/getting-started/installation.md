@@ -2,25 +2,29 @@
 
 ## Requirements
 
-- Python 3.10 to 3.14. CHGNet publishes wheels up to 3.12 only; on 3.13 and
-  3.14 pip compiles it from source, which needs a C compiler.
-- ASE (Atomic Simulation Environment)
+- Linux or macOS. Windows is not supported natively; use
+  [WSL](https://learn.microsoft.com/windows/wsl/) instead.
+- Python 3.10+ for the base package. Optional backends may impose additional
+  Python-version or build requirements. The supplied standard conda environment
+  allows Python 3.10–3.12; the development environment requires 3.12 for torch-sim.
+- Core dependencies, including ASE, are installed automatically by pip
 - An MLIP backend **only** for MLIP relaxation / melt-quench MD; the base
   install is deliberately torch-free
-- A C/C++ compiler **only** for the torch-sim engine
+- A C/C++ compiler for the torch-sim engine (and any dependency built from source)
   ([see below](#the-torch-sim-engine))
 
 ## Pick the install for your task
 
 | I want to… | Install |
 |---|---|
-| generate random structures, analyse trajectories (RDF, CN, S(q), plots), classical LJ/Buckingham pipelines | `pip install amorphgen` (~80 MB, no PyTorch) |
-| MLIP relaxation & melt-quench MD | `pip install "amorphgen[mace]"` or `"amorphgen[chgnet]"` |
-| everything (MACE + CHGNet) | `pip install "amorphgen[all]"` |
+| generate random structures, analyse trajectories (RDF, CN, S(q), plots), classical LJ/Buckingham pipelines | `pip install amorphgen` (no PyTorch) |
+| MLIP relaxation & melt-quench MD | `pip install "amorphgen[mace]"` or `pip install "amorphgen[chgnet]"` |
+| MACE + CHGNet | `pip install "amorphgen[all]"` |
 | batched GPU relaxation and MD of ensembles (`--engine torchsim`) | `pip install "amorphgen[mace,torchsim]"` (Python 3.12+, and a C/C++ compiler) |
 
-On a torch-free install, `--device auto` resolves to CPU and any
-calculator-requiring command fails fast with the exact install line to copy.
+On a torch-free install, `--device auto` resolves to CPU. Classical potentials
+work on CPU without PyTorch; commands requesting an unavailable MLIP backend report
+the required install command.
 `amorphgen --list-models` shows every model with installed/missing markers.
 
 ## Install from PyPI
@@ -46,13 +50,10 @@ pip install "amorphgen[mace,chgnet]"
 # SevenNet + CHGNet (alternative env for SevenNet users)
 pip install "amorphgen[sevennet,chgnet]"
 
-# Conflict-free convenience bundle (MACE + CHGNet + analysis)
+# Convenience bundle: MACE + CHGNet (analysis is included in the base package)
 pip install "amorphgen[all]"
 
-# Development install
-pip install "amorphgen[all,dev]"
-
-# torch-sim engine for batched ensembles on a GPU (Python 3.12+, add to any MLIP extra)
+# torch-sim with MACE (Python 3.12+; also supports SevenNet or Lennard-Jones)
 pip install "amorphgen[mace,torchsim]"
 ```
 
@@ -86,10 +87,12 @@ See {doc}`../guides/backends` for the full explanation of the conflict.
 ### The torch-sim engine
 
 The `[torchsim]` extra adds a second execution engine (`--engine torchsim`)
-that relaxes, anneals and quenches all structures of an ensemble in one
-batched call. It needs Python 3.12 and a CUDA GPU or CPU (Apple MPS is not
-supported) and works with MACE, SevenNet and Lennard-Jones. Everything else
-runs unchanged on the default ASE engine. See {doc}`../guides/backends`.
+for `--random-gen --relax`, `--batch-opt` and `--hybrid-ensemble`. It batches
+relaxations and supports NVT annealing and quenching in the hybrid workflow.
+It needs Python 3.12+ and a CUDA GPU or CPU (Apple MPS is not supported), and
+works with MACE, SevenNet and Lennard-Jones. CHGNet and Buckingham use the
+default ASE engine. On Python below 3.12 the extra does not install torch-sim.
+See {doc}`../guides/backends`.
 
 It also needs a C/C++ compiler wherever it runs, and pip cannot install one:
 torch-sim's neighbour list goes through `torch.compile`, which builds its
@@ -112,14 +115,16 @@ On a cluster whose compute nodes have no compiler, load one in the job script
 ```bash
 git clone https://github.com/SMTG-Bham/AmorphGen.git
 cd AmorphGen
-pip install -e ".[mace,chgnet,dev]"
+pip install -e ".[mace,chgnet]"
+
+# For development, include tests and the documentation toolchain:
+# pip install -e ".[all,dev,docs]"
 ```
 
 ## Install with conda
 
-AmorphGen is not on conda-forge, but a conda environment is the cleanest way to
-isolate it; on HPC, conda manages the CUDA toolchain. From a clone, the
-environment files in
+The supplied conda environments install Python from conda-forge and AmorphGen
+with pip. From a clone, the environment files in
 [`build_tools/`](https://github.com/SMTG-Bham/AmorphGen/tree/main/build_tools)
 create it in one step and install the checkout in editable mode:
 
@@ -142,7 +147,7 @@ Or create the environment with conda, then install AmorphGen into it with pip:
 conda create -n amorphgen python=3.11
 conda activate amorphgen
 
-# from PyPI (once released):
+# from PyPI:
 pip install "amorphgen[mace,chgnet]"
 
 # or from source:
@@ -151,25 +156,24 @@ cd AmorphGen
 pip install -e ".[mace,chgnet]"
 ```
 
-CHGNet is safe alongside MACE or SevenNet; just don't put MACE and SevenNet in
-the same environment (see the warning above, or the {doc}`../guides/backends`
-page for the full explanation).
-
 ## Backend compatibility
 
 | Backend | PyPI package | GPU support | Mac (Apple Silicon) |
 |---------|-------------|-------------|---------------------|
-| MACE    | `mace-torch` | CUDA yes | CPU + MPS yes |
+| MACE    | `mace-torch` | CUDA yes | CPU; see MPS note below |
 | CHGNet  | `chgnet`    | CUDA yes | CPU + MPS yes |
-| SevenNet | `sevenn`   | CUDA yes | CPU + MPS yes |
-| Classical (LJ, Buckingham) | built-in | N/A | CPU yes |
+| SevenNet | `sevenn`   | CUDA yes | CPU; see MPS note below |
+| Classical (LJ, Buckingham) | built-in | Optional CUDA path with PyTorch | CPU yes |
 | torch-sim engine (`--engine torchsim`) | `torch-sim-atomistic` | CUDA yes | CPU only, no MPS |
+
+On Apple Silicon, `--device auto` can select MPS. MACE and SevenNet default
+to float64, which MPS cannot represent; use `--device cpu` for these defaults.
+CHGNet uses float32 and includes an MPS loading path.
 
 ## HPC setup (SLURM)
 
 ```bash
-# Load your cluster's CUDA module (name varies by site)
-module load CUDA/11.8.0
+# Follow your cluster's instructions to initialise conda before these commands.
 
 # MACE + CHGNet env (recommended default)
 conda create -n amorphgen python=3.11
@@ -183,16 +187,26 @@ conda activate amorphgen-ts
 pip install "amorphgen[mace,torchsim]"
 ```
 
-If you also want SevenNet, create a second environment as described
-in the warning above and switch between them in your SLURM scripts via
-`source activate amorphgen` or `source activate amorphgen-sevennet`.
+Initialise conda in each SLURM job and activate the matching environment with
+`conda activate amorphgen` or `conda activate amorphgen-ts`. For SevenNet, use
+its separate environment as described above. The compute node needs an NVIDIA
+driver compatible with the installed PyTorch CUDA build; these environment
+files do not install a driver or a standalone CUDA toolkit. See
+{doc}`../guides/hpc` for job examples.
 
 ## Verify installation
 
 ```python
 import amorphgen
-print(amorphgen.__version__)  # 1.0.0
+print(amorphgen.__version__)  # installed package version
 
 from amorphgen.utils.calculators import list_models
-list_models()  # prints all available models grouped by backend
+list_models()  # prints registered models and backend installation status
+```
+
+Or verify the CLI without loading or downloading a model:
+
+```bash
+amorphgen --version
+amorphgen --list-models
 ```

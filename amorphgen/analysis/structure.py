@@ -55,6 +55,10 @@ def is_bonding_pair(s1: str, s2: str, composition) -> bool:
     (the rule shared by the coordination report, the total coordination, the
     bond angles and the CN plot).
 
+    * Hydrogenated group-IV network (C/Si/Ge plus H, at most one H per host
+      atom): host-host pairs follow the H-free host's rules below, X-H is a
+      bond and H-H is not. The composition gate is shared with generation
+      through :func:`~amorphgen.utils.radii._hydrogenated_host`.
     * Compound with an anion: a pair is a bond only when exactly one member is
       an anion, and which elements those are comes from :func:`anion_elements`
       (charge balance), not from a fixed list. Cation-cation contacts (Ga-In,
@@ -68,17 +72,24 @@ def is_bonding_pair(s1: str, s2: str, composition) -> bool:
       GaAs or Ti-Ti in TiC is a second-shell contact, since those compounds are
       not metals.
 
-    ``composition`` may be a mapping of counts (preferred: the metal-fraction
-    test needs them) or a bare set of symbols.
+    ``composition`` may be a mapping of counts (preferred: the hydrogen and
+    metal fractions need them) or a bare set of symbols (one of each assumed).
     """
     try:
         from ..pipeline.random_gen import _classify_bond
-        from ..utils.radii import NONMETALS, METALLOIDS
+        from ..utils.radii import NONMETALS, METALLOIDS, _hydrogenated_host
     except ImportError:
         from amorphgen.pipeline.random_gen import _classify_bond
-        from amorphgen.utils.radii import NONMETALS, METALLOIDS
+        from amorphgen.utils.radii import (
+            NONMETALS, METALLOIDS, _hydrogenated_host,
+        )
     counts = (dict(composition) if hasattr(composition, "items")
               else {e: 1 for e in composition})
+    host = _hydrogenated_host(counts)
+    if host is not None:
+        if "H" in (s1, s2):
+            return s1 != s2
+        counts = host
     elements = set(counts)
     anions = anion_elements(counts)
     if anions and anions != elements:

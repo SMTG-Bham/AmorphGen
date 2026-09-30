@@ -2,15 +2,16 @@
 
 compute_rdf                      total / partial g(r), ensemble-averaged
 compute_averaged_rdf             ensemble-mean g(r)
-compute_structure_factor_direct  S(q) by Debye sum at reciprocal-lattice q
+compute_structure_factor_direct  S(q) by reciprocal-lattice scattering sum
 compute_structure_factor         S(q) by Fourier transform of g(r); g(r) is
-                                 cut at L/2, which damps the FSDP
+                                 truncated at a finite rmax
 xray_form_factor                 f0(q), Waasmaier-Kirfel (1995)
 
-``weighting``: "xray" (q-dependent f0(q)), "neutron" (Varley, F. Sears. "Neutron scattering lengths and cross sectioirn." Neutron news 3.3 (1992): 29-37.), or
-"unweighted" (f = 1). Multi-component S(q) is the Faber-Ziman sum of partials,
-w_ab = (2 - delta_ab) c_a c_b f_a f_b / <f>^2, with partials using the total
-number density. Conventions: Keen, David A. "A comparison of various commonly used correlation functions for describing total scattering." Applied Crystallography 34.2 (2001): 172-177.
+``weighting``: "xray" (q-dependent f0(q)), "neutron" (coherent scattering
+lengths from V. F. Sears, Neutron News 3(3), 26-37, 1992), or "unweighted"
+(f = 1). Multi-component S(q) uses Faber-Ziman partials and tends to 1 at
+high q. For correlation-function conventions, see D. A. Keen, Journal of
+Applied Crystallography 34(2), 172-177 (2001).
 """
 
 from __future__ import annotations
@@ -457,13 +458,11 @@ def _smooth_sq_weighted(q, s_q, n_per_bin, sigma_q):
 def compute_structure_factor_direct(atoms_list, qmax=15.0, nq=300,
                                     weighting="xray", q_batch=4096,
                                     sigma_q=0.0, partials=False):
-    """Compute S(q) directly from atomic positions via the Debye formula
-    evaluated at reciprocal-lattice q-vectors.
+    """Compute Faber-Ziman S(q) from reciprocal-lattice scattering amplitudes.
 
-    Avoids the rmax truncation that damps the first sharp diffraction
-    peak (FSDP) in the FFT-of-g(r) approach. Q-vector enumeration uses
-    the reciprocal lattice of each structure, so the q-resolution is
-    limited only by the simulation cell size (q_min ~ 2*pi/L).
+    Subtracts self-scattering so S(q) tends to 1 at high q. Avoids the
+    finite-rmax integral used by the FT-of-g(r) method, but retains
+    finite-cell sampling limits (q_min ~ 2*pi/L for a cubic cell).
 
     Parameters
     ----------
@@ -488,9 +487,11 @@ def compute_structure_factor_direct(atoms_list, qmax=15.0, nq=300,
         (so they resolve the FSDP like the total). Per q-vector,
         ``S_ab = 1 + (Re<F_a F_b*>/sqrt(N_a N_b) - delta_ab)/sqrt(c_a c_b)``
         with ``F_a = sum_{i in a} exp(i q.r_i)``; the weighted sum
-        ``sum_ab (2-delta_ab) c_a c_b f_a f_b S_ab / <f>^2`` reproduces
-        ``s_q`` exactly. Partials are pure geometry (independent of
-        ``weighting``) and are smoothed with ``sigma_q`` like the total.
+        the weighted sum of unique partials reproduces ``s_q`` per
+        q-vector. After shell averaging, recombination is exact for
+        constant weights; using bin-centre X-ray weights is approximate.
+        Partials are independent of ``weighting`` and are smoothed with
+        ``sigma_q`` like the total.
 
     Returns
     -------
@@ -651,10 +652,8 @@ def compute_structure_factor(atoms_list, pair=None, qmax=15.0, nq=300,
           experimental X-ray/neutron S(Q) in general because it omits
           per-element scattering weights.
         * ``"xray"`` — Faber-Ziman partials weighted by the q-dependent
-          atomic form factors f_A(q)·f_B(q) (Waasmaier-Kirfel 1995); f(0)=Z, so
-          a Z² description is exact only at
-          q = 0; quantitatively good below q ~ 5 inverse-Angstrom
-          (covers the FSDP and main-peak region).
+          atomic form factors f_A(q)·f_B(q) (Waasmaier-Kirfel 1995).
+          The tabulated neutral-atom fits approach Z at q = 0.
         * ``"neutron"`` — same Faber-Ziman combination but weighted by
           tabulated neutron coherent scattering lengths (b_A·b_B). Uses
           a built-in table of ~50 common elements; raises KeyError for
@@ -667,13 +666,11 @@ def compute_structure_factor(atoms_list, pair=None, qmax=15.0, nq=300,
 
     Notes
     -----
-    For X-ray S(Q) of amorphous oxides the FSDP at ~1.5-2.5
-    inverse-Angstrom is dominated by heavy-atom cation-cation
-    correlations and cancels in the unweighted sum because
-    the cation-anion partial dips at the same q. The ``"xray"``
-    weighting recovers it. See ``docs/notes/sq_xrd_methodology.md``
-    for a worked example on a-Ga2O3 (Kaewmeechai et al., Phys. Rev. B
-    111, 035203, 2025).
+    Finite-rmax truncation can change peak heights and introduce ripples.
+    Compare with :func:`compute_structure_factor_direct` and check cell-size
+    convergence. Scattering weights change the contributions of different
+    element pairs; they do not remove truncation errors. See
+    ``docs/notes/sq_xrd_methodology.md`` for conventions and limitations.
     """
     if weighting not in ("unweighted", "xray", "neutron"):
         raise ValueError(

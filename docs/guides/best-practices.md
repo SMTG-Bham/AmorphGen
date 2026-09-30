@@ -3,55 +3,49 @@
 Practical guidance for getting physically reliable amorphous structures out of
 AmorphGen, and an honest account of where the underlying methods break down.
 
-## Prefer NVT annealing over NPT melt-quench with foundation MLIPs
+(prefer-nvt-annealing-over-npt-melt-quench-with-foundation-mlips)=
+## Choose the ensemble and calculator together
 
-The single most important recommendation: **with universal/foundation MLIPs,
-generate amorphous structures by random placement + low-temperature annealing
-(or the hybrid route), rather than a full crystal melt-quench under NPT.**
+Validate the chosen calculator for the composition, density and temperature
+range of the intended workflow. A model's accuracy on a crystalline starting
+structure does not establish its accuracy on random, amorphous or liquid
+configurations. Check its training coverage and compare representative
+configurations with reference calculations or measurements.
 
-Universal MLIPs (MACE-MP, CHGNet, SevenNet, …) are trained almost entirely on
-*near-equilibrium crystalline* data. A high-temperature liquid is out of that
-distribution on every axis at once, large forces, broken/over-coordinated
-bonds, high kinetic energy, so the model extrapolates and the melt is
-unreliable. The failure is worst under **NPT**, because the barostat acts on the
-stress tensor, which is even more sensitive to out-of-distribution force error
-than the energy: wrong stresses drive the cell to expand, collapsing the
-predicted density.
+NPT uses the calculator's stress tensor to change the cell. Inspect both the
+volume trajectory and the resulting density. NVT keeps the cell fixed during
+MD; it is useful when a justified target density is available, but fixing the
+cell does not validate the predicted forces or structure.
 
-AmorphGen's {doc}`random-generation` and {doc}`hybrid-workflow` routes are built
-around the reliable regime: they start from in-distribution disordered
-configurations and anneal at low temperature, in a **fixed cell (NVT-like)** when
-you keep the auto-estimated density. This avoids the unstable liquid entirely.
-
-```{tip}
-If you must run a melt-quench, prefer **NVT** (fixed cell) over NPT, keep the
-melt temperature as low as the chemistry allows, and treat any large
-mid-quench volume change as a red flag rather than a result.
-```
+AmorphGen's {doc}`random-generation` and {doc}`hybrid-workflow` routes let you
+start from disordered configurations and choose an anneal temperature. Set
+each MD stage to **NVT** and use `--cell-filter none` for relaxation when
+holding the starting density fixed; the random-gen and hybrid CLI modes
+otherwise default to isotropic cell relaxation (`cubic`). The full pipeline
+defaults to NPT for stages 3 and 4, so override both for fixed-volume MD.
 
 ### Decision guide
 
 | Situation | Recommended route |
 |-----------|-------------------|
-| New composition, no crystal needed | `--random-gen` + `--relax` (NVT-like, fixed cell) |
+| New composition, no crystal needed | `--random-gen --relax --cell-filter none` when keeping a validated density fixed |
 | Want a diverse amorphous ensemble cheaply | `--hybrid-ensemble` (random → anneal → quench) |
-| You have a crystal and want classic MQ | Full pipeline, but prefer **NVT** stages; watch the density |
-| MLIP keeps over-expanding under NPT | Switch to random-gen / hybrid, or fix the cell |
+| You have a crystal and want classic MQ | Full pipeline; choose NVT or NPT according to the density constraint and calculator validation |
+| Cell expands unexpectedly under NPT | Check model stresses, timestep, coupling parameters and reference density before continuing |
 
 ## Choosing the anneal temperature
 
-A 0 K relaxation of a random-gen seed fixes bond *lengths* but cannot cross
-barriers: network *connectivity* defects (dangling anions, missing bridges,
-under-coordinated formers) survive it. Annealing is what heals them, but
-only if the temperature is high enough for bonds to break and reform, and
-"high enough" is **system-dependent**. Watch a connectivity metric during
-the anneal (bridging-anion fraction, network-former coordination), not just
-the energy: if the metric is flat, the anneal is only vibrating.
+A static relaxation can leave a random-gen seed in a local minimum with
+connectivity defects. Annealing can allow further rearrangements; the useful
+temperature and duration depend on the system and calculator. Track both
+energy and structural metrics during the anneal (for example, bridging-anion
+fraction and network-former coordination). A flat coordination metric alone
+does not distinguish a converged network from a trapped one.
 
-Worked example, a-SiO₂ (72 atoms, CHGNet, NVT). A random-gen +
-short-relax seed starts with 79% of Si tetrahedral (CN=4) and 79% of O
-bridging (Si–O–Si). Annealing at just **600 K** heals the network within
-~5 ps:
+An exploratory a-SiO₂ run (72 atoms, CHGNet, NVT) previously recorded in
+this guide gave the following coordination fractions at 600 K. The complete
+input, model version and trajectory are not supplied with this table, so it
+is an illustration of what to monitor, not a reproducible temperature recipe:
 
 | Time at 600 K | Si CN=4 | bridging O |
 |---|---|---|
@@ -59,35 +53,23 @@ bridging (Si–O–Si). Annealing at just **600 K** heals the network within
 | 3 ps | 92% | 100% |
 | 5 ps | 100% | 100% |
 
-Corner-sharing silica rearranges readily: a modest anneal far below any
-melting point completes the tetrahedral network, at NVT in the fixed
-auto-estimated cell (the reliable MLIP regime from the section above).
+A separate 1500 K, 8 ps anneal of the same starting seed was reported to
+end at 96% Si CN=4 and 98% bridging O after re-relaxation, with an energy
+about 38 meV/atom lower (−590.99 vs −588.23 eV for 72 atoms). These
+exploratory observations do not establish a generally sufficient temperature
+or duration for silica or other network glasses.
 
-The same seed annealed at **1500 K** for 8 ps ends with the *same*
-connectivity (96% Si CN=4, 98% bridging O after re-relaxation) but a
-**~38 meV/atom lower energy** (−590.99 vs −588.23 eV for 72 atoms):
-connectivity metrics saturate first, while ring-topology and strain keep
-relaxing at higher temperature. So for silica-like glasses, 600 K is enough
-to *heal* the network; a hotter anneal buys a deeper minimum without
-changing the headline coordination numbers, compare re-relaxed energies,
-not just CN, when the medium-range order matters (e.g. for ring statistics
-or vibrational properties).
+For your own protocol:
 
-**Rules of thumb:**
+- Compare several temperatures and durations using the same calculator and
+  analysis settings.
+- Inspect density, coordination, RDF and any relevant connectivity or ring
+  metrics; extend sampling when the properties of interest are still changing.
+- Re-relax sampled structures before comparing minimum energies. Use the same
+  relaxation settings and calculator; annealing does not guarantee a lower
+  final energy for every seed.
 
-- Open corner-sharing networks (SiO₂, GeO₂, B₂O₃, phosphates):
-  **500–800 K, a few ps** is typically enough.
-- Dense or heavy-cation frameworks (rutile-type oxides, high-valent
-  oxides, heavy-metal halide/oxyhalide glasses): low-T anneals leave the
-  connectivity metrics flat; expect to need **~1000 K or above and ≥10 ps**
-  before bridging grows, then re-relax.
-- If the metric is still rising when the anneal ends, extend it; plateau
-  first, then quench/relax.
-- Always **re-relax after annealing** and compare energies: the annealed
-  minimum should be lower; if it is not, the anneal was too short or too
-  cold.
-
-## Trust the relaxed density, set it when the estimate is shaky
+## Validate the density and override an uncertain estimate
 
 The auto-estimated density is a *starting cell* heuristic (class-aware sphere
 packing on Shannon/Cordero/Goldschmidt radii). It is good for common oxides but
@@ -97,8 +79,9 @@ approximate for unusual chemistries.
 For elements missing from the radii tables, or compositions far from the tuned
 material classes, the auto density can be off. AmorphGen prints
 `NOTE: Auto density is approximate for this composition` when confidence is low,
-in that case pass `--target-density` (or a `cell_length`) explicitly, or relax
-with a cell filter and trust the **relaxed** density, not the estimate.
+in that case pass `--target-density` explicitly (or `cell_length_ang` in the Python
+API). A cell relaxation provides a model-dependent density that also needs
+validation.
 ```
 
 Dense rutile-type dioxides are the usual culprits: the generic `metal_oxide`
@@ -106,41 +89,42 @@ packing factor under-predicts them, which is why rutile-type MO₂ oxides
 (TiO₂, SnO₂, RuO₂, IrO₂, OsO₂, …) are routed to a denser `rutile_dioxide`
 class. They are identified geometrically: an MO₂ whose 4+ cation radius is
 below the rutile/fluorite cutoff (~0.70 Å), so fluorite dioxides (ZrO₂, HfO₂,
-CeO₂) correctly stay `metal_oxide`. See {doc}`../validation/index` for the
-validated density ranges.
+CeO₂) use the separate `fluorite_dioxide` class. See {doc}`random-generation`
+for density-estimation classes; validate the resulting density for your material.
 
 ## Known limitations
 
 - Foundation-MLIP reliability: accuracy on amorphous/liquid configurations,
   and on elements sparsely represented in training data, is not guaranteed.
-  High-temperature liquid sampling under NPT is the main failure mode (see
-  above); validate against AIMD or experiment for any new chemistry (see
+  Validate the intended temperature and ensemble against reference
+  calculations or experiment for any new chemistry (see
   {doc}`../validation/index`).
 - Density estimation is approximate: the auto density is a class-aware
   sphere-packing *estimate* for the starting cell, tuned on common material
   classes. It can be off for unusual chemistries; override with
-  `--target-density` and trust the relaxed density.
+  `--target-density` and validate the relaxed density.
 - Element coverage of the radii tables: minimum-separation and density
   estimation use Shannon/Cordero/Goldschmidt radii for a curated element set.
   Elements outside it fall back to approximate values, degrading the auto
   density (e.g. set an explicit `--target-density`, or add the element to
   `amorphgen/utils/radii.py`).
-- Single-point relaxation leaves voids: a 0 K relax of one random structure
-  can stay porous; use the hybrid (anneal + quench) route for densification.
+- Local relaxation can leave voids: a 0 K relaxation of one random structure
+  can stay porous. Annealing can rearrange the network, but NVT and fixed-cell
+  relaxation preserve the total density; densification requires a volume change.
 - Ensembles, not single structures: one structure is not statistically
   representative of an amorphous phase. Generate an ensemble (e.g. `-n 20`) and
   average for any reported property.
 - Structure generation only: AmorphGen produces relaxed atomic structures,
   not electronic-structure or transport properties; those need a separate
   DFT/post-processing step on the generated models.
-- Classical potentials need parameters: the Lennard-Jones and
-  Buckingham+Coulomb backends require user-supplied parameters; they are a fast
-  starting point, not a substitute for a fitted potential.
+- Classical potentials need suitable parameters: the Lennard-Jones and
+  Buckingham+Coulomb backends accept explicit parameter sets. Defaults or
+  illustrative parameters do not validate a potential for your material.
 - Resume granularity: `--resume` skips completed stages and continues an
   interrupted MD stage from its last saved trajectory frame; only the
   optimisation stages (1 and 7) restart from the beginning.
 
 ## Further reading
 
-For the reliability literature behind the NVT-over-NPT recommendation, see the
-broader work on finite-temperature reliability of foundation atomistic models.
+See {doc}`benchmarks` for exploratory comparisons and
+{doc}`../validation/index` for the validation examples supplied with this project.

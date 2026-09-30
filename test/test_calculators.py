@@ -1,219 +1,151 @@
-"""Tests for amorphgen.utils.calculators — backend dispatch + helpers.
-
-These tests use mock patching to exercise dispatch logic without needing
-the actual MLIP backends (MACE / CHGNet / SevenNet) installed.
-"""
+"""Calculator dispatch and dtype contracts, without optional ML backends."""
 from __future__ import annotations
 
-from unittest.mock import patch, MagicMock
+import sys
+from types import ModuleType, SimpleNamespace
+from unittest.mock import Mock, patch
 
 import pytest
 
-from amorphgen.utils.calculators import (
-    get_calculator,
-    list_models,
-    CLASSICAL_MODELS,
-)
+from amorphgen.utils.calculators import get_calculator, list_models, _load_chgnet, _load_mace
 
-
-# ─── list_models ───────────────────────────────────────────────────────────
 
 class TestListModels:
     def test_runs_and_prints_known_backends(self, capsys):
         list_models()
-        out = capsys.readouterr().out
-        # Should at minimum mention the four backends.
-        assert "MACE" in out
-        assert "CHGNet" in out.upper() or "chgnet" in out
-        assert any(token in out for token in ("SevenNet", "sevennet", "7net"))
-        assert any(token in out.lower() for token in ("classical", "buckingham", "lennard"))
+        out = capsys.readouterr().out.lower()
+        for backend in ("mace", "chgnet", "sevennet", "classical"):
+            assert backend in out
 
-
-# ─── device='auto' resolution ──────────────────────────────────────────────
 
 class TestDeviceAuto:
-    def test_auto_resolves_to_real_device(self):
-        """device='auto' should pick CUDA / MPS / CPU and forward a real string."""
-        with patch("amorphgen.utils.calculators._load_classical") as mock_load:
-            mock_load.return_value = MagicMock()
-            get_calculator("buckingham", device="auto",
-                            classical_params={
-                                "params": {("Si", "O"): {"A": 0, "rho": 1, "C": 0}},
-                                "charges": {"Si": 0, "O": 0},
-                                "cutoff": 5.0,
-                            })
-            assert mock_load.called
-            forwarded_device = mock_load.call_args.kwargs.get("device")
-            assert forwarded_device in ("cuda", "mps", "cpu")
-            assert forwarded_device != "auto"
+    @pytest.mark.parametrize("cuda, mps, expected", [
+        (True, True, "cuda"),
+        (False, True, "mps"),
+        (False, False, "cpu"),
+    ])
+    def test_auto_resolves_device_in_priority_order(self, monkeypatch, cuda, mps, expected):
+        torch = SimpleNamespace(
+            cuda=SimpleNamespace(is_available=lambda: cuda),
+            backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda: mps)),
+        )
+        monkeypatch.setitem(sys.modules, "torch", torch)
+        with patch("amorphgen.utils.calculators._load_classical") as load:
+            result = get_calculator("lj", device="auto")
+        load.assert_called_once_with("lj", device=expected)
+        assert result is load.return_value
 
-    def test_explicit_cpu_is_preserved(self):
-        with patch("amorphgen.utils.calculators._load_classical") as mock_load:
-            mock_load.return_value = MagicMock()
-            get_calculator("buckingham", device="cpu",
-                            classical_params={
-                                "params": {}, "charges": {}, "cutoff": 5.0,
-                            })
-            assert mock_load.call_args.kwargs.get("device") == "cpu"
+    def test_auto_without_torch_falls_back_to_cpu(self, monkeypatch):
+        monkeypatch.setitem(sys.modules, "torch", None)
+        with patch("amorphgen.utils.calculators._load_classical") as load:
+            get_calculator("lj", device="auto")
+        load.assert_called_once_with("lj", device="cpu")
 
+    def test_explicit_cpu_is_preserved(self, monkeypatch):
+        # Explicit CPU selection must also work on a torch-free install.
+        monkeypatch.setitem(sys.modules, "torch", None)
+        with patch("amorphgen.utils.calculators._load_classical") as load:
+            get_calculator("lj", device="cpu")
+        load.assert_called_once_with("lj", device="cpu")
 
-# ─── Backend routing ───────────────────────────────────────────────────────
 
 class TestBackendRouting:
-    def test_mace_routes_to_load_mace(self):
-        with patch("amorphgen.utils.calculators._load_mace") as mock_load:
-            mock_load.return_value = MagicMock()
-            get_calculator("mace-mpa-0", device="cpu")
-            assert mock_load.called
+    @pytest.mark.parametrize("model, loader, expected_args, expected_kwargs", [
+        ("mace-mpa-0", "_load_mace", ("mace-mpa-0",), {"default_dtype": "float64"}),
+        ("chgnet", "_load_chgnet", (), {"default_dtype": "float32"}),
+        ("sevennet", "_load_sevennet", ("sevennet",), {"default_dtype": "float64"}),
+        ("lennard-jones", "_load_classical", ("lennard-jones",), {}),
+        ("lj", "_load_classical", ("lj",), {}),
+        ("buckingham", "_load_classical", ("buckingham",), {}),
+        ("buck", "_load_classical", ("buck",), {}),
+    ])
+    def test_routes_to_backend(self, model, loader, expected_args, expected_kwargs):
+        with patch(f"amorphgen.utils.calculators.{loader}") as load:
+            result = get_calculator(model, device="cpu")
+        load.assert_called_once_with(*expected_args, device="cpu", **expected_kwargs)
+        assert result is load.return_value
 
-    def test_chgnet_routes_to_load_chgnet(self):
-        with patch("amorphgen.utils.calculators._load_chgnet") as mock_load:
-            mock_load.return_value = MagicMock()
-            get_calculator("chgnet", device="cpu")
-            assert mock_load.called
-
-    def test_sevennet_routes_to_load_sevennet(self):
-        with patch("amorphgen.utils.calculators._load_sevennet") as mock_load:
-            mock_load.return_value = MagicMock()
-            get_calculator("sevennet", device="cpu")
-            assert mock_load.called
-
-    def test_classical_routes_to_load_classical(self):
-        with patch("amorphgen.utils.calculators._load_classical") as mock_load:
-            mock_load.return_value = MagicMock()
-            get_calculator("lennard-jones", device="cpu",
-                            classical_params={"params": {}, "charges": {}, "cutoff": 5.0})
-            assert mock_load.called
+    def test_classical_parameters_are_forwarded(self):
+        params = {"params": {}, "charges": {}, "cutoff": 5.0}
+        with patch("amorphgen.utils.calculators._load_classical") as load:
+            get_calculator("buckingham", device="cpu", classical_params=params)
+        load.assert_called_once_with("buckingham", device="cpu", classical_params=params)
 
     def test_unknown_model_raises(self):
-        with pytest.raises((ValueError, ImportError)):
+        with pytest.raises(ValueError, match="Unrecognised model"):
             get_calculator("totally-not-a-model-xyz", device="cpu")
 
-
-# ─── model_path takes priority over model name ────────────────────────────
-
-class TestModelPath:
-    def test_model_path_routes_to_mace(self):
-        """A model_path argument should always route to the MACE loader,
-        regardless of the model name string."""
-        with patch("amorphgen.utils.calculators._load_mace") as mock_load:
-            mock_load.return_value = MagicMock()
-            get_calculator(model="chgnet",
-                           device="cpu",
-                           model_path="/fake/path/to/model.model")
-            assert mock_load.called
-            kwargs = mock_load.call_args.kwargs
-            assert kwargs.get("model_path") == "/fake/path/to/model.model"
+    def test_model_path_takes_priority(self):
+        with patch("amorphgen.utils.calculators._load_mace") as load:
+            result = get_calculator("chgnet", device="cpu", model_path="custom.model")
+        load.assert_called_once_with("chgnet", device="cpu", model_path="custom.model",
+                                     default_dtype="float64")
+        assert result is load.return_value
 
 
-# ─── CLASSICAL_MODELS registry ────────────────────────────────────────────
-
-class TestClassicalModelsRegistry:
-    def test_known_aliases_present(self):
-        for name in ("lennard-jones", "lj", "buckingham", "buck"):
-            assert name in CLASSICAL_MODELS, f"{name} missing from CLASSICAL_MODELS"
-
-    def test_classical_model_detected_by_name(self):
-        """A classical model name should route to _load_classical even
-        without classical_params kwarg surviving the dispatch (the loader
-        will raise its own validation error later)."""
-        with patch("amorphgen.utils.calculators._load_classical") as mock_load:
-            mock_load.return_value = MagicMock()
-            for name in ("lennard-jones", "lj", "buckingham", "buck"):
-                get_calculator(name, device="cpu",
-                                classical_params={"params": {}, "charges": {}, "cutoff": 5.0})
-            assert mock_load.call_count == 4
+def test_invalid_mace_model_path_does_not_load_weights(tmp_path, monkeypatch):
+    loaders = SimpleNamespace(mace_mp=Mock(), MACECalculator=Mock())
+    monkeypatch.setitem(sys.modules, "mace.calculators", loaders)
+    with pytest.raises(FileNotFoundError, match="Custom MACE model file not found"):
+        _load_mace("mace-mpa-0", device="cpu", model_path=str(tmp_path / "missing.model"))
+    loaders.mace_mp.assert_not_called()
+    loaders.MACECalculator.assert_not_called()
 
 
-# ─── CHGNet default_dtype handling (regression: was a silent no-op) ──────────
+@pytest.fixture
+def chgnet_stubs(monkeypatch):
+    """Exercise the loader without loading weights or changing real torch state."""
+    torch = SimpleNamespace(float32=object(), float64=object(), set_default_dtype=Mock())
+    model_type = Mock()
+    calculator = Mock()
+    package = ModuleType("chgnet")
+    model_package = ModuleType("chgnet.model")
+    model_module = ModuleType("chgnet.model.model")
+    dynamics = ModuleType("chgnet.model.dynamics")
+    model_module.CHGNet = model_type
+    model_module.TORCH_DTYPE = torch.float64
+    dynamics.CHGNetCalculator = calculator
+    package.model = model_package
+    model_package.model = model_module
+    model_package.dynamics = dynamics
+    for name, module in {
+        "torch": torch,
+        "chgnet": package,
+        "chgnet.model": model_package,
+        "chgnet.model.model": model_module,
+        "chgnet.model.dynamics": dynamics,
+    }.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    return SimpleNamespace(torch=torch, module=model_module,
+                           model_type=model_type, calculator=calculator)
+
 
 class TestChgnetDefaultDtype:
-    """Pre-2026-05-11 the CHGNet loader accepted ``default_dtype`` via
-    ``**kwargs`` and silently forwarded it to ``CHGNetCalculator``, which
-    ignored unknown kwargs.  So YAML configs with ``default_dtype: float64``
-    were a silent no-op — users believed they were running fp64 but got fp32.
+    @pytest.mark.parametrize("dtype, error, message", [
+        ("bfloat16", ValueError, "default_dtype"),
+        ("float64", NotImplementedError, "composition_model"),
+    ])
+    def test_unsupported_dtype_fails_before_loading(self, chgnet_stubs, dtype, error, message):
+        with pytest.raises(error, match=message):
+            _load_chgnet(device="cpu", default_dtype=dtype)
+        chgnet_stubs.model_type.load.assert_not_called()
+        chgnet_stubs.calculator.assert_not_called()
+        chgnet_stubs.torch.set_default_dtype.assert_not_called()
 
-    Post-fix: ``default_dtype`` is recognised, ``float32`` and ``None`` set
-    torch's default + chgnet's module-level ``TORCH_DTYPE`` to float32, and
-    ``float64`` raises ``NotImplementedError`` with a clear message (because
-    CHGNet's composition_model submodule constructs input tensors via a path
-    that bypasses ``TORCH_DTYPE`` and crashes at forward time on fp64).
-
-    Skipped when chgnet is not installed.
-    """
-
-    def _chgnet_or_skip(self):
-        pytest.importorskip("chgnet")
-        return True
-
-    def test_default_dtype_invalid_raises(self):
-        self._chgnet_or_skip()
-        from amorphgen.utils.calculators import _load_chgnet
-        with pytest.raises(ValueError, match="default_dtype"):
-            _load_chgnet(device="cpu", default_dtype="bfloat16")
-
-    def test_default_dtype_float64_raises_not_implemented(self):
-        """float64 must raise a clear NotImplementedError pointing the user
-        to MACE — silently downcasting would re-introduce the original bug."""
-        self._chgnet_or_skip()
-        from amorphgen.utils.calculators import _load_chgnet
-        with pytest.raises(NotImplementedError, match="composition_model"):
-            _load_chgnet(device="cpu", default_dtype="float64")
-
-    def test_default_dtype_float32_sets_torch_default(self):
-        self._chgnet_or_skip()
-        import torch
-        from amorphgen.utils.calculators import _load_chgnet
-        # Pre-set to float64 to verify the loader resets it.
-        torch.set_default_dtype(torch.float64)
-        _load_chgnet(device="cpu", default_dtype="float32")
-        assert torch.get_default_dtype() is torch.float32
-        # And chgnet's module-level constant matches.
-        import chgnet.model.model as _mod
-        assert _mod.TORCH_DTYPE is torch.float32
-
-    def test_default_dtype_none_keeps_float32(self):
-        """Passing default_dtype=None should give CHGNet's native float32."""
-        self._chgnet_or_skip()
-        import torch
-        from amorphgen.utils.calculators import _load_chgnet
-        _load_chgnet(device="cpu", default_dtype=None)
-        assert torch.get_default_dtype() is torch.float32
-
-    def test_model_weights_are_float32(self):
-        """The loaded CHGNet model's parameters should all be float32."""
-        self._chgnet_or_skip()
-        import torch
-        from amorphgen.utils.calculators import _load_chgnet
-        calc = _load_chgnet(device="cpu", default_dtype="float32")
-        assert all(p.dtype is torch.float32 for p in calc.model.parameters())
-
-    def test_default_dtype_stripped_from_calculator_kwargs(self):
-        """default_dtype must not end up in CHGNetCalculator(**kwargs)
-        — if it did, future CHGNet versions with stricter signature
-        validation would reject it."""
-        self._chgnet_or_skip()
-        from amorphgen.utils.calculators import _load_chgnet
-        # If default_dtype were leaking through, CHGNetCalculator might
-        # complain.  We just check the call doesn't raise.
-        _load_chgnet(device="cpu", default_dtype="float32")
-
-    def test_default_dtype_recovers_after_prior_fp64_caller(self):
-        """If an earlier caller set torch default to float64 (e.g. a MACE
-        loader), _load_chgnet must reset to float32 — otherwise CHGNet's
-        forward pass crashes on dtype mismatch."""
-        self._chgnet_or_skip()
-        import torch
-        from amorphgen.utils.calculators import _load_chgnet
-        torch.set_default_dtype(torch.float64)
-        import chgnet.model.model as _mod
-        _mod.TORCH_DTYPE = torch.float64   # simulate fp64-poisoned state
-        _load_chgnet(device="cpu", default_dtype="float32")
-        assert torch.get_default_dtype() is torch.float32
-        assert _mod.TORCH_DTYPE is torch.float32
+    @pytest.mark.parametrize("dtype", [None, "float32"])
+    def test_resets_dtype_and_consumes_default_dtype_kwarg(self, chgnet_stubs, dtype):
+        stubs = chgnet_stubs
+        result = _load_chgnet(device="cpu", default_dtype=dtype, stress_weight=0.5)
+        stubs.torch.set_default_dtype.assert_called_once_with(stubs.torch.float32)
+        assert stubs.module.TORCH_DTYPE is stubs.torch.float32
+        stubs.model_type.load.assert_called_once_with(use_device="cpu")
+        stubs.calculator.assert_called_once_with(
+            model=stubs.model_type.load.return_value, use_device="cpu", stress_weight=0.5,
+        )
+        assert result is stubs.calculator.return_value
 
 
-# ─── Backend availability / fail-fast (DESIGN_MLIP_OPTIONAL.md D2/D4) ──────
+# ─── Backend availability / fail-fast checks ─────────────────────────────
 
 class TestBackendAvailability:
     """require_backend / available_backends / list_models markers."""
@@ -235,8 +167,7 @@ class TestBackendAvailability:
         assert require_backend("buckingham") == "classical"
 
     def test_require_backend_missing_raises_with_install_hint(self, monkeypatch):
-        """The fail-fast message must contain a copy-pasteable install line
-        (invariant 4 of DESIGN_MLIP_OPTIONAL.md)."""
+        """The fail-fast message must contain a copy-pasteable install line."""
         import amorphgen.utils.calculators as calc
         monkeypatch.setattr(calc, "backend_available",
                             lambda b: b == "classical")
@@ -352,3 +283,31 @@ class TestDtypeFailFast:
     def test_cli_lets_chgnet_auto_through(self, tmp_path, monkeypatch):
         with pytest.raises(self._ReachedStages):
             self._mq_ensemble(tmp_path, monkeypatch, "model: chgnet\n")
+
+
+def test_real_chgnet_uses_float32_weights_and_computes_finite_results():
+    """Exercise the installed backend's bundled checkpoint when available."""
+    pytest.importorskip("chgnet")
+    import numpy as np
+    import torch
+    import chgnet.model.model as chgnet_model
+    from ase.build import bulk
+
+    original_dtype = torch.get_default_dtype()
+    original_chgnet_dtype = chgnet_model.TORCH_DTYPE
+    try:
+        torch.set_default_dtype(torch.float64)
+        chgnet_model.TORCH_DTYPE = torch.float64
+        calc = _load_chgnet(device="cpu", default_dtype="float32")
+        parameters = tuple(calc.model.parameters())
+        assert parameters
+        assert all(parameter.dtype is torch.float32 for parameter in parameters)
+        atoms = bulk("Si", "diamond", a=5.43, cubic=True)
+        atoms.calc = calc
+        assert np.isfinite(atoms.get_potential_energy())
+        forces = atoms.get_forces()
+        assert forces.shape == (len(atoms), 3)
+        assert np.isfinite(forces).all()
+    finally:
+        torch.set_default_dtype(original_dtype)
+        chgnet_model.TORCH_DTYPE = original_chgnet_dtype

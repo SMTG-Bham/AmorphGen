@@ -1,116 +1,83 @@
-"""
-tests/test_mace_integration.py
--------------------------------
-Tier 3 — MACE integration tests.
+"""Real MACE integration tests, enabled with ``pytest test --run-mace``.
 
-These tests use a real MACE calculator and require:
-  - mace-torch installed
-  - Internet access (first run downloads the model)
-  - Ideally a GPU (falls back to CPU — slow)
-
-Run with:
-    pytest tests/test_mace_integration.py --run-mace -v
-
-These are skipped in CI by default.
+Requires mace-torch. The first run may download the foundation model. These
+small checks use CPU so the opt-in suite also works without a GPU.
 """
 
-import os
+import numpy as np
 import pytest
+from ase import Atoms
 from ase.build import bulk
+from ase.calculators.calculator import Calculator
+from ase.io import write
+
+pytestmark = pytest.mark.mace
 
 
-@pytest.mark.mace
-class TestMaceCalculatorFactory:
+@pytest.fixture(scope="module")
+def mace_calc():
+    pytest.importorskip("mace")
+    import torch
+    from amorphgen.utils import get_calculator
 
-    def test_get_mace_calculator_cpu(self):
-        from amorphgen.utils import get_mace_calculator
-        calc = get_mace_calculator(model="mace-mpa-0", device="cpu")
-        assert calc is not None
-
-    def test_invalid_model_path_raises(self, tmp_path):
-        from amorphgen.utils import get_mace_calculator
-        with pytest.raises(FileNotFoundError):
-            get_mace_calculator(model_path="/nonexistent/path/model.model",
-                                device="cpu")
-
-    def test_mace_calculator_can_compute_energy(self):
-        from amorphgen.utils import get_mace_calculator
-        atoms = bulk("Al", "fcc", a=4.05, cubic=True)
-        calc  = get_mace_calculator(model="mace-mpa-0", device="cpu")
-        atoms.calc = calc
-        energy = atoms.get_potential_energy()
-        assert isinstance(energy, float)
-        assert energy < 0    # Al should have negative cohesive energy
+    original_dtype = torch.get_default_dtype()
+    try:
+        yield get_calculator(model="mace-mpa-0", device="cpu")
+    finally:
+        torch.set_default_dtype(original_dtype)
 
 
-@pytest.mark.mace
-class TestFullPipelineWithMACE:
-    """
-    End-to-end pipeline test with real MACE on a tiny Al cell.
-    Not a physically meaningful amorphisation — just checks no crashes.
-    """
+def test_mace_calculator_computes_energy_forces_and_stress(mace_calc):
+    assert isinstance(mace_calc, Calculator)
+    atoms = bulk("Al", "fcc", a=4.05, cubic=True)
+    atoms.calc = mace_calc
+    assert np.isfinite(atoms.get_potential_energy())
+    forces = atoms.get_forces()
+    assert forces.shape == (len(atoms), 3)
+    assert np.isfinite(forces).all()
+    stress = atoms.get_stress()
+    assert stress.shape == (6,)
+    assert np.isfinite(stress).all()
 
-    def test_stages_1_to_7_al(self, tmp_path):
-        from amorphgen import MeltQuenchPipeline
-        from ase.build import bulk
-        from ase.io import write
-        from ase import Atoms
 
-        atoms = bulk("Al", "fcc", a=4.05, cubic=True).repeat(2)
-        poscar = os.path.join(tmp_path, "Al_test.cif")
-        write(poscar, atoms)
-        n_atoms = len(atoms)
+def test_stages_1_to_7_al(tmp_path, mace_calc):
+    """A short real-model pipeline preserves atoms and produces finite geometry."""
+    from amorphgen import MeltQuenchPipeline
 
-        cfg_override = {
-            "mace_model": "mace-mpa-0",
-            "device":     "cpu",
-            "opt": {
-                "fmax": 0.1, "max_steps": 10,
-                "fix_symmetry": False,
-            },
-            "melt": {
-                # NVT avoids NPT barostat instability on tiny test cells
-                "ensemble":    "NVT",
-                "T_start":     300, "T_end": 500,
-                "T_step":      100, "steps_per_T": 5,
-                "make_cubic":  False,
-            },
-            "eq_premelt": {
-                "ensemble": "NVT", "steps": 5,
-            },
-            "eq_high": {
-                "ensemble":           "NVT",
-                "temperature_K":      500,
-                "steps":              5,
-                "sample_interval_ps": None,   # disable snapshots
-            },
-            "eq_low": {
-                "ensemble": "NVT", "steps": 5,
-            },
-            "quench": {
-                "ensemble":    "NVT",
-                "T_start":     500, "T_end": 300,
-                "T_step":      -100, "steps_per_T": 5,
-            },
-            "final_opt": {
-                "fmax": 0.1, "max_steps": 10,
-                "fix_symmetry": False,
-            },
-        }
-
-        work_dir = os.path.join(tmp_path, "al_pipeline")
-        pipeline = MeltQuenchPipeline(
-            input_file=poscar,
-            work_dir=work_dir,
-            cfg_override=cfg_override,
-        )
-        result = pipeline.run()
-
-        # pipeline.run() returns Atoms or (Atoms, snapshot_paths)
-        if isinstance(result, tuple):
-            result, _ = result
-
-        assert isinstance(result, Atoms), (
-            f"Expected Atoms, got {type(result)}")
-        assert len(result) == n_atoms, (
-            f"Atom count changed: {n_atoms} → {len(result)}")
+    atoms = bulk("Al", "fcc", a=4.05, cubic=True).repeat(2)
+    source = tmp_path / "Al_test.cif"
+    write(source, atoms)
+    cfg_override = {
+        "model": "mace-mpa-0",
+        "device": "cpu",
+        "seed": 17,
+        "opt": {"fmax": 0.1, "max_steps": 10, "fix_symmetry": False},
+        "melt": {
+            # NVT avoids barostat instability on this small test cell.
+            "ensemble": "NVT", "T_start": 300, "T_end": 500,
+            "T_step": 100, "steps_per_T": 5, "make_cubic": False,
+        },
+        "eq_premelt": {"ensemble": "NVT", "T": 300, "steps": 5},
+        "eq_high": {
+            "ensemble": "NVT", "T": 500, "steps": 5,
+            "sample_interval_ps": None,
+        },
+        "eq_low": {"ensemble": "NVT", "T": 300, "steps": 5},
+        "quench": {
+            "ensemble": "NVT", "T_start": 500, "T_end": 300,
+            "T_step": -100, "steps_per_T": 5,
+        },
+        "final_opt": {"fmax": 0.1, "max_steps": 10, "fix_symmetry": False},
+    }
+    pipeline = MeltQuenchPipeline(
+        input_file=str(source), work_dir=str(tmp_path / "al_pipeline"),
+        cfg_override=cfg_override, calc=mace_calc,
+    )
+    result = pipeline.run()
+    if isinstance(result, tuple):
+        result, _ = result
+    assert isinstance(result, Atoms)
+    assert result.get_chemical_symbols() == atoms.get_chemical_symbols()
+    assert np.isfinite(result.positions).all()
+    assert np.isfinite(result.cell.array).all()
+    assert result.get_volume() > 0

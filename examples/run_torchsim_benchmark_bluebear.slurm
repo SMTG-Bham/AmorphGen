@@ -3,8 +3,8 @@
 # Benchmark: ASE engine vs torch-sim engine for a 20 x 576-atom a-GeO2 ensemble
 # (random-gen + MACE-MPA-0 relaxation) on one BlueBEAR GPU.
 #
-# torch-sim needs Python >= 3.12. The existing amorphgen venv is Python 3.11,
-# so this script uses a SEPARATE venv (see the one-off setup block below).
+# torch-sim needs a Python >= 3.12 virtualenv with amorphgen[mace,torchsim]
+# installed (see the one-off setup block below).
 #
 # Output (under the submission directory):
 #     bench_torchsim/ase/random_opt/       20 relaxed structures, ASE path
@@ -13,10 +13,10 @@
 # ----------------------------------------------------------------------------
 
 #SBATCH --job-name=amg_torchsim
-# Defaults are the Birmingham BlueBEAR project this was developed on. To run it
-# elsewhere set AMORPHGEN_ROOT and AMORPHGEN_VENV, and give your own project with
-#   sbatch --account=<your-project> <this script>
-#SBATCH --account=scanlodo-amorphous-oxides
+# Export AMORPHGEN_VENV=/path/to/venv before submitting (see docs/guides/hpc.md).
+# For repository files, AMORPHGEN_ROOT defaults to the submission directory.
+# Choose your account at submission: sbatch --account=your-project <this-script>
+# Adapt the BlueBEAR modules and QoS below to your cluster.
 #SBATCH --qos=bbgpu
 #SBATCH --time=04:00:00
 #SBATCH --ntasks=1
@@ -32,16 +32,16 @@ mkdir -p logs
 module purge
 module load bear-apps/2023b/live        # provides Python 3.12; check with `module avail Python`
 module load Python/3.12.3-GCCcore-13.2.0
-VENV=${AMORPHGEN_VENV:-/rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/venvs/amorphgen-py312}
+VENV="${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}"
 
 # ── one-off setup (run interactively once, then comment out) ─────────────────
-# python -m venv $VENV
-# source $VENV/bin/activate
+# python -m venv "$VENV"
+# source "$VENV/bin/activate"
 # pip install --upgrade pip
-# pip install -e "/rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/AmorphGen[mace,torchsim]"
+# pip install -e "${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}[mace,torchsim]"
 # python -c "import torch, torch_sim; print(torch.__version__, torch.cuda.is_available(), torch_sim.__version__)"
 # ─────────────────────────────────────────────────────────────────────────────
-source $VENV/bin/activate
+source "$VENV/bin/activate"
 python -c "from amorphgen.utils.radii import estimate_cell_length as e; print('radii check', e({'Ir':40,'O':80}))"
 
 COMP="GeO2*192"; N=20; SEED=1

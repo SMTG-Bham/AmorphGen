@@ -13,17 +13,17 @@
 # 20 structures = 20 array tasks, one GPU each (parallel). Each task ~2-4 h.
 #
 # Place this script + hybrid_iro2_r2scan.yaml in your run directory (e.g.
-# examples_iro2_new/) and submit FROM there:
-#   cd examples_iro2_new && sbatch run_iro2_hybrid_r2scan_bluebear.slurm
+# my_iro2_run/) and submit FROM there:
+#   cd my_iro2_run && sbatch run_iro2_hybrid_r2scan_bluebear.slurm
 # Outputs/config are resolved relative to that submit directory.
 # Collect:  final structures land in iro2_hybrid_r2scan/task_NN/final/
 # ----------------------------------------------------------------------------
 
 #SBATCH --job-name=amg_iro2_hyb_r2s
-# Defaults are the Birmingham BlueBEAR project this was developed on. To run it
-# elsewhere set AMORPHGEN_ROOT and AMORPHGEN_VENV, and give your own project with
-#   sbatch --account=<your-project> <this script>
-#SBATCH --account=scanlodo-amorphous-oxides
+# Export AMORPHGEN_VENV=/path/to/venv before submitting (see docs/guides/hpc.md).
+# For repository files, AMORPHGEN_ROOT defaults to the submission directory.
+# Choose your account at submission: sbatch --account=your-project <this-script>
+# Adapt the BlueBEAR modules and QoS below to your cluster.
 #SBATCH --qos=bbgpu
 #SBATCH --time=06:00:00
 #SBATCH --array=0-19
@@ -39,7 +39,7 @@ set -eu
 module purge
 module load bear-apps/2023a/live
 module load Python/3.11.3-GCCcore-12.3.0
-source "${AMORPHGEN_VENV:-/rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/venvs/amorphgen}/bin/activate"
+source "${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}/bin/activate"
 
 # Resolve paths relative to the submit directory (where this + the config live)
 cd "${SLURM_SUBMIT_DIR:-.}"

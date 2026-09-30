@@ -9,8 +9,6 @@ Targets:
 """
 from __future__ import annotations
 
-import warnings
-
 import numpy as np
 import pytest
 
@@ -124,14 +122,14 @@ class TestAutoTargetCn:
 
     def test_in2o3_oxide_cn(self):
         cn, tol = auto_target_cn({"In": 32, "O": 48})
-        # Oxygen target is typically anion-coordination (~3-4)
-        assert "In" in cn or "O" in cn
+        assert cn == {"In": 5}
+        assert tol == 1
 
     def test_pure_metal_alloy_cn(self):
         cn, tol = auto_target_cn({"Cu": 32, "Zn": 32})
         # Alloys default to CN=8 with broader tolerance
-        assert any(v >= 6 for v in cn.values())
-        assert tol >= 1
+        assert cn == {"Cu": 8, "Zn": 8}
+        assert tol == 2
 
     def test_iivi_chalcogenides_are_tetrahedral(self):
         # Bug fix: Group-12 cations (Zn, Cd, Hg) in chalcogenides form
@@ -205,29 +203,26 @@ class TestRepairIters:
         a2 = generate_random(composition={"Si": 32}, cell_length_ang=10.0,
                               target_cn={"Si": 4}, seed=42)
         # Same seed + repair_iters=0 should give bit-identical positions.
-        np.testing.assert_array_almost_equal(
+        np.testing.assert_array_equal(
             a1.get_positions(), a2.get_positions()
         )
-
-    def test_positive_iters_runs(self):
-        """repair_iters>0 should run the repair loop without error."""
-        atoms = generate_random(
-            composition={"Si": 32}, cell_length_ang=10.0,
-            target_cn={"Si": 4}, seed=0, repair_iters=50,
-        )
-        assert len(atoms) == 32
 
     def test_repair_records_in_sc_report(self):
         """When repair runs, the sc_report should record the post-repair CN."""
         atoms = generate_random(
             composition={"Si": 32}, cell_length_ang=10.0,
             target_cn={"Si": 4}, seed=0, repair_iters=100,
+            minsep={"Si-Si": 2.0}, dmax={"Si-Si": 3.0},
         )
-        sc = atoms.info.get("sc_report")
-        # If SC was active, sc_report should exist and have Si entry.
-        if sc and "Si" in sc:
-            assert "mean" in sc["Si"]
-            assert sc["Si"]["target"] == 4
+        assert len(atoms) == 32
+        distances = atoms.get_all_distances(mic=True)
+        np.fill_diagonal(distances, np.inf)
+        coordination = (distances <= 3.0).sum(axis=1)
+        sc = atoms.info["sc_report"]["Si"]
+        assert sc["target"] == 4
+        assert sc["mean"] == pytest.approx(coordination.mean())
+        assert sc["min"] == coordination.min()
+        assert sc["max"] == coordination.max()
 
 
 # ─── Composition-based path coverage ──────────────────────────────────────
@@ -263,7 +258,6 @@ class TestFormatAutoDeriveSummary:
     def _build(self, comp, target_cn=None):
         from amorphgen.utils.radii import (
             format_auto_derive_summary,
-            default_minsep,
             estimate_cell_length,
             auto_target_cn,
         )
@@ -404,7 +398,7 @@ class TestRetryMode:
         shrink but only to the documented floor (0.95^4 ~ 0.815)."""
         import numpy as np
         from ase.neighborlist import neighbor_list
-        from amorphgen.utils.radii import default_minsep, auto_target_cn
+        from amorphgen.utils.radii import auto_target_cn
         tcn, _ = auto_target_cn(self.COMP)
         ms = default_minsep(["Si"] * 8 + ["O"] * 16, target_cn=tcn)
         a = generate_random(self.COMP, retry_mode="reduce-minsep", **self.STALL)
@@ -451,7 +445,6 @@ class TestSoftPack:
     def test_mgo_keeps_estimated_density_and_floors(self):
         from ase.neighborlist import neighbor_list
         from amorphgen.pipeline.random_gen import generate_random, _get_minsep
-        from amorphgen.utils.radii import default_minsep
         from amorphgen.utils.common import compute_density_gcm3
         comp = {"Mg": 54, "O": 54}
         a = generate_random(comp, seed=7)
@@ -483,23 +476,33 @@ def test_relax_does_not_print_a_false_placement_stall(tmp_path, monkeypatch, cap
     its own 'Final density' line; comparing that with the placement target made
     every relax run claim the placement had stalled."""
     from ase.io import read
+    from ase.calculators.lj import LennardJones
     from amorphgen.pipeline import random_gen as rg
+    from amorphgen.utils.common import compute_density_gcm3
 
-    real = rg.generate_random
+    class ShrinkOptimizer:
+        """Change the cell in the actual batch relaxation path."""
 
-    def shrink_after_relax(atoms, cfg_override=None, calc=None, **kw):
-        """Stand in for the relax step: change the cell, as a real one does."""
-        atoms.set_cell(atoms.cell * 0.90, scale_atoms=True)
-        return atoms
+        def __init__(self, atoms, logfile=None):
+            self.atoms = atoms
 
-    monkeypatch.setattr(rg, "_opt_run", shrink_after_relax, raising=False)
+        def step(self):
+            self.atoms.set_cell(self.atoms.cell * 0.90, scale_atoms=True)
+
+    monkeypatch.setattr(rg, "_get_optimizer_class", lambda name: ShrinkOptimizer)
     files = rg.batch_random({"Si": 8, "O": 16}, n_structures=1,
-                            output_dir=str(tmp_path), seed=1)
+                            output_dir=str(tmp_path), seed=1, relax=True,
+                            calc=LennardJones(), cell_filter="none",
+                            max_relax_steps=1)
     out = capsys.readouterr().out
     assert "placed at" in out, out[-800:]
     assert "placement stalled" not in out, out[-800:]
-    # and the placed value is the one reported, not a post-relax number
     placed = read(str(tmp_path / "random_initial" / "random_0000.xyz"))
-    from amorphgen.utils.common import compute_density_gcm3
+    assert files == [str(tmp_path / "random_opt" / "random_0000_opt.xyz")]
+    relaxed = read(files[0])
     rho = compute_density_gcm3(placed)
+    rho_relaxed = compute_density_gcm3(relaxed)
+    assert rho_relaxed == pytest.approx(rho / 0.90**3)
+    assert f"Final density: {rho_relaxed:.2f}" in out
     assert f"placed at {rho:.2f}" in out
+    assert f"placed at {rho_relaxed:.2f}" not in out

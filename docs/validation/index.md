@@ -1,26 +1,25 @@
 # Validation
 
-AmorphGen has been benchmarked against a DFT-PBE0 melt-quench reference for
-amorphous Ga₂O₃. The results below come from running the **hybrid workflow**
-(`--hybrid-ensemble`), random placement followed by stages 4-7 (high-T
-anneal → quench → low-T eq → final relax) with CHGNet on GPU, NPT throughout, 
-alongside Random and Full melt-quench ensembles for comparison.
+This page records a comparison against a DFT-PBE0 melt-quench reference for
+amorphous Ga₂O₃. It compares random placement followed by CHGNet relaxation,
+the **hybrid workflow** (`--hybrid-ensemble`, stages 4–7), and the full
+melt-quench workflow with CHGNet on GPU.
 
-All ensembles are **N = 20 structures**. Plots and reports below come
-from the built-in analysis (`amorphgen --analyse`) so they exactly match
-what you would see if you re-ran this workflow yourself.
+The reported ensembles contain **N = 20 structures** each. The repository
+includes the comparison figure and one representative structure, but not
+the full ensembles or the complete run configurations and seeds. The
+commands below show how to run a similar comparison; they do not reproduce
+these numerical results exactly.
 
 ```{note}
-All coordination and bond-angle numbers
-on this page are produced with the default `--cutoff auto-rdf`, which
-finds the first minimum of each partial RDF and is the standard
-convention in neutron-diffraction analysis of glasses and liquids. The
-legacy `--cutoff auto` (minsep-based) is kept for the
-placement / repair stages of `--random-gen` but **should not be used
-for analysis** of materials with broad first-shell distributions - it
-systematically truncates the first peak and under-counts coordination.
-This was the default in AmorphGen v1.0.0rc1 and earlier; from v1.0.0 the
-analysis default is `auto-rdf`.
+The reported coordination and bond-angle analysis uses `--cutoff auto-rdf`,
+the analysis default since v1.0.0rc2. It estimates each bond cutoff from
+the first minimum of the partial RDF and falls back to a radii-based value
+when no suitable minimum is found. The alternative `--cutoff auto` uses
+minimum-separation estimates and can truncate broad first shells. Inspect
+the RDF and selected cutoff when comparing coordination numbers between
+studies. Changes to cutoff detection can also change reanalysed results;
+see {doc}`/changelog`.
 ```
 
 ## a-Ga₂O₃
@@ -65,12 +64,12 @@ Random + CHGNet relax, AmorphGen Hybrid (Stages 4-7), AmorphGen Full MQ
 | O–Ga–O angle (°) | 107.5 | 107.7 | 107.6 | **107.9** | — |
 
 ```{note}
-Local structure (bond, coordination, angles) matches the PBE0 reference
-across all three AmorphGen workflows. Density agreement varies: Random
-and Hybrid stay closer to PBE0 because their cells are constrained near
-the auto-estimated density; the Full MQ workflow (NPT throughout)
-exposes CHGNet's preferred equilibrium density, which is ~9% lower than
-PBE0 - a known limitation of MPtrj-trained MLIPs for oxide glasses.
+In this comparison, the local structural averages are close to the PBE0
+reference across all three AmorphGen workflows. Density agreement varies:
+the Full MQ ensemble is about 9% less dense than the PBE0 ensemble.
+The guide examples use NVT for hybrid MD and NPT for full MQ, so their
+volume constraints differ. Density differences depend on both the
+potential and the simulation protocol.
 ```
 
 ### Validation figure
@@ -88,13 +87,20 @@ PBE0 - a known limitation of MPtrj-trained MLIPs for oxide glasses.
 range. Blue = DFT-PBE0 reference, orange = AmorphGen Random,
 green = AmorphGen Hybrid, pink = AmorphGen Full MQ.*
 
-### Reproduce
+### Run a similar comparison
+
+Run from a repository checkout after installing CHGNet. Save the example
+configurations from {doc}`/guides/hybrid-workflow` and
+{doc}`/guides/mq-ensemble` as `hybrid.yaml` and `mq.yaml`, and provide your own
+`Ga2O3_supercell.xyz` for the full MQ option. Review the temperatures,
+durations, and cell constraints for your system before running.
 
 ```bash
-# 1. Generate 20 random a-Ga2O3 structures (Ga160O240, 400 atoms)
+# 1. Generate and relax 20 random structures (Ga160O240, 400 atoms)
 amorphgen --random-gen \
     --composition "Ga2O3*80" \
     --n-structures 20 \
+    --relax --model chgnet --device cuda --cell-filter none \
     --work-dir random_ga2o3/
 
 # 2. Run either Hybrid or Full MQ workflow
@@ -118,22 +124,30 @@ amorphgen --analyse \
     --save-report report.txt --save-plot plots/ --save-pdf
 ```
 
-`hybrid.yaml` and `mq.yaml` are the CHGNet configs given in
-{doc}`/guides/hybrid-workflow` and {doc}`/guides/mq-ensemble`. Both ensemble
-modes collect their final structures in `<work-dir>/final/`.
+Both ensemble modes collect their final structures in `<work-dir>/final/`.
+Analyse `random_ga2o3/random_opt/` for the random-plus-relaxation comparison.
+Use `amorphgen.analysis.compare_ensembles` to plot the ensembles together;
+see {doc}`/api/analysis`.
 
 Reference files for a-SiO₂, a-GeO₂, a-HfO₂ and a-IrO₂ sit next to it in
-`examples/`. The reference file `examples/reference_a_Ga2O3.yaml` is shipped with
-AmorphGen and contains the PBE0 ensemble metrics plus experimental
-neutron/EXAFS data for automatic match/concern/fail scoring.
+`examples/` in the repository. The reference file
+`examples/reference_a_Ga2O3.yaml` contains literature ranges for automatic
+match/concern/fail scoring. These example files are not installed by the
+Python wheel.
 
 ## Data availability
 
-A representative a-Ga₂O₃ structure ships with AmorphGen at
+A representative a-Ga₂O₃ structure is included in the repository at
 `examples/validation/ga2o3/example_final.xyz`. The full 20-structure
-ensemble will be archived on Zenodo at the first stable release (v1.0.0);
-a DOI link will be added here.
+ensembles are not included. To inspect the bundled structure:
+
+```bash
+amorphgen --analyse examples/validation/ga2o3/example_final.xyz \
+    --reference examples/reference_a_Ga2O3.yaml
+```
+
+Its individual metrics need not equal the ensemble averages in the table.
 
 ## Reference data sources
 
-- a-Ga₂O₃: kaewmeechai, Strand & Shluger, *Phys. Rev. B* **111** (2025) 035203 (DFT-PBE0 ensemble); Stehlik et al., *J. Non-Cryst. Solids* **458** (2017) 14 (neutron + EXAFS); Yoshioka et al., *J. Phys. Condens. Matter* **19** (2007) 346211 (DFT-MD).
+- a-Ga₂O₃: Kaewmeechai, Strand & Shluger, *Phys. Rev. B* **111** (2025) 035203 (DFT-PBE0 ensemble); Stehlik et al., *J. Non-Cryst. Solids* **458** (2017) 14 (neutron + EXAFS); Yoshioka et al., *J. Phys. Condens. Matter* **19** (2007) 346211 (DFT-MD).

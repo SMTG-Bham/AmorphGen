@@ -12,7 +12,6 @@ from ase.build import bulk
 from ase.calculators.emt import EMT
 from ase.io import read, write
 
-from amorphgen.configs import DEFAULT_CONFIG
 from amorphgen.utils.common import merge_config
 
 
@@ -21,6 +20,7 @@ from amorphgen.utils.common import merge_config
 EMT_CFG = {
     "model": "mace-mpa-0",  # not used — calc is passed directly
     "device": "cpu",
+    "seed": 0,
     "traj_format": "extxyz",
     "opt": {
         "fmax": 0.5,
@@ -95,7 +95,6 @@ class TestEquilibrate:
     def test_eq_high_make_cubic(self, cu_supercell, emt_calc, tmp_work_dir):
         """Stage 4 reshapes the cell to a cube when make_cubic flag is on
         (eq_high.make_cubic taking precedence over melt.make_cubic)."""
-        import numpy as np
         from amorphgen.pipeline.equilibrate import run
         # Distort the input cell so reshape is observable.
         atoms = cu_supercell.copy()
@@ -116,7 +115,6 @@ class TestEquilibrate:
 
     def test_eq_high_make_cubic_disabled(self, cu_supercell, emt_calc, tmp_work_dir):
         """Stage 4 leaves the cell shape alone when make_cubic flag is off."""
-        import numpy as np
         from amorphgen.pipeline.equilibrate import run
         atoms = cu_supercell.copy()
         skew_cell = atoms.cell.array.copy()
@@ -168,6 +166,9 @@ class TestMelt:
     def test_melt_trajectory_written(self, cu_supercell, emt_calc, tmp_work_dir):
         from amorphgen.pipeline.melt_cell import run
         run(cu_supercell, cfg_override=EMT_CFG, calc=emt_calc)
+        frames = read("stage3_melt_traj.xyz", index=":")
+        assert frames
+        assert all(len(frame) == len(cu_supercell) for frame in frames)
         assert os.path.isfile("stage3_melt.log")
 
 
@@ -197,53 +198,43 @@ class TestQuench:
 class TestRateConfig:
     """Test rate (K/ps) auto-calculation of steps_per_T."""
 
-    def test_melt_with_rate(self, cu_supercell, emt_calc, tmp_work_dir):
-        from amorphgen.pipeline.melt_cell import run
-        cfg = dict(EMT_CFG)
-        cfg["melt"] = {
-            "ensemble": "NVT",
-            "T_start": 300, "T_end": 600, "T_step": 100,
-            "rate": 100,         # 100 K/ps
-            "timestep": 1.0,     # 1 fs
-            "friction": 0.01,
-            "make_cubic": False,
-        }
-        # rate=100 K/ps, T_step=100 K, timestep=1 fs
-        # steps_per_T = 100 / (100 * 0.001) = 1000
-        result = run(cu_supercell, cfg_override=cfg, calc=emt_calc)
-        assert result is not None
+    @pytest.mark.parametrize("sign", [1, -1], ids=["positive", "negative"])
+    @pytest.mark.parametrize("stage,rate,timestep,expected_steps", [
+        ("melt", 100, 1.0, 1000),
+        ("quench", 200, 0.5, 1000),
+        ("quench", 10000, 1.0, 10),
+    ])
+    def test_rate_drives_stage_schedule(self, cu_supercell, emt_calc,
+                                       tmp_work_dir, monkeypatch, sign,
+                                       stage, rate, timestep, expected_steps):
+        """The stage uses rate magnitude and timestep, overriding steps_per_T."""
+        from unittest.mock import Mock, call
+        from amorphgen.pipeline import melt_cell, quench
 
-    def test_quench_with_rate(self, cu_supercell, emt_calc, tmp_work_dir):
-        from amorphgen.pipeline.quench import run
-        cfg = dict(EMT_CFG)
-        cfg["quench"] = {
-            "ensemble": "NVT",
-            "T_start": 600, "T_end": 300, "T_step": -100,
-            "rate": 200,         # 200 K/ps
-            "timestep": 0.5,     # 0.5 fs
-            "friction": 0.01,
-        }
-        # rate=200 K/ps, T_step=100 K, timestep=0.5 fs
-        # steps_per_T = 100 / (200 * 0.0005) = 1000
-        result = run(cu_supercell, cfg_override=cfg, calc=emt_calc)
-        assert result is not None
+        module = melt_cell if stage == "melt" else quench
+        temperatures = [300, 400, 500, 600]
+        if stage == "quench":
+            temperatures.reverse()
+        temperatures = temperatures[1:]  # initial temperature is set at construction
+        cfg = merge_config(EMT_CFG, {stage: {
+            "rate": sign * rate,
+            "timestep": timestep,
+            "steps_per_T": 99999,
+        }})
+        dyn = Mock(spec=["set_temperature", "run"])
+        monkeypatch.setattr(module, "build_md_dynamics", Mock(return_value=dyn))
+        monkeypatch.setattr(module, "attach_outputs",
+                            Mock(return_value=(Mock(), Mock())))
 
-    def test_rate_overrides_steps_per_T(self, cu_supercell, emt_calc, tmp_work_dir):
-        """When both rate and steps_per_T are given, rate wins."""
-        from amorphgen.pipeline.quench import run
-        cfg = dict(EMT_CFG)
-        cfg["quench"] = {
-            "ensemble": "NVT",
-            "T_start": 600, "T_end": 300, "T_step": -100,
-            "steps_per_T": 99999,  # should be ignored
-            "rate": 10000,         # very fast → few steps
-            "timestep": 1.0,
-            "friction": 0.01,
-        }
-        # rate=10000 K/ps → steps_per_T = 100 / (10000 * 0.001) = 10
-        result = run(cu_supercell, cfg_override=cfg, calc=emt_calc)
-        assert result is not None
-        assert os.path.isfile("stage5_quenched.xyz")
+        module.run(cu_supercell, cfg_override=cfg, calc=emt_calc)
+
+        expected_calls = []
+        for temperature in temperatures:
+            expected_calls.extend([
+                call.set_temperature(temperature_K=temperature),
+                call.run(expected_steps),
+            ])
+        assert dyn.mock_calls == expected_calls
 
 
 class TestFinalOpt:
@@ -442,7 +433,7 @@ class TestFrameLevelResume:
         from amorphgen.pipeline import equilibrate
 
         def cfg(steps):
-            return {"device": "cpu", "traj_format": "extxyz",
+            return {"device": "cpu", "traj_format": "extxyz", "seed": 0,
                     "eq_premelt": {"ensemble": "NVT", "T": 300,
                                    "steps": steps, "timestep": 1.0,
                                    "friction": 0.01}}
@@ -464,7 +455,7 @@ class TestFrameLevelResume:
         from amorphgen.pipeline import quench
 
         def cfg():
-            return {"device": "cpu", "traj_format": "extxyz",
+            return {"device": "cpu", "traj_format": "extxyz", "seed": 0,
                     "quench": {"ensemble": "NVT", "T_start": 600,
                                "T_end": 300, "T_step": -100,
                                "steps_per_T": 60, "timestep": 1.0,
@@ -527,7 +518,7 @@ class TestStageWorkDir:
         atoms = bulk("Cu", "fcc", a=3.6, cubic=True).repeat(2)
 
         def cfg(steps):
-            return {"device": "cpu", "traj_format": "extxyz",
+            return {"device": "cpu", "traj_format": "extxyz", "seed": 0,
                     "eq_premelt": {"ensemble": "NVT", "T": 300,
                                    "steps": steps, "timestep": 1.0,
                                    "friction": 0.01}}

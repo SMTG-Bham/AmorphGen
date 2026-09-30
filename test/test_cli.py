@@ -5,7 +5,6 @@ Tier 1 tests for CLI argument parsing and input validation.
 """
 
 import pytest
-import sys
 from unittest.mock import patch
 
 from amorphgen.cli import (

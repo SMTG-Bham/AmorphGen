@@ -1,103 +1,48 @@
----
-orphan: true
----
+# Scattering methods and citations
 
-# How AmorphGen computes S(q), and where the method comes from
+AmorphGen implements standard scattering conventions in
+`amorphgen/analysis/rdf.py`, exposed through `StructureAnalyser` and the CLI.
+Cite the software version used, together with the sources relevant to the
+calculation. The repository's
+[CITATION.cff](https://github.com/SMTG-Bham/AmorphGen/blob/main/CITATION.cff)
+contains the software citation.
 
-A common (and reasonable) question from users about to publish:
+## Sources used by the implementation
 
+| Topic | Reference |
+|---|---|
+| Total-scattering normalization and correlation-function conventions | [Keen, *J. Appl. Cryst.* **34** (2001), 172–177](https://doi.org/10.1107/S0021889800019993) |
+| Faber–Ziman partial weighting | [Faber & Ziman, *Philos. Mag.* **11** (1965), 153–173](https://doi.org/10.1080/14786436508211931) |
+| q-dependent X-ray form factors | [Waasmaier & Kirfel, *Acta Cryst. A* **51** (1995), 416–431](https://doi.org/10.1107/S0108767394013292) |
+| Coherent neutron scattering lengths | [Sears, *Neutron News* **3** (1992), 26–37](https://doi.org/10.1080/10448639208218770) |
 
+The direct method evaluates atomic scattering amplitudes at nonzero
+reciprocal-lattice vectors and averages over spherical shells. It subtracts
+the self-scattering contribution to produce Faber–Ziman `S(q)` with a
+high-q limit of 1. X-ray weights use q-dependent neutral-atom form factors,
+not constant atomic numbers. See {doc}`sq_xrd_methodology` for the equations.
 
-## What's standard physics
+## Reporting a calculation
 
-Every equation behind ``structure_factor_direct()`` and the
-simulated-XRD recipe was published long before AmorphGen existed:
+A methods description should state:
 
-| Ingredient | First published | Status |
-|---|---|---|
-| Debye scattering equation $S(q)=\frac{1}{N\langle f\rangle^{2}}\sum_{ij}f_i f_j \frac{\sin(qr_{ij})}{qr_{ij}}$ | Debye 1915 | Textbook (Egami & Billinge 2003) |
-| Evaluation at reciprocal-lattice vectors of a periodic cell | Ashcroft & Mermin 1976 textbook | Standard solid-state |
-| Spherical averaging into q-bins | — | Universal convention |
-| Faber–Ziman multi-element weighting | Faber & Ziman 1965 | Universal convention |
-| X-ray Z-approximation (q → 0 limit of f(q)) | Implicit in early X-ray theory | Textbook (Cullity & Stock) |
-| Tabulated neutron scattering lengths | Sears 1992 | Universal reference |
-| Bragg's law + Lorentz–polarization correction | Bragg 1913; Bragg-Brentano geometry | Used by GSAS-II, FullProf, Topas |
+- The AmorphGen version, input configurations, cell sizes and temperature.
+- Whether `structure_factor_direct()` or the FT-based `structure_factor()`
+  was used, and the scattering weights.
+- The q range, number of bins and smoothing width; for the FT method, `rmax`.
+- The normalization of the experimental reference and any additional
+  instrument or sample corrections.
 
-There is no equation in AmorphGen's S(q) or XRD code whose first
-publication is later than 1992, and most of them are pre-1970.
+For example, after filling in the settings actually used:
 
-## What's ours
+> Structure factors were computed with AmorphGen by summing atomic
+> scattering amplitudes over the periodic cells' reciprocal-lattice vectors
+> and averaging into spherical q shells. X-ray weights used the
+> Waasmaier–Kirfel neutral-atom form factors. The self-scattering term was
+> removed using the Faber–Ziman normalization.
 
-The Python code that wires the standard equations together:
-
-- ~200 lines in ``amorphgen/analysis/rdf.py`` and
-  ``amorphgen/analysis/analyser.py``
-- The API surface (``structure_factor()``,
-  ``structure_factor_direct()``, the ``weighting=`` parameter, the
-  return-dict format)
-- The Sears scattering-length table inline as a Python dict
-- The XRD recipe documented in the analysis guide as a code snippet
-
-That's all. There is no AmorphGen "method" or "approximation" that
-needs to be cited separately, the implementation is a wrapper.
-
-## Other packages that do exactly the same thing
-
-The reciprocal-lattice-sum approach for S(q) of periodic amorphous
-MD cells is implemented in at least:
-
-- ISAACS ([Le Roux & Petkov, *J. Appl. Cryst.* **43** (2010) 181](https://doi.org/10.1107/S0021889809051929))
-- LiquidLib ([Walter, Bian, Mendoza & Schweizer, *Comput. Phys. Commun.* **228** (2018) 209](https://doi.org/10.1016/j.cpc.2018.03.005))
-- freud ([Ramasubramani et al., *Comput. Phys. Commun.* **254** (2020) 107275](https://doi.org/10.1016/j.cpc.2020.107275))
-- OVITO ``StructureFactorModifier``
-- DL_POLY built-in S(q)
-- VMD plugins
-
-If AmorphGen gave a different answer to ISAACS or LiquidLib on the
-same trajectory, that would be a bug, not a feature. The numbers
-should agree, and they do, see the validation table below.
-
-## Validation evidence
-
-Three independent cross-checks confirm the implementation matches
-established physics and other simulation codes:
-
-| Check | Expected | AmorphGen | ✓ |
-|---|---|---|---|
-| Asymptotic limit S(q→∞), X-ray, a-Ga₂O₃ | $\langle f^{2}\rangle/\langle f\rangle^{2} = 1.43$ (analytic) | 1.44 | yes |
-| FSDP intensity for a-Ga₂O₃ DFT-PBE0 ensemble | ~1.8 (GAP_500, Csányi group, separate code) ([Kaewmeechai et al. PRB **111** (2025) 035203](https://doi.org/10.1103/PhysRevB.111.035203)) | 2.00 | yes |
-| Experimental FSDP intensity for a-Ga₂O₃ X-ray S(Q) | 1.8–2.0 (same reference, Fig. S2b) | 2.00 | yes |
-
-The numbers cross-validate against an analytic limit, an independent
-simulation code, and laboratory experiment.
-
-## How to cite
-
-In a paper that uses AmorphGen for S(q) or simulated XRD analysis,
-**cite the physics, not AmorphGen as a method.** The recommended
-form is:
-
-> Total X-ray structure factors $S(q)$ were computed from the Debye
-> scattering equation [Debye 1915] evaluated at the reciprocal-
-> lattice vectors of the simulation cell using the Faber–Ziman
-> multi-element convention [Faber & Ziman 1965] with atomic
-> scattering factors $f_\alpha = Z_\alpha$. Simulated X-ray
-> diffraction patterns were generated by mapping $S(q)$ to $2\theta$
-> via Bragg's law [Bragg 1913] and applying the standard Lorentz–
-> polarization correction. All analysis was performed using the
-> AmorphGen package [your AmorphGen-paper citation here].
-
-Cite **AmorphGen** for the software ecosystem (random generation,
-melt-quench pipeline, ensemble I/O, the StructureAnalyser API).
-Cite **the primary literature** for the physics. This is the same
-convention used for ASE, VASP, LAMMPS or any other framework that
-implements long-standing physics.
-
-## Bottom line
-
-If a reviewer asks "is this implementation a known method or did the
-authors invent something?", the answer is unambiguous: it's the
-standard textbook approach, the same algorithm as ISAACS, LiquidLib,
-freud, OVITO and DL_POLY, and it validates against an analytic limit,
-an independent simulation code, and experiment. AmorphGen contributes
-the integration and ergonomics, not the physics.
+Add the software and method citations to this description. If reporting an
+XRD intensity profile, also describe the conversion from normalized `S(q)`
+to coherent intensity and the measurement-specific corrections. Agreement
+with another package or an experiment should be supported by a reproducible
+comparison of the same inputs and conventions.
