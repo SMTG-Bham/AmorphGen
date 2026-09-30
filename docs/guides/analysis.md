@@ -248,6 +248,25 @@ material systems.
 
 ::::::
 
+## Which contacts count as bonds?
+
+The bonding coordination report, total coordination, bond angles and CN
+plot share the same bonding rule. In compounds with anions, only
+cation–anion pairs count as bonds; charge balance determines the anions.
+Without anions, the radii classification decides: same-element pairs
+count in a single-element system or a metal-rich alloy (at least 70 %
+metal atoms), and unlike-element pairs count when classified as ionic,
+covalent or metallic.
+
+Hydrogenated group-IV networks contain only C, Si and/or Ge plus H, with
+at most one H per host atom. Their host keeps the bonding rules of the
+H-free composition: Si–Si in a-Si:H, Ge–Ge in a-Ge:H and C–C in a-C:H
+count as bonds. In a-SiC:H only Si–C host pairs count, and in a-SiGe:H
+only Si–Ge host pairs count. Every host–H pair counts as a bond; H–H
+never does. These pairs still have to lie within their distance cutoffs.
+Metal hydrides, hydroxides, compositions with other elements and those
+with more H than host atoms retain the usual rules.
+
 ## Cutoff
 
 The cutoff defines what counts as a "first-shell" bond and affects
@@ -660,9 +679,10 @@ comment line) when generating.
 That's an analysis artifact. Same-element pairs in multi-element ionic
 compounds (Si–Si in SiO₂, Hf–Hf in HfO₂, Ga–Ga in Ga₂O₃) are
 **second-shell contacts mediated through the anion**, not first-shell
-bonds. From v1.0.0+ they're excluded from bond-angle triplets
-automatically. For coordination, you can ignore the X–X mean, the
-relevant CN for AB systems is A–B and B–A.
+bonds. They are listed under `Non-bonded contacts` and excluded from
+bonding coordination, total coordination, bond-angle triplets and the
+CN plot. For SiO₂, the relevant bonding CNs are Si–O and O–Si. In
+a-Si and a-Si:H, however, Si–Si is a host-network bond and is included.
 
 ### "RDF goes to zero suddenly at large r"
 
