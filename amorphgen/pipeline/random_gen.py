@@ -109,13 +109,21 @@ def _push_apart(atoms: Atoms, minsep: dict, max_iter: int = 600,
     pos = atoms.get_positions().copy()
     syms = atoms.get_chemical_symbols()
     cut = max(minsep.values()) if minsep else 3.0
-    pair_m = np.array([[_get_minsep(a, b, minsep) for b in syms] for a in syms])
+    # per-species lookup rather than an N x N matrix: the floor depends only on
+    # the two species, so build types x types once and index it by the pairs the
+    # neighbour list actually returns. A 1000-atom cell went from a million
+    # _get_minsep calls and an 8 MB matrix to a handful of calls and none.
+    species = sorted(set(syms))
+    s_idx = {s: k for k, s in enumerate(species)}
+    code = np.fromiter((s_idx[s] for s in syms), dtype=np.intp, count=len(syms))
+    minsep_tab = np.array([[_get_minsep(a, b, minsep) for b in species]
+                           for a in species])
     work = atoms.copy()
     min_ratio = 0.0
     for it in range(max_iter):
         work.set_positions(pos)
         i, j, D = neighbor_list("ijD", work, cut)
-        m = pair_m[i, j]
+        m = minsep_tab[code[i], code[j]]
         d = np.linalg.norm(D, axis=1)
         bad = (d < tol * m) & (i < j)
         min_ratio = float((d / m).min()) if len(d) else 1.0

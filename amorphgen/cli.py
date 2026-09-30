@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-import numpy as np
 import os
 
 
@@ -1465,18 +1464,29 @@ def main():
                 from .analysis.rdf import coordination_from_Tr, first_Tr_peak
                 pk, r_lo, r_hi = first_Tr_peak(tr)
                 if pk is None:
-                    print(f"  no resolved first peak; rho = {tr['rho']:.4f} atoms/A^3")
+                    tr_line = (f"  T(r) ({tr_w}, q = {qlo}-{qhi} 1/A, {win} window): "
+                               f"no resolved first peak; "
+                               f"rho = {tr['rho']:.4f} atoms/A^3")
                 else:
                     n_first = coordination_from_Tr(tr, r_lo, r_hi)
-                    print(f"  first T(r) peak at r = {pk:.2f} A "
-                          f"({r_lo:.2f}-{r_hi:.2f} A, weighted count {n_first:.2f}); "
-                          f"rho = {tr['rho']:.4f} atoms/A^3")
+                    tr_line = (f"  T(r) ({tr_w}, q = {qlo}-{qhi} 1/A, {win} window): "
+                               f"first peak at r = {pk:.2f} A "
+                               f"({r_lo:.2f}-{r_hi:.2f} A, weighted count {n_first:.2f}); "
+                               f"rho = {tr['rho']:.4f} atoms/A^3")
+                print(tr_line)
+                # the report file is already written by this point (rings does
+                # the same), so append rather than adding to `text`
+                if report_path:
+                    with open(report_path, "a") as rf:
+                        rf.write("\n" + tr_line + "\n")
                 if args.tr_scan or an_cfg.get("tr_scan", False):
                     from .analysis.rdf import scan_Tr_qmax, format_Tr_scan
                     rows = scan_Tr_qmax(sa.atoms_list, weighting=tr_w, qmin=qlo)
                     scan_text = format_Tr_scan(rows)
                     print(scan_text)
-                    text += "\n" + scan_text
+                    if report_path:
+                        with open(report_path, "a") as rf:
+                            rf.write("\n" + scan_text + "\n")
                 if plot_dir:
                     from .analysis.plotting import plot_tr
                     plot_tr(tr, output_dir=plot_dir,
