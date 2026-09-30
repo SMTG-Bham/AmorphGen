@@ -12,8 +12,8 @@
 #   ./run_quench_array_bluebear.slurm  # this file
 #
 # After submission each task writes:
-#   ./quench_runs/struct_NNNN/run_0000/final_amorphous.xyz
-#   ./quench_runs/struct_NNNN/run_0000/stage{5,6,7}_*.xyz
+#   ./quench_runs/run_NNNN/final_amorphous.xyz
+#   ./quench_runs/run_NNNN/stage{5,6,7}_*.xyz
 # ----------------------------------------------------------------------------
 
 #SBATCH --job-name=amg_quench
@@ -52,10 +52,10 @@ if [ -z "${SNAP}" ]; then
 fi
 
 # Stage just this task's snapshot in a per-task input dir so --snapshot-dir
-# picks exactly one. All quench outputs land in the shared quench_runs/,
-# where batch_quench creates run_${TASK}/ named after the snapshot index.
+# picks exactly one. Single-input batches write directly to their output
+# directory, so every task needs its own run_${TASK}/ directory.
 INPUT_DIR=${ROOT}/inputs_per_task/task_${TASK}
-QUENCH_DIR=${ROOT}/quench_runs
+QUENCH_DIR=${ROOT}/quench_runs/run_${TASK}
 mkdir -p ${INPUT_DIR} ${QUENCH_DIR}
 cp -n "${SNAP}" ${INPUT_DIR}/
 
@@ -63,13 +63,12 @@ cp -n "${SNAP}" ${INPUT_DIR}/
 echo "host: $(hostname)"
 echo "task: ${TASK}"
 echo "snapshot: $(basename ${SNAP})"
-echo "output:   ${QUENCH_DIR}/run_${TASK}/"
+echo "output:   ${QUENCH_DIR}/"
 nvidia-smi -L
 echo
 
 # ── Run quench (stages 5, 6, 7) ───────────────────────────────────────────
-# batch_quench writes to ${QUENCH_DIR}/run_${TASK}/final_amorphous.xyz
-# (named after the parsed snapshot index, not the loop counter).
+# batch_quench writes to ${QUENCH_DIR}/final_amorphous.xyz.
 amorphgen --batch-quench \
   --snapshot-dir ${INPUT_DIR} \
   --config ${ROOT}/mq_stages_567_cuda.yaml \

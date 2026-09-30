@@ -16,10 +16,12 @@ minsep calculation, density estimation) are in amorphgen.utils.radii.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import importlib
 import time
+from collections import Counter
 import numpy as np
 from ase import Atoms
 from ase.io import write
@@ -1214,6 +1216,11 @@ def batch_random(
     optimizer : str
     cell_filter : str
     max_retries : int
+    resume : bool
+        Reuse completed structures only when the stored composition, format,
+        and relaxation mode match. Incompatible or unreadable run metadata
+        raises ValueError before any existing output is changed. Legacy runs
+        without metadata are checked against the structures' atom counts.
     **kwargs
         Forwarded to generate_random().
 
@@ -1259,49 +1266,59 @@ def batch_random(
     not_selected = (set(range(n_structures)) - selected) if selected else set()
 
     # ── Resume support: scan for existing completed structures ──
+    meta_path = os.path.join(output_dir, "run_metadata.json")
+    current_meta = {
+        "composition": composition,
+        "output_format": output_format,
+        "relax": relax,
+    }
     existing_indices = set()
     if resume:
-        import json as _json
-
-        # Write or check run metadata for consistency
-        meta_path = os.path.join(output_dir, "run_metadata.json")
-        current_meta = {
-            "composition": composition,
-            "output_format": output_format,
-            "relax": relax,
-        }
         if os.path.isfile(meta_path):
             try:
-                with open(meta_path) as mf:
-                    prev_meta = _json.load(mf)
-                if prev_meta.get("composition") != composition:
-                    import warnings
-                    warnings.warn(
-                        f"Resume: composition changed from "
-                        f"{prev_meta['composition']} to {composition}. "
-                        f"Structures may be inconsistent."
+                with open(meta_path, encoding="utf-8") as mf:
+                    prev_meta = json.load(mf)
+            except (OSError, ValueError) as exc:
+                raise ValueError(
+                    f"Cannot resume: cannot read run metadata {meta_path!r}. "
+                    "Use a separate output directory for a new run."
+                ) from exc
+            if not isinstance(prev_meta, dict) or "composition" not in prev_meta:
+                raise ValueError(f"Cannot resume: invalid run metadata {meta_path!r}.")
+            for key, value in current_meta.items():
+                if key in prev_meta and prev_meta[key] != value:
+                    raise ValueError(
+                        f"Cannot resume: {key} changed from {prev_meta[key]!r} "
+                        f"to {value!r}. Use a separate output directory "
+                        "for an incompatible run."
                     )
-            except Exception:
-                pass  # corrupted metadata, proceed anyway
 
         # Scan for completed files (resume against the new subdir layout
         # introduced in v1.0.0rc2)
         for idx in range(n_structures):
-            if relax:
-                check_file = os.path.join(
-                    opt_dir, f"random_{idx:04d}_opt{ext}")
-            else:
-                check_file = os.path.join(
-                    initial_dir, f"random_{idx:04d}{ext}")
-            if os.path.isfile(check_file) and os.path.getsize(check_file) > 0:
-                # Validate ASE can read it
+            initial_file = os.path.join(initial_dir, f"random_{idx:04d}{ext}")
+            opt_file = os.path.join(opt_dir, f"random_{idx:04d}_opt{ext}")
+            check_file = opt_file if relax else initial_file
+            # Check unfinished initial structures too, and do not rely solely
+            # on metadata: it may be missing from an older or copied run.
+            for candidate in (initial_file, opt_file) if relax else (initial_file,):
+                if not os.path.isfile(candidate) or os.path.getsize(candidate) == 0:
+                    continue
                 try:
                     from ase.io import read as _read
-                    _read(check_file)
+                    saved_atoms = _read(candidate)
+                except Exception:
+                    continue  # corrupted file, will regenerate
+                saved_composition = dict(Counter(saved_atoms.get_chemical_symbols()))
+                if saved_composition != composition:
+                    raise ValueError(
+                        f"Cannot resume: composition of {candidate!r} is "
+                        f"{saved_composition!r}, expected {composition!r}. "
+                        "Use a separate output directory for an incompatible run."
+                    )
+                if candidate == check_file:
                     existing_indices.add(idx)
                     paths.append(check_file)
-                except Exception:
-                    pass  # corrupted file, will regenerate
 
         if existing_indices:
             missing = [i for i in range(n_structures)
@@ -1441,17 +1458,8 @@ def batch_random(
             return reduced
 
         # Save run metadata for resume consistency checks
-        if resume or True:  # always write metadata
-            import json as _json
-            meta_path = os.path.join(output_dir, "run_metadata.json")
-            meta = {
-                "composition": composition,
-                "output_format": output_format,
-                "relax": relax,
-                "n_structures": n_structures,
-            }
-            with open(meta_path, "w") as mf:
-                _json.dump(meta, mf, indent=2)
+        with open(meta_path, "w", encoding="utf-8") as mf:
+            json.dump({**current_meta, "n_structures": n_structures}, mf, indent=2)
 
         # Pre-warm calculator: model load + MPS graph compile happen once,
         # outside the per-structure timing. Otherwise the first structure

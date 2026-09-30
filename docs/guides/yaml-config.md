@@ -253,7 +253,9 @@ final_opt:
   cell_filter: FrechetCellFilter   # full cell relax for accurate density
 ```
 
-When `final_opt:` is absent, Stage 7 silently falls back to `opt:`. This is fine for many workflows but worth knowing if you're producing publication-quality structures.
+Stage 7 inherits `opt:` and applies the individual keys in `final_opt:` on top.
+Partial overrides, including a CLI flag such as `--format`, preserve all other
+optimisation settings from `opt:`.
 
 ## Selecting an NPT integrator
 

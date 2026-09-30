@@ -88,18 +88,82 @@ class TestRandomGenResume:
                              seed=42, resume=True)
         assert len(paths) == 3
 
-    def test_resume_composition_mismatch_warns(self, tmp_path):
-        """Changing composition on resume should warn."""
+    def test_resume_composition_mismatch_fails_without_writes(self, tmp_path):
+        """Equal atom counts must not let SiO2 outputs stand in for GeO2."""
         out = str(tmp_path / "structures")
 
         # First run with SiO2
-        batch_random({"Si": 8, "O": 16}, n_structures=2,
+        batch_random({"Si": 4, "O": 8}, n_structures=2,
                      output_dir=out, seed=42)
+        before = {p: p.read_bytes() for p in (tmp_path / "structures").rglob("*")
+                  if p.is_file()}
 
         # Resume with different composition
-        with pytest.warns(UserWarning, match="composition changed"):
-            batch_random({"Al": 8, "O": 12}, n_structures=2,
+        with pytest.raises(ValueError, match="Cannot resume: composition changed"):
+            batch_random({"Ge": 4, "O": 8}, n_structures=2,
                          output_dir=out, seed=42, resume=True)
+        assert {p: p.read_bytes() for p in (tmp_path / "structures").rglob("*")
+                if p.is_file()} == before
+
+    @pytest.mark.parametrize("metadata", ["missing", "matching"])
+    @pytest.mark.parametrize("composition", [{"Ge": 4, "O": 8}, {"Si": 5, "O": 7}])
+    def test_resume_checks_saved_composition(self, tmp_path, metadata, composition):
+        """A readable checkpoint needs the correct elements and counts."""
+        import json
+        from ase import Atoms
+
+        initial = tmp_path / "random_initial"
+        initial.mkdir()
+        path = initial / "random_0000.xyz"
+        write(path, Atoms("Si4O8", cell=[8, 8, 8], pbc=True))
+        if metadata == "matching":
+            (tmp_path / "run_metadata.json").write_text(json.dumps({
+                "composition": composition, "output_format": "xyz", "relax": False,
+            }))
+        before = path.read_bytes()
+        with pytest.raises(ValueError, match="Cannot resume: composition of"):
+            batch_random(composition, output_dir=str(tmp_path), resume=True)
+        assert path.read_bytes() == before
+        assert not (tmp_path / "random_gen.log").exists()
+
+    def test_cli_resume_rejects_incompatible_formula(self, tmp_path):
+        import subprocess
+        import sys
+
+        batch_random({"Si": 4, "O": 8}, n_structures=2,
+                     output_dir=str(tmp_path), seed=42)
+        before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+        result = subprocess.run(
+            [sys.executable, "-m", "amorphgen.cli", "--random-gen",
+             "--composition", "GeO2*4", "-n", "2", "--resume", "-o", str(tmp_path)],
+            capture_output=True, text=True,
+        )
+        assert result.returncode != 0
+        assert "composition changed" in result.stdout + result.stderr
+        assert "already exist" not in result.stdout
+        assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+
+    @pytest.mark.parametrize("metadata", ["{", "[]", "{}"])
+    def test_resume_refuses_invalid_metadata(self, tmp_path, metadata):
+        path = tmp_path / "run_metadata.json"
+        path.write_text(metadata)
+        with pytest.raises(ValueError, match="Cannot resume: .*metadata"):
+            batch_random({"Si": 4, "O": 8}, output_dir=str(tmp_path), resume=True)
+        assert path.read_text() == metadata
+        assert not (tmp_path / "random_gen.log").exists()
+
+    @pytest.mark.parametrize("changed", [{"output_format": "cif"}, {"relax": True}])
+    def test_resume_checks_other_stored_settings(self, tmp_path, changed):
+        import json
+        metadata = {"composition": {"Si": 4, "O": 8},
+                    "output_format": "xyz", "relax": False}
+        path = tmp_path / "run_metadata.json"
+        path.write_text(json.dumps(metadata))
+        before = path.read_bytes()
+        with pytest.raises(ValueError, match=f"{next(iter(changed))} changed"):
+            batch_random(metadata["composition"], output_dir=str(tmp_path),
+                         resume=True, **changed)
+        assert path.read_bytes() == before
 
 
 class TestSeedReproducibility:

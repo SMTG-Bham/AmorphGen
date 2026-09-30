@@ -60,13 +60,16 @@ The inner `run_NNNN/` is named after the source snapshot's index (parsed from th
 `snapshot_0007_*`, making it easy to trace any final structure back to its
 high-T starting frame.
 
+For a single input, the ASE engine writes the stage outputs directly inside
+`quench_runs/`; the final structure is still collected into `final/mq_0000.<fmt>`.
+The torch-sim engine retains the `run_NNNN/` subdirectory for single inputs.
+
 ### HPC job-array tip
 
-When splitting the per-snapshot quenches across SLURM array tasks, point **all
-tasks at the same `quench_runs/`** output dir; AmorphGen names the per-task
-subdir from the snapshot index, so there's no collision. Don't pass each task
-its own `-o quench_runs/run_${TASK}`, which nests inside another `run_NNNN/`
-created by `batch_quench` and gives you the unhelpful `quench_runs/run_0007/run_0007/`.
+When splitting the per-snapshot quenches across SLURM array tasks, give **each
+task its own output directory**. A single-input `--batch-quench` writes directly
+to that directory, so `-o quench_runs/run_${TASK}` keeps the tasks separate and
+preserves the usual ensemble layout.
 
 A clean per-task command looks like:
 
@@ -77,7 +80,7 @@ amorphgen --batch-quench \
   --snapshot-dir inputs_per_task/task_${TASK} \
   --config mq.yaml --stages 5 6 7 \
   --model chgnet --device cuda \
-  -o quench_runs        # shared across all array tasks
+  -o quench_runs/run_${TASK}   # separate output directory for each task
 ```
 
 A full SLURM array template ships with the package at

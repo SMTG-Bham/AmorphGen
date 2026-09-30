@@ -4,6 +4,28 @@ orphan: true
 
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Stage 3 preserves the input cell and bond lengths before heating. Cubic
+  reshaping now requires an explicit `melt: make_cubic: true` setting.
+- Ensemble collection handles flat single-input batch outputs, including the
+  default `--mq-ensemble -n 1` and one-input array jobs. Missing expected finals
+  raise an error. The quench-array example uses a separate directory per task.
+- Stage 7 inherits all `opt:` settings and applies partial `final_opt:` or CLI
+  overrides without dropping unrelated YAML optimisation settings.
+- The pipeline and standalone stage/batch entry points forward `--dtype` /
+  `default_dtype` to their calculators instead of using the backend's default
+  precision.
+- Conversion refuses destinations that would overwrite an input, including
+  symlink and hardlink aliases, before writing any converted files.
+- Torch-sim rejects an invalid explicit `--model-path` instead of falling back
+  to a foundation model.
+- Random generation resume refuses changes to recorded composition, output
+  format or relaxation mode, validates saved atom counts and elements, and
+  reports invalid metadata instead of silently accepting incompatible results.
+
 ## v1.0.0rc2 (2026-05-22)
 
 ### Changed (breaking)

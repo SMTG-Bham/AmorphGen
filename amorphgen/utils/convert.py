@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import glob as _glob
 import os
-from typing import Iterable
 
 from ase.io import read, write
 
@@ -42,6 +41,46 @@ def _gather_inputs(input_path: str) -> list[str]:
         return [input_path]
     raise FileNotFoundError(
         f"convert: input path '{input_path}' does not exist")
+
+
+def _plan_outputs(files: list[str], output_dir: str, ext: str) -> list[str]:
+    """Name and validate all outputs before writing any of them."""
+    source_paths = {os.path.realpath(path) for path in files}
+    source_ids = {(stat.st_dev, stat.st_ino) for stat in map(os.stat, files)}
+    used_bases: set[str] = set()
+    destinations: list[str] = []
+    output_paths: set[str] = set()
+    output_ids: set[tuple[int, int]] = set()
+    for path in files:
+        base, in_ext = os.path.splitext(os.path.basename(path))
+        # s.xyz, s.cif and s_xyz.cif must all receive distinct names.
+        candidate = base if base not in used_bases else f"{base}_{in_ext.lstrip('.')}"
+        suffix = 2
+        unique_base = candidate
+        while unique_base in used_bases:
+            unique_base = f"{candidate}_{suffix}"
+            suffix += 1
+        used_bases.add(unique_base)
+        dest = os.path.join(output_dir, unique_base + ext)
+        resolved = os.path.realpath(dest)
+        try:
+            stat = os.stat(dest)
+            dest_id = (stat.st_dev, stat.st_ino)
+        except FileNotFoundError:
+            dest_id = None
+        if resolved in source_paths or dest_id in source_ids:
+            raise ValueError(
+                f"convert: output '{dest}' would overwrite an input file. "
+                "Choose a different output directory with --work-dir or output_dir.")
+        if resolved in output_paths or dest_id in output_ids:
+            raise ValueError(
+                f"convert: output '{dest}' aliases another output file. "
+                "Choose a different output directory with --work-dir or output_dir.")
+        output_paths.add(resolved)
+        if dest_id is not None:
+            output_ids.add(dest_id)
+        destinations.append(dest)
+    return destinations
 
 
 def convert(input_path: str,
@@ -76,6 +115,13 @@ def convert(input_path: str,
     list of str
         Paths to the converted output files, in input order.
 
+    Raises
+    ------
+    ValueError
+        If an output would overwrite any input, including through a symbolic
+        or hard link, or if two outputs alias the same file. No files are
+        written when such a collision is found.
+
     Examples
     --------
     >>> from amorphgen import convert
@@ -101,6 +147,7 @@ def convert(input_path: str,
             output_dir = f"{input_path.rstrip('/')}_{output_format}"
         else:
             output_dir = os.path.dirname(input_path) or "."
+    destinations = _plan_outputs(files, output_dir, ext)
     os.makedirs(output_dir, exist_ok=True)
 
     if verbose:
@@ -108,15 +155,8 @@ def convert(input_path: str,
               f"{output_dir}/  (format: {output_format})")
 
     written: list[str] = []
-    used_bases = set()
-    for f in files:
-        base, in_ext = os.path.splitext(os.path.basename(f))
-        # s.xyz and s.cif must not both become s.vasp
-        if base in used_bases:
-            base = f"{base}_{in_ext.lstrip('.')}"
-        used_bases.add(base)
+    for f, dest in zip(files, destinations):
         atoms = read(f)
-        dest = os.path.join(output_dir, base + ext)
         if ase_format == "vasp" and sort:
             atoms = atoms[atoms.numbers.argsort()]
             write(dest, atoms, format=ase_format, sort=True)

@@ -145,6 +145,7 @@ class MeltQuenchPipeline:
                 model=self.cfg.get("model", "mace-mpa-0"),
                 device=device,
                 model_path=self.cfg.get("model_path"),
+                default_dtype=self.cfg.get("default_dtype", "auto"),
                 **calc_kwargs,
             )
         return self._calc

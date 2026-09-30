@@ -49,6 +49,10 @@ def resolve_torch_device(device: str):
 def build_model(model: str, device: str = "auto", model_path: str | None = None,
                 classical_params: dict | None = None, dtype: str = "float64"):
     """Build a torch-sim ModelInterface for an AmorphGen model name."""
+    if model_path is not None and not os.path.isfile(model_path):
+        raise FileNotFoundError(
+            f"Custom MACE model file not found: {model_path}\n"
+            "Please provide a valid path to a .model file.")
     _require()
     import torch
     from .calculators import MACE_FOUNDATION_MODELS, SEVENNET_MODELS, _ci_get
@@ -74,7 +78,7 @@ def build_model(model: str, device: str = "auto", model_path: str | None = None,
 
     if model_path or name.startswith("mace") or _ci_get(MACE_FOUNDATION_MODELS, model) != model:
         from torch_sim.models.mace import MaceModel
-        if model_path and os.path.isfile(model_path):
+        if model_path is not None:
             raw = model_path
         else:
             from mace.calculators.foundations_models import mace_mp

@@ -47,8 +47,10 @@ def run(atoms_or_file, cfg_override=None, calc=None, work_dir=None, **kwargs):
         atoms = deepcopy(atoms_or_file)
         print("[Stage 3] Using provided Atoms object")
 
-    # Optional cubic reshape
-    if cfg.get("make_cubic", True):
+    # Preserve the crystalline geometry unless a reshape was explicitly
+    # requested. Equal-volume cubic reshaping shears non-cubic cells and
+    # changes bond lengths before the heating ramp even starts.
+    if cfg.get("make_cubic", False):
         atoms = make_cubic(atoms)
         print("[Stage 3] Cell reshaped to cubic")
 
@@ -73,6 +75,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, work_dir=None, **kwargs):
             model=global_cfg.get("model", "mace-mpa-0"),
             device=device,
             model_path=global_cfg.get("model_path"),
+            default_dtype=global_cfg.get("default_dtype", "auto"),
         )
     atoms.calc = calc
 

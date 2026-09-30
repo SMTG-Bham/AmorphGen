@@ -981,7 +981,8 @@ def _run_mq_ensemble(args, override: dict) -> None:
     )
 
     _collect_ensemble_final(quench_dir, final_dir, args.format,
-                            prefix="mq", fmt_map=_FORMAT_MAP)
+                            prefix="mq", fmt_map=_FORMAT_MAP,
+                            snapshot_files=snap_files)
     print(f"\n{bar}")
     print(f"  MQ ensemble complete -> {final_dir}/")
     print(bar)
@@ -1050,7 +1051,8 @@ def _run_hybrid_ensemble(args, override: dict) -> None:
 
         _collect_ensemble_final(quench_dir, final_dir, args.format,
 
-                                prefix='hybrid', fmt_map=_FORMAT_MAP)
+                                prefix='hybrid', fmt_map=_FORMAT_MAP,
+                                snapshot_files=snap_files, flat_single_run=False)
 
         print(f'\n{bar}\n  Hybrid ensemble complete (torch-sim) -> {final_dir}/\n{bar}')
 
@@ -1075,35 +1077,66 @@ def _run_hybrid_ensemble(args, override: dict) -> None:
     )
 
     _collect_ensemble_final(quench_dir, final_dir, args.format,
-                            prefix="hybrid", fmt_map=_FORMAT_MAP)
+                            prefix="hybrid", fmt_map=_FORMAT_MAP,
+                            snapshot_files=snap_files)
     print(f"\n{bar}")
     print(f"  Hybrid ensemble complete -> {final_dir}/")
     print(bar)
 
 
 def _collect_ensemble_final(quench_dir: str, final_dir: str, output_format: str,
-                            prefix: str, fmt_map: dict) -> None:
-    """Copy each run_NNNN/final_amorphous.xyz to final_dir/<prefix>_NNNN.<fmt>."""
+                            prefix: str, fmt_map: dict,
+                            snapshot_files: list[str] | None = None,
+                            flat_single_run: bool = True) -> None:
+    """Collect batch outputs, including the ASE single-input flat layout.
+
+    Input filenames preserve the snapshot index of a flat output and restrict
+    collection to the current batch. Torch-sim always uses run_NNNN directories.
+    """
     import glob as _glob
     from ase.io import read, write
+    from .pipeline.batch_quench import _run_dir_name
 
     if output_format not in fmt_map:
         print(f"Warning: unknown format '{output_format}', using 'xyz'")
         output_format = "xyz"
     ase_format, ext = fmt_map[output_format]
 
+    def final_output(run_dir):
+        for name in ("final_amorphous.xyz", "final_amorphous.extxyz"):
+            path = os.path.join(run_dir, name)
+            if os.path.isfile(path):
+                return path
+        return None
+
+    flat_output = final_output(quench_dir) if flat_single_run else None
+    if snapshot_files is None:
+        runs = [(os.path.basename(d), final_output(d))
+                for d in sorted(_glob.glob(os.path.join(quench_dir, "run_*")))
+                if os.path.isdir(d)]
+        if flat_output:
+            runs = [(name, src) for name, src in runs if name != "run_0000"]
+            runs.insert(0, ("run_0000", flat_output))
+        runs = [(name, src) for name, src in runs if src is not None]
+    else:
+        runs = []
+        for i, snap_file in enumerate(snapshot_files):
+            name = _run_dir_name(snap_file, fallback_idx=i)
+            src = (flat_output if len(snapshot_files) == 1 and flat_output
+                   else final_output(os.path.join(quench_dir, name)))
+            if src is None:
+                raise FileNotFoundError(
+                    f"No final batch output for {snap_file!r} in {quench_dir!r} "
+                    f"(expected {name}/final_amorphous.xyz or a flat singleton output)."
+                )
+            runs.append((name, src))
+    if not runs:
+        raise FileNotFoundError(f"No final batch outputs found in {quench_dir!r}.")
+
     os.makedirs(final_dir, exist_ok=True)
     n_collected = 0
-    for run_dir in sorted(_glob.glob(os.path.join(quench_dir, "run_*"))):
-        idx = os.path.basename(run_dir).replace("run_", "")
-        src = os.path.join(run_dir, "final_amorphous.xyz")
-        if not os.path.isfile(src):
-            # Backwards-compat: older runs wrote .extxyz extension
-            legacy = os.path.join(run_dir, "final_amorphous.extxyz")
-            if os.path.isfile(legacy):
-                src = legacy
-            else:
-                continue
+    for name, src in runs:
+        idx = name.removeprefix("run_")
         dest = os.path.join(final_dir, f"{prefix}_{idx}{ext}")
         atoms = read(src)
         if ase_format == "vasp":

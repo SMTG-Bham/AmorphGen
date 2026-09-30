@@ -79,7 +79,10 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt",
     ase.Atoms
     """
     global_cfg = merge_config(DEFAULT_CONFIG, cfg_override)
-    cfg = global_cfg.get(stage_key, global_cfg["opt"])
+    # Stage 7 inherits the common optimisation settings. CLI flags also
+    # create a partial final_opt block, which must override individual
+    # values without discarding the rest of a YAML opt block.
+    cfg = merge_config(global_cfg["opt"], global_cfg.get(stage_key))
 
     if isinstance(atoms_or_file, str):
         atoms = read(atoms_or_file)
@@ -97,6 +100,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt",
             model=global_cfg.get("model", "mace-mpa-0"),
             device=device,
             model_path=global_cfg.get("model_path"),
+            default_dtype=global_cfg.get("default_dtype", "auto"),
         )
     atoms.calc = calc
 

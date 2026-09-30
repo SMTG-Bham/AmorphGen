@@ -134,6 +134,7 @@ def run(snapshot_files: list[str],
             model=global_cfg.get("model", "mace-mpa-0"),
             device=device,
             model_path=global_cfg.get("model_path"),
+            default_dtype=global_cfg.get("default_dtype", "auto"),
         )
 
     bar = "=" * 65

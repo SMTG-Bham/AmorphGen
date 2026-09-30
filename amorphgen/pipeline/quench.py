@@ -68,6 +68,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, work_dir=None, **kwargs):
             model=global_cfg.get("model", "mace-mpa-0"),
             device=device,
             model_path=global_cfg.get("model_path"),
+            default_dtype=global_cfg.get("default_dtype", "auto"),
         )
     atoms.calc = calc
 
