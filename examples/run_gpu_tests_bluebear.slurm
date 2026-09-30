@@ -18,6 +18,7 @@ module load bear-apps/2024a/live
 module load Python/3.12.3-GCCcore-13.3.0
 source /rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312/bin/activate
 cd /rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/AmorphGen
+python -m pip install -q pytest      # the venv has no test runner (job 55164159 found none)
 python -c "import torch, torch_sim; print('torch', torch.__version__, '| cuda', torch.cuda.is_available(), '|', torch.cuda.get_device_name(0), '| torch-sim', torch_sim.__version__)"
 python -m pytest test/test_torchsim_gpu.py -v -s --tb=short -p no:cacheprovider
 python -m pytest test/test_torchsim_engine.py test/test_mace_integration.py -v --tb=short --run-mace -p no:cacheprovider

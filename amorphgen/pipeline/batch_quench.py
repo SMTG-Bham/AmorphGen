@@ -27,6 +27,33 @@ from copy import deepcopy
 from ase.io import read, write, iread
 
 
+def _run_seed_index(snap_file: str, loop_idx: int, explicit=None) -> int:
+    """Index that feeds one run's MD seed stream (velocities, thermostat noise).
+
+    The run's LOCAL identity is the ``snapshot_NNNN`` number in its filename
+    when it has one, and the position in the loop otherwise. Using the filename
+    number keeps a run's seed stable when the input set changes: adding a file
+    to the directory, or resuming with a different selection, must not give
+    ``run_0007`` a different seed halfway through.
+
+    That local index is then banded by where the run's scope comes from (see
+    :func:`~amorphgen.utils.common.scoped_run_index`): an explicit
+    ``--run-index`` and a ``SLURM_ARRAY_TASK_ID`` each get their own band, so
+    two runs can only share an index when they come from the same source with
+    the same local identity.
+    """
+    from ..utils.common import scoped_run_index
+    m = re.match(r"snapshot[_-]?(\d+)",
+                 os.path.splitext(os.path.basename(snap_file))[0])
+    local = int(m.group(1)) if m else loop_idx
+    if explicit is not None:
+        return scoped_run_index(local, int(explicit), "batch")
+    task = os.environ.get("SLURM_ARRAY_TASK_ID")
+    if task and task.isdigit():
+        return scoped_run_index(local, int(task), "slurm")
+    return scoped_run_index(local)
+
+
 def _run_dir_name(snap_file: str, fallback_idx: int) -> str:
     """Pick a self-documenting run-dir name from a snapshot filename.
 
@@ -120,6 +147,12 @@ def run(snapshot_files: list[str],
     single_run = len(selected) == 1
 
     results = []
+    # fail fast: an out-of-range snapshot number must stop the batch before any
+    # run starts, not when its turn comes after hours of MD
+    for i, snap_file in enumerate(selected):
+        _run_seed_index(snap_file, i,
+                        cfg_override.get("run_index") if cfg_override else None)
+
     for i, snap_file in enumerate(selected):
         run_name = _run_dir_name(snap_file, fallback_idx=i)
         run_dir = work_dir if single_run else os.path.join(work_dir, run_name)
@@ -143,12 +176,9 @@ def run(snapshot_files: list[str],
         atoms.calc = calc
         orig_dir = os.getcwd()
         os.chdir(run_dir)
-        # the run's index feeds the per-run seed stream explicitly, so a
-        # single-snapshot run (which writes into work_dir, no run_NNNN/) and
-        # every SLURM array task still get their own velocities and noise
         run_cfg = dict(cfg_override or {})
-        if run_cfg.get("run_index") is None:
-            run_cfg["run_index"] = int(run_name[4:])
+        run_cfg["seed_index"] = _run_seed_index(
+            snap_file, i, cfg_override.get("run_index") if cfg_override else None)
 
         try:
             # MD stages get the resume flag for FRAME-level resume within
@@ -272,6 +302,13 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
                              f"(got {cfg[key].get('ensemble')}); NPT stages need the ASE engine.")
     os.makedirs(work_dir, exist_ok=True)
     seed = cfg.get("seed")
+    # the batched engine runs a whole chunk on one noise stream, so the index
+    # that has to separate jobs is the JOB's: --run-index, or the SLURM array
+    # task, resolved exactly as the ASE path resolves it
+    from ..utils.common import run_index_for, scoped_run_index
+    _explicit = cfg.get("run_index")
+    job_index = (scoped_run_index(0, int(_explicit), "batch")   # same band as the ASE path
+                 if _explicit is not None else run_index_for(cfg))
     batch_size = batch_size or (cfg.get("opt", {}) or {}).get("batch_size") or "auto"
 
     runs = []                      # (run_dir, snapshot_file)
@@ -327,7 +364,7 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
                 ws = [_RunWriter(d, "stage4_eq.log", "stage4_eq_traj.xyz", append=done > 0, step_offset=done) for d in dirs]
                 print(f"  [Stage 4] NVT {c['T']} K, {n - done} steps")
                 atoms = batch_nvt(atoms, model, float(c["T"]), n - done, timestep_fs=float(c.get("timestep", 0.5)),
-                                  friction=float(c.get("friction", 0.01)), seed=seed, stage=4, tag=ci * 1_000_000 + done, writers=ws)
+                                  friction=float(c.get("friction", 0.01)), seed=seed, stage=4, tag=ci * 1_000_000 + done, run_index=job_index, writers=ws)
                 for d, a in zip(dirs, atoms):
                     write(os.path.join(d, "stage4_eq.xyz"), a, format="extxyz")
         if 5 in stages:
@@ -350,7 +387,7 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
                 print(f"  [Stage 5] quench {c['T_start']} -> {c['T_end']} K, {len(temps)} segments x {spt} steps"
                       + (f" (from step {done})" if done else ""))
                 atoms = batch_nvt(atoms, model, sched[done:], len(sched) - done, timestep_fs=dt,
-                                  friction=float(c.get("friction", 0.01)), seed=seed, stage=5, tag=ci * 1_000_000 + done, writers=ws)
+                                  friction=float(c.get("friction", 0.01)), seed=seed, stage=5, tag=ci * 1_000_000 + done, run_index=job_index, writers=ws)
                 for d, a in zip(dirs, atoms):
                     write(os.path.join(d, "stage5_quenched.xyz"), a, format="extxyz")
         if 6 in stages:
@@ -365,7 +402,7 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
                 ws = [_RunWriter(d, "stage6_eq.log", "stage6_eq_traj.xyz", append=done > 0, step_offset=done) for d in dirs]
                 print(f"  [Stage 6] NVT {c['T']} K, {n - done} steps")
                 atoms = batch_nvt(atoms, model, float(c["T"]), n - done, timestep_fs=float(c.get("timestep", 0.5)),
-                                  friction=float(c.get("friction", 0.01)), seed=seed, stage=6, tag=ci * 1_000_000 + done, writers=ws)
+                                  friction=float(c.get("friction", 0.01)), seed=seed, stage=6, tag=ci * 1_000_000 + done, run_index=job_index, writers=ws)
                 for d, a in zip(dirs, atoms):
                     write(os.path.join(d, "stage6_eq.xyz"), a, format="extxyz")
         if 7 in stages:

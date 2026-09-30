@@ -27,7 +27,7 @@ _LOG_HEADER = (f"{'Step':>8}  {'Time_ps':>10}  {'T_K':>8}  {'Epot_eV':>12}  "
                f"{'Ekin_eV':>12}  {'Etot_eV':>12}  {'Vol_A3':>10}\n" + "-" * 84 + "\n")
 
 
-def _derive_seed(seed, stage: int, tag: int = 0) -> int:
+def _derive_seed(seed, stage: int, tag: int = 0, run_index: int = 0) -> int:
     """Integer seed for torch-sim's state generator, distinct per (seed,
     stage, tag). torch-sim draws initial momenta and Langevin noise from
     ``state.rng`` (NOT torch's global generator), which otherwise starts
@@ -37,7 +37,7 @@ def _derive_seed(seed, stage: int, tag: int = 0) -> int:
     if seed is None:
         ss = np.random.SeedSequence()
     else:
-        ss = np.random.SeedSequence([int(seed), int(stage), int(tag)])
+        ss = np.random.SeedSequence([int(seed), int(stage), int(tag), int(run_index)])
     return int(ss.generate_state(1, dtype=np.uint32)[0])
 
 
@@ -92,7 +92,8 @@ class _RunWriter:
 
 def batch_nvt(atoms_list, model, temperatures, n_steps: int, timestep_fs: float = 0.5,
               friction: float = 0.01, seed=None, stage: int = 4, tag: int = 0,
-              interval: int = TRAJ_LOG_INTERVAL, writers=None, log=print):
+              run_index: int = 0, interval: int = TRAJ_LOG_INTERVAL,
+              writers=None, log=print):
     """Batched NVT-Langevin MD of *atoms_list* for *n_steps*.
 
     Parameters
@@ -104,6 +105,10 @@ def batch_nvt(atoms_list, model, temperatures, n_steps: int, timestep_fs: float 
     tag : int
         Extra seed component (chunk index, resume offset) so every batch of a
         run and every resumed block gets its own noise stream.
+    run_index : int
+        The job's banded run index (`utils.common.run_index_for`), so two SLURM
+        array tasks running the same inputs with the same ``seed`` do not draw
+        identical momenta and thermostat noise.
     writers : list[_RunWriter], optional
         One per structure; each receives a frame every *interval* steps.
 
@@ -126,7 +131,7 @@ def batch_nvt(atoms_list, model, temperatures, n_steps: int, timestep_fs: float 
     # Seed the state's generator: it is what nvt_langevin_init (momenta) and
     # the Langevin step (noise) use.
     state = ts.initialize_state(list(atoms_list), model.device, model.dtype)
-    state.rng = _derive_seed(seed, stage, tag)
+    state.rng = _derive_seed(seed, stage, tag, run_index)
     kT0 = float(T_sched[0]) * 8.617330337217213e-05
     md = nvt_langevin_init(state, model, kT=kT0)
     have_p = all(np.abs(a.get_momenta()).sum() > 0 for a in atoms_list)

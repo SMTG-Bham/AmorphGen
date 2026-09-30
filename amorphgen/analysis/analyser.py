@@ -191,8 +191,9 @@ class StructureAnalyser:
         except ImportError:
             from amorphgen.pipeline.random_gen import _classify_bond
 
+        from collections import Counter
         from .structure import is_bonding_pair
-        elements = set(self.atoms_list[0].get_chemical_symbols())
+        elements = Counter(self.atoms_list[0].get_chemical_symbols())
 
         def bonded(a, b):
             return is_bonding_pair(a, b, elements)
@@ -413,6 +414,25 @@ class StructureAnalyser:
                                                sigma_q=sigma_q,
                                                partials=partials)
 
+    def total_correlation(self, weighting="xray", qmin=0.3, qmax=20.0, nq=400,
+                          rmax=10.0, nr=600, window="lorch"):
+        """Total correlation function T(r) = 4 pi r rho g(r), the curve a
+        diffraction paper plots beside S(Q).
+
+        The g(r) behind it is SCATTERING-WEIGHTED and obtained by Fourier
+        transforming the weighted S(Q) over the measured Q range, so it is
+        directly comparable with published data and is NOT the same as
+        :meth:`rdf` with ``pair=None``, which weights every pair equally.
+        Set ``qmin``/``qmax``/``window`` to the experiment's own values.
+
+        Returns a dict with ``r``, ``g_r``, ``T_r``, ``G_r`` (the reduced PDF),
+        the ``q``/``s_q`` used, and ``rho``.
+        """
+        from .rdf import compute_total_correlation
+        return compute_total_correlation(self.atoms_list, weighting=weighting,
+                                         qmin=qmin, qmax=qmax, nq=nq, rmax=rmax,
+                                         nr=nr, window=window)
+
     def averaged_rdf(self, pair=None, rmax=None, nbins=200):
         """Compute RDF per structure with mean and standard deviation.
 
@@ -594,13 +614,15 @@ class StructureAnalyser:
                 from ..pipeline.random_gen import _classify_bond
             except ImportError:
                 from amorphgen.pipeline.random_gen import _classify_bond
+            from collections import Counter
             from .structure import is_bonding_pair
+            _comp = Counter(self.atoms_list[0].get_chemical_symbols())
 
             bonding_cn = {}
             nonbonded_cn = {}
             for pair, data in cn.items():
                 s1, s2 = pair.split("-")
-                if is_bonding_pair(s1, s2, self.atoms_list[0].get_chemical_symbols()):
+                if is_bonding_pair(s1, s2, _comp):
                     bonding_cn[pair] = data
                 else:
                     nonbonded_cn[pair] = data
@@ -727,10 +749,12 @@ class StructureAnalyser:
         except ImportError:
             from amorphgen.pipeline.random_gen import _classify_bond
 
+        from collections import Counter
         from .structure import is_bonding_pair
         unique = sorted(set(self.atoms_list[0].get_chemical_symbols()))
+        comp = Counter(self.atoms_list[0].get_chemical_symbols())
         bonding_pairs = [f"{s1}-{s2}" for s1 in unique for s2 in unique
-                         if is_bonding_pair(s1, s2, unique)]
+                         if is_bonding_pair(s1, s2, comp)]
 
         # If single element, use same-species
         if not bonding_pairs:

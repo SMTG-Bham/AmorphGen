@@ -23,8 +23,10 @@ module load Python/3.12.3-GCCcore-13.3.0
 source /rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312/bin/activate
 PKG=/rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/AmorphGen
 SYS=$PKG/examples/class_benchmark_systems.txt
-# systems whose rules changed, that jammed in the first pass (now soft-packed), or that were restored/added
-REFIX="GeSe2 GeS2 As2S3 As2Se3 Ge3N4 MgF2 AlF3 Fe2O3 Sb2S3 NiO Cu64Zr36 Pd40Ni40P20 BeO MgO Be3N2 LiCl Li2ZrCl6 BiOBr FeOCl CuZr CuZr2 NiTi Pd4Si TiB2 MgB2 ZrB2 LaB6 ZrN HfN ScN YN TiN ThO2 UO2 Y2O3 GaP InAs InSb WC"
+# EMPTY after the revert of 2026-09-29: no density rule has changed since the
+# last pass, so classes/ + classes_v2/ are current. Put system names here (space
+# separated) when a rule changes and they need regenerating.
+REFIX=""
 grep -v "^#" $SYS | grep -wE "$(echo $REFIX | tr ' ' '|')" > classes_v2/systems.txt
 relax_and_analyse () {   # $1 = dir
     amorphgen --batch-opt --input-dir $1/random_initial -o $1/random_opt \

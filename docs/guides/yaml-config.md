@@ -320,6 +320,10 @@ analysis:
   sq_method: direct       # direct | ft
   sq_smooth: 0.05         # re-binning width for the direct method (1/A); 0 = raw
   sq_partials: true       # also the Faber-Ziman partials S_ab(q) (direct method)
+  tr: true                # total correlation function T(r) = 4 pi r rho g(r)
+  tr_qrange: [0.3, 20.0]  # integration limits (1/A); match the experiment
+  tr_window: lorch        # lorch | none
+  tr_scan: true           # sweep qmax / window and report the spread
   rings: true             # or a nodes-bridge pair such as Ge-O
   voronoi: Ge             # or true for all atoms
   connectivity: true      # corner/edge/face sharing of cation polyhedra

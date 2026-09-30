@@ -43,32 +43,58 @@ def build_neighbour_dict(atoms, cutoff, get_cutoff_fn):
     return nbr_dict, syms
 
 
-def is_bonding_pair(s1: str, s2: str, elements) -> bool:
-    """Whether an s1-s2 contact counts as a first-shell BOND in a system made
-    of ``elements`` (the rule shared by the coordination report, the total
-    coordination, the bond angles and the CN plot).
+# Highest positive oxidation state, for the charge-balance test that decides
+# which elements act as anions in a given compound. The Shannon table lists
+# only the anionic state for S, N, H and the halogens, so the common positive
+# states of the p-block are given here.
+# a same-element metal pair is a first-shell bond above this metal fraction
+_METAL_RICH_BOND_FRACTION = 0.70
 
-    * Compound with an anion (O, N, S, Se, Te, halides, hydride): a pair is a
-      bond only when exactly one member is an anion. Cation-cation contacts
-      (Ga-In, and also hetero pairs the radii table calls covalent such as
-      Al-Si or Na-Si in aluminosilicate glasses) and anion-anion contacts are
-      second-shell neighbours mediated by the anion.
-    * No anion (a-Si, SiC, GaAs, alloys): the radii classification decides;
-      same-element pairs bond in single-element systems and pure-metal alloys.
+
+from ..utils.radii import anion_elements, _max_positive_os      # noqa: F401  (re-exported)
+
+
+def is_bonding_pair(s1: str, s2: str, composition) -> bool:
+    """Whether an s1-s2 contact counts as a first-shell BOND in this compound
+    (the rule shared by the coordination report, the total coordination, the
+    bond angles and the CN plot).
+
+    * Compound with an anion: a pair is a bond only when exactly one member is
+      an anion, and which elements those are comes from :func:`anion_elements`
+      (charge balance), not from a fixed list. Cation-cation contacts (Ga-In,
+      and hetero pairs the radii table calls covalent such as Al-Si or Na-Si in
+      aluminosilicate glasses) and anion-anion contacts are second-shell
+      neighbours mediated by the anion.
+    * No anion (a-Si, SiC, GaAs, alloys): the radii classification decides. A
+      same-element pair is a bond in a single-element system, and in a
+      metal-rich composition (at least 70 % metal atoms, which covers the
+      metallic glasses Ni80P20, Fe80B20, Pd80Si20 as well as CuZr); Ga-Ga in
+      GaAs or Ti-Ti in TiC is a second-shell contact, since those compounds are
+      not metals.
+
+    ``composition`` may be a mapping of counts (preferred: the metal-fraction
+    test needs them) or a bare set of symbols.
     """
     try:
         from ..pipeline.random_gen import _classify_bond
-        from ..utils.radii import ANION_CHARGES
+        from ..utils.radii import NONMETALS, METALLOIDS
     except ImportError:
         from amorphgen.pipeline.random_gen import _classify_bond
-        from amorphgen.utils.radii import ANION_CHARGES
-    elements = set(elements)
-    anions = {e for e in elements if e in ANION_CHARGES}
-    if anions and len(elements) > 1:
+        from amorphgen.utils.radii import NONMETALS, METALLOIDS
+    counts = (dict(composition) if hasattr(composition, "items")
+              else {e: 1 for e in composition})
+    elements = set(counts)
+    anions = anion_elements(counts)
+    if anions and anions != elements:
         return (s1 in anions) != (s2 in anions)
     bt = _classify_bond(s1, s2)
     if s1 == s2:
-        return len(elements) == 1 or bt == "metallic"
+        if len(elements) == 1:
+            return True
+        n_metal = sum(n for e, n in counts.items()
+                      if e not in NONMETALS and e not in METALLOIDS)
+        metal_fraction = n_metal / sum(counts.values())
+        return bt == "metallic" and metal_fraction >= _METAL_RICH_BOND_FRACTION
     return bt in ("ionic", "covalent", "metallic")
 
 
@@ -160,9 +186,11 @@ def compute_all_angles(atoms_list, max_cutoff, get_cutoff_fn,
         except ImportError:
             from amorphgen.pipeline.random_gen import _classify_bond
 
+        from collections import Counter
         unique = sorted(set(atoms_list[0].get_chemical_symbols()))
+        comp = Counter(atoms_list[0].get_chemical_symbols())
         bonding_pairs = {(s1, s2) for s1 in unique for s2 in unique
-                         if is_bonding_pair(s1, s2, unique)}
+                         if is_bonding_pair(s1, s2, comp)}
 
     angle_data = {}
 

@@ -243,8 +243,9 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
     # gets one panel per cation-centred pair plus the anion's total over all
     # its cations (O-(Ga+In+Zn)). Single-element and alloy systems, which
     # have no cation-anion pair, fall back to every pair with CN > 0.5.
+    from collections import Counter
     from .structure import is_bonding_pair
-    _elements = set(analyser.atoms_list[0].get_chemical_symbols())
+    _elements = Counter(analyser.atoms_list[0].get_chemical_symbols())
 
     def _is_bond(pair):
         a, b = pair.split("-")
@@ -570,6 +571,48 @@ def plot_sq(sq_result, output_dir=".", prefix="analysis", dpi=300,
             w.writerow(["q_invA", "s_q"])
             for qi, si in zip(q, s):
                 w.writerow([f"{qi:.5f}", "" if np.isnan(si) else f"{si:.6f}"])
+    print(f"  Saved: {base}.csv")
+
+
+def plot_tr(tr_result, output_dir=".", prefix="analysis", dpi=300,
+            save_pdf=False, show_title=False):
+    """Plot T(r) and write r, the weighted g(r), T(r) and G(r) as CSV.
+
+    The CSV is what you overlay on a digitised figure from a diffraction paper.
+    """
+    import csv
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    os.makedirs(output_dir, exist_ok=True)
+    r = np.asarray(tr_result["r"], dtype=float)
+    T = np.asarray(tr_result["T_r"], dtype=float)
+    g = np.asarray(tr_result["g_r"], dtype=float)
+    G = np.asarray(tr_result["G_r"], dtype=float)
+
+    fig, ax = plt.subplots(figsize=(5.4, 4.0))
+    ax.plot(r, T, lw=1.5, color=_PALETTE[0])
+    ax.set_xlabel(r"$r$ ($\mathrm{\AA}$)")
+    ax.set_ylabel(r"$T(r)$ ($\mathrm{\AA}^{-2}$)")
+    ax.set_xlim(r.min(), r.max())
+    _apply_pub_style(ax)
+    if show_title:
+        ax.set_title(f"T(r) — {tr_result['weighting']} weighting, "
+                     f"Q = {tr_result['qmin']:.1f}-{tr_result['qmax']:.1f} " r"$\mathrm{\AA}^{-1}$")
+    fig.tight_layout()
+    base = os.path.join(output_dir, f"{prefix}_tr")
+    _save_fig(fig, base, dpi, save_pdf)
+    plt.close(fig)
+
+    with open(f"{base}.csv", "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow([f"# weighting={tr_result['weighting']} qmin={tr_result['qmin']} "
+                    f"qmax={tr_result['qmax']} window={tr_result['window']} "
+                    f"rho={tr_result['rho']:.6f} at/A^3"])
+        w.writerow(["r_A", "g_r_weighted", "T_r_invA2", "G_r_invA2"])
+        for row in zip(r, g, T, G):
+            w.writerow([f"{v:.6f}" for v in row])
     print(f"  Saved: {base}.csv")
 
 

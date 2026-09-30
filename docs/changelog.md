@@ -356,6 +356,113 @@ orphan: true
 
 ### Fixed after the rc4 upload (on GitHub main; not in the rc4 wheel on PyPI)
 
+- **Which contacts count as first-shell bonds, and which run gets which MD seed
+  (2026-09-29).** Two rules that several parts of the package share were rebuilt after a
+  sequence of code reviews.
+
+  *Bonding pairs.* The coordination report, the total coordination, the bond angles and
+  the CN plot all ask one question: is an A-B contact a bond? The answer used to come
+  from a fixed anion list, which failed whenever an element on it was acting as the
+  cation. TeO2 and SO3 had no bonds at all (every pair was anion-anion, so the
+  coordination table fell back to Te-Te and the angles came out empty, visible as a blank
+  CN column for TeO2 in the class benchmark); sulfates, nitrates and hydroxides lost their
+  S-O, N-O and O-H bonds the same way. Which elements are anions is now derived from the
+  composition by charge balance: every element of the anion table starts as a candidate,
+  and one is promoted to cation only when that brings the compound closer to neutrality.
+  The most electronegative element is never promoted, so an off-stoichiometry or
+  defective cell always keeps an anion. That single criterion reproduces the chemistry
+  without a table of exceptions: tellurium is the anion in CdTe and the cation in TeO2 and
+  in a tellurite, sulfur the anion in ZnS and in La2O2S but the cation in a sulfate,
+  hydrogen the anion in LiH and the cation in a hydroxide. It also leaves real cells
+  intact, because promoting their major anion would overshoot far past neutrality: the
+  mixed-chalcogen glasses (Ge-S-Se, Ge-Se-Te) keep Ge-Se and Ge-Te, F-doped silica keeps
+  Si-O, an oxygen impurity in NaCl keeps Na-Cl and LiPON keeps P-N. Verified on about 40
+  compositions.
+
+  Two further corrections to the same rule. Cation-cation contacts are no longer bonds
+  even when the radii table calls them covalent, which used to inflate the total
+  coordination in aluminosilicate and soda-lime glasses (Si-(Al+O) = 5) and add spurious
+  angles. And a same-element pair is a bond only in a single-element system or a
+  composition that is at least 70 % metal atoms, which keeps Ni-Ni in Ni80P20, Fe-Fe in
+  Fe80B20 and Cu-Cu in CuZr while dropping Ga-Ga in GaAs, Ti-Ti in TiC and Be-Be in Be2C.
+  The analysis call sites pass element counts rather than a bare set so that fraction can
+  be computed.
+
+  *MD seed streams.* Runs that shared a `--seed` could share their velocities and
+  thermostat noise: the run index came from the `run_NNNN/` directory name alone, and a
+  single-snapshot run writes straight into the work directory, so every SLURM array task
+  drew the same numbers. A run's index is now its `snapshot_NNNN` number when the
+  filename has one and its position in the loop otherwise, which keeps a run's seed
+  stable when the input set changes or a resume selects differently. That local index is
+  then banded by where the run's scope came from. Each source has its own range: an
+  explicit `--run-index` on an ensemble, a `SLURM_ARRAY_TASK_ID` on an ensemble, the same
+  two on the single-structure pipeline, and no scope at all. Two runs therefore share a
+  seed stream only when they come from the same source with the same scope and the same
+  local identity. That includes a pipeline run started inside a `run_NNNN/` directory,
+  the usual SLURM pattern `cd run_$SLURM_ARRAY_TASK_ID && amorphgen ...`, and the
+  directory name now has to match exactly, so a folder called `myrun_2` is not mistaken
+  for one. The banded value travels under its own config key, which a config file may not
+  set, so a stage cannot mistake a local index for an explicit one and band it twice.
+  Out-of-range values are refused rather than wrapped, since folding `snapshot_100003`
+  onto `snapshot_0003` would silently merge two streams, and every snapshot filename is
+  checked before the first run starts rather than when its turn comes. A pipeline run
+  started in `run_0003/` and one given `--run-index 3` get the same index on purpose:
+  both say "this is run 3" of the same workflow. **Behaviour change:** these indices are
+  seed labels and they have moved, so a run resumed across this change draws different
+  velocities and thermostat noise from that point on. Finish a running ensemble before
+  updating, or regenerate it.
+
+  *Classification.* The metal-rich metalloid-glass rule no longer reaches the s-block:
+  Li3P, Na3Sb and Cs3Sb are Zintl phases and keep their pnictide treatment, while
+  Ni80P20, Fe80B20 and Pd80Si20 remain alloys.
+
+- **`--tr`: the total correlation function T(r) = 4 pi r rho g(r)**, the curve a
+  diffraction paper plots beside S(q) (`StructureAnalyser.total_correlation()`,
+  `rdf.compute_total_correlation()`). It follows the experiment's own route: the
+  weighted S(q), then the Fourier transform over the measured q range, then the
+  4 pi r rho factor, with `--tr-qrange` and `--tr-window` exposing the two choices
+  that decide whether two curves can be compared at all. The reduced PDF G(r) comes
+  with it, and `rdf.coordination_from_Tr()` integrates a peak of r*T(r) for the
+  coordination number a diffraction paper would quote. This is NOT the unweighted
+  `--total-rdf` curve: for a multi-element system the scattering weights matter, and
+  in IGZO the indium correlations dominate the X-ray weighted one.
+- **`--tr-scan`**: sweeps the T(r) transform choices, qmax and the window, and reports how
+  far the first peak and its integrated count move (`rdf.scan_Tr_qmax()`,
+  `rdf.format_Tr_scan()`). Those two are properties of the measurement, not of the model,
+  so a comparison should carry that spread rather than imply a precision the transform
+  does not have. On a-IGZO the first peak sits at 2.08-2.13 A across qmax 12-25 with a
+  Lorch window; without one the truncation ripple splits it above qmax 20 and the count
+  collapses from 2.9 to 0.7, which the table makes obvious.
+- **A relaxation no longer reports a false placement stall.** The density line added
+  with the warning above was printed after `--relax` had moved the cell, so it compared
+  the relaxed density with the placement target and claimed "placement stalled and the
+  cell was expanded" on any relaxation that shifted the density by more than 2 %, which
+  is most of them. The placement is now measured before the relaxation and reported as
+  `placed at ...`; the relaxed value keeps its own `Final density` line.
+- **The seed reached the ASE engine only.** `--hybrid-ensemble --engine torchsim` seeded
+  its batched MD from the stage, chunk and resume offset alone, so two SLURM array tasks
+  running the same inputs with one `--seed` drew identical momenta and thermostat noise:
+  the problem the run-index work had just fixed for the ASE path. The job's run index is
+  now part of the torch-sim seed as well.
+- **SO3 and SeO2 densities were half their true value.** The rule that gives a non-metal
+  acting as an oxide cation its positive Shannon radius only fires when the table lists
+  one, and sulfur and selenium had only their anionic state, so both fell back to an
+  anion radius four times too large (SO3 1.10 against 1.92 g/cm3, SeO2 1.66 against
+  3.95). Their positive states are now in the table, and a non-metal that is promoted to
+  cation but has no positive state falls back to its covalent radius. The rule is gated
+  on the element actually being a cation in that compound, which charge balance decides,
+  so the chlorine of an oxychloride, the nitrogen of an oxynitride and the hydrogen of a
+  hydroxide keep their ionic radii: giving them covalent ones halved the cell and doubled
+  the density (BiOCl 1.50 of its crystal value instead of 0.75, Si2N2O 1.98 instead of
+  0.78). `anion_elements()` moved to `utils.radii`, where the radius selector can reach
+  it, and is re-exported from `analysis.structure`.
+- **Placement no longer changes the density silently.** The auto-expand and
+  auto-retry:minsep messages were `logger.info`, and the package configures no logging
+  handler, so a 20-40 % density loss was invisible on the CLI. They are now warnings
+  (visible with no logging setup), and `batch_random` prints and logs every structure's
+  achieved density, with an explicit `WARNING: density X, -44% from the requested Y`
+  line whenever it misses the request by more than 2 %. Soft-packed structures are
+  marked `[soft-packed at the requested cell]`.
 - **Soft-pack instead of cell expansion when placement jams.** Random sequential
   addition stalls near a 0.38 hard-sphere fraction, which the estimated density of
   dense oxides (MgO, BeO), alloys, borides and large-cation nitrides reaches, and the
@@ -392,16 +499,6 @@ orphan: true
 - **Resume could turn a `traj_format: traj` trajectory into extxyz.** The torn-frame
   repair rewrote the file in the format guessed from the `*_traj.xyz` name; it now keeps
   the file's real format (binary trajectory or extxyz), so the resumed stage can append.
-- **Hetero cation-cation pairs were counted as bonds** by the coordination report, the
-  total coordination, the bond angles and the CN plot when the radii table classed them
-  covalent (Al-Si, Na-Si in aluminosilicate and soda-lime glasses), inflating totals and
-  adding spurious angles. One rule now applies everywhere (`structure.is_bonding_pair`):
-  in a compound with an anion, a pair is a bond only when exactly one member is an anion.
-- **Same MD seed stream for every job in single-snapshot and SLURM-array runs.** The
-  run index came from the `run_NNNN/` directory name only, and a single-snapshot run
-  writes straight into the work directory. `batch_quench` now passes each run's index
-  explicitly, `SLURM_ARRAY_TASK_ID` is used outside a run directory, and `--run-index`
-  (YAML `run_index`) sets it by hand.
 - **CN plot of multi-cation compounds showed a cation-cation pair.** For IGZO the
   mirrored-bars layout picked Ga-In / In-Ga (second-shell contacts) because the
   reciprocal-pair search ran over every pair. The plot now uses bonded pairs only:

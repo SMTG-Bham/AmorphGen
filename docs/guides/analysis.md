@@ -772,6 +772,10 @@ amorphgen --analyse \
 | `--sq-method` | `direct` (default): Debye sum at the reciprocal-lattice q-vectors, resolves the FSDP. `ft`: Fourier transform of g(r), smoother but damps the FSDP. |
 | `--sq-smooth SIGMA_Q` | Gaussian re-binning width in Å⁻¹ for the direct S(q) (default 0.05; 0 = raw). Raw values are kept in the CSV. |
 | `--sq-partials` | With `--sq` (direct method): the Faber-Ziman partial structure factors S_ab(q) of every element pair. First peaks printed, `s_<pair>` columns in `analysis_sq.csv`, `analysis_sq_partials.png`. |
+| `--tr` | Total correlation function T(r) = 4πrρg(r), the curve diffraction papers plot beside S(q). The weighted S(q) is Fourier-transformed over the measured q range, so the result is directly comparable with published data, unlike the unweighted g(r) of `--total-rdf`. `analysis_tr.png` plus a CSV with r, the weighted g(r), T(r) and the reduced PDF G(r). |
+| `--tr-qrange QMIN QMAX` | Integration limits for `--tr` (default 0.3 20). Set them to the experiment's own range: qmax fixes the real-space resolution and the truncation ripple. |
+| `--tr-window {lorch,none}` | Window for the `--tr` transform. `lorch` damps the qmax truncation ripple at the cost of broader peaks; match whichever the paper used. |
+| `--tr-scan` | Sweep qmax and the window and report how far the first T(r) peak and its integrated count move. The q range belongs to the measurement rather than the model, so this is the honest error bar on a comparison, and it exposes a truncation ripple splitting the first peak. |
 | `--pair-panels` | One small panel per element pair for the partial g(r) (`analysis_rdf_panels.png`) and, with `--sq-partials`, for S_ab(q) (`analysis_sq_partials_panels.png`). |
 | `--total-cn SPEC` | Total first-shell coordination of one element over several partner types, repeatable: `O` counts every bonded partner, `O:In+Ga` only the named ones. Printed, and plotted as `analysis_cn_total.png` + CSV. |
 | `--check-dimers` | Report unphysical close contacts (O–O peroxide, N–N) per structure. |

@@ -357,3 +357,22 @@ def test_connectivity_flag(tmp_path, monkeypatch, capsys):
     assert "Polyhedral connectivity" in out and "corner 100.0%" in out
     assert "Polyhedral connectivity" in rep.read_text()
     assert (plots / "analysis_connectivity.csv").exists()
+
+
+def test_run_index_flag_reaches_the_config(monkeypatch):
+    """Review round 11: --run-index must arrive in the merged config. Dropping
+    the mapping line in cli.py makes the flag silently do nothing."""
+    import sys
+    from amorphgen.cli import _get_parser, _build_override
+    parser = _get_parser()
+    argv = ["--random-gen", "--composition", "Si=8", "--run-index", "7", "--seed", "3"]
+    args = parser.parse_args(argv)
+    monkeypatch.setattr(sys, "argv", ["amorphgen"] + argv)
+    override = _build_override(args, parser, explicit_only=True, argv=argv)
+    assert override.get("run_index") == 7
+    assert override.get("seed") == 3
+    # and it is absent when not given, so it cannot shadow another source
+    args2 = parser.parse_args(["--random-gen", "--composition", "Si=8"])
+    o2 = _build_override(args2, parser, explicit_only=True,
+                         argv=["--random-gen", "--composition", "Si=8"])
+    assert o2.get("run_index") is None

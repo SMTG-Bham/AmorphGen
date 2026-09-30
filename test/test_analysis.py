@@ -686,3 +686,269 @@ def test_is_bonding_pair_rules():
     assert b("P", "O", {"Li", "P", "O"}) and b("Si", "N", {"Si", "N"})
     assert b("Si", "Si", {"Si"}) and b("Si", "C", {"Si", "C"}) and b("Ga", "As", {"Ga", "As"})
     assert b("Cu", "Zr", {"Cu", "Zr"}) and b("Cu", "Cu", {"Cu", "Zr"})
+
+
+class TestBondingPairRules:
+    """Review round 4 (2026-09-29): which contacts count as first-shell bonds."""
+
+    @staticmethod
+    def _b(a, b, els):
+        from amorphgen.analysis.structure import is_bonding_pair
+        return is_bonding_pair(a, b, els)
+
+    def test_compound_of_two_anion_elements_has_a_cation(self):
+        """TeO2 and SO3 are made only of elements on the anion list; the least
+        electronegative one is the cation, so Te-O and S-O are bonds and the
+        coordination report is not empty."""
+        assert self._b("Te", "O", {"Te", "O"}) and not self._b("O", "O", {"Te", "O"})
+        assert self._b("S", "O", {"S", "O"}) and not self._b("S", "S", {"S", "O"})
+        assert self._b("Se", "O", {"Se", "O"})
+
+    def test_hydrogen_is_an_anion_only_in_a_hydride(self):
+        assert self._b("Li", "H", {"Li", "H"})                    # hydride
+        assert not self._b("H", "H", {"Mg", "H"})
+        assert self._b("O", "H", {"Na", "O", "H"})                # hydroxide: H is the cation
+        assert self._b("Na", "O", {"Na", "O", "H"})
+        assert not self._b("Na", "H", {"Na", "O", "H"})
+
+    def test_several_true_anions_all_bond_to_the_cation(self):
+        els = {"Bi", "O", "Cl"}
+        assert self._b("Bi", "O", els) and self._b("Bi", "Cl", els)
+        assert not self._b("O", "Cl", els)
+
+    def test_same_element_bonds_only_in_elements_and_metal_alloys(self):
+        assert self._b("Si", "Si", {"Si"})                        # a-Si
+        assert self._b("Cu", "Cu", {"Cu", "Zr"})                  # metallic glass
+        assert not self._b("Ga", "Ga", {"Ga", "As"})              # III-V, not a metal
+        assert not self._b("In", "In", {"In", "P"})
+        assert not self._b("Ti", "Ti", {"Ti", "C"})               # carbide
+        assert not self._b("Ga", "In", {"In", "Ga", "Zn", "O"})   # cation-cation in an oxide
+
+    def test_anion_set_follows_charge_balance(self):
+        """Review round 5: membership of the anion table is not enough. The
+        same element is an anion or a cation depending on what it is with."""
+        from amorphgen.analysis.structure import anion_elements as ae
+        assert ae({"Cd": 1, "Te": 1}) == {"Te"}          # telluride: Te is the anion
+        assert ae({"Te": 1, "O": 2}) == {"O"}            # tellurite: Te is the cation
+        assert ae({"Na": 2, "Te": 1, "O": 4}) == {"O"}   # ... even with a real cation present
+        assert ae({"La": 2, "O": 2, "S": 1}) == {"O", "S"}   # oxysulfide: both balance
+        assert ae({"H": 2, "S": 1, "O": 4}) == {"O"}     # sulfate: H and S are cations
+        assert ae({"Na": 1, "N": 1, "O": 3}) == {"O"}    # nitrate
+        assert ae({"Li": 1, "H": 1}) == {"H"}            # hydride
+        assert ae({"Na": 1, "O": 1, "H": 1}) == {"O"}    # hydroxide
+        assert ae({"Bi": 1, "O": 1, "Cl": 1}) == {"O", "Cl"}
+        assert ae({"Cu": 1, "Zr": 1}) == set()
+
+    def test_metal_rich_glasses_keep_their_metal_metal_bonds(self):
+        """Ni80P20, Fe80B20 and Pd80Si20 are classified as alloys, so their
+        metal-metal contacts must count as bonds; GaAs and TiC are not metals."""
+        assert self._b("Ni", "Ni", {"Ni": 80, "P": 20})
+        assert self._b("Fe", "Fe", {"Fe": 80, "B": 20})
+        assert self._b("Pd", "Pd", {"Pd": 80, "Si": 20})
+        assert self._b("Cu", "Cu", {"Cu": 50, "Zr": 50})
+        assert not self._b("Ga", "Ga", {"Ga": 1, "As": 1})
+        assert not self._b("Ti", "Ti", {"Ti": 1, "C": 1})
+        assert not self._b("Be", "Be", {"Be": 2, "C": 1})
+
+    def test_off_stoichiometry_cells_keep_an_anion(self):
+        """A charge-unbalanced composition (a random test cell, a defective
+        model) must not end up with no anion at all: the most electronegative
+        element is never demoted."""
+        from amorphgen.analysis.structure import anion_elements as ae
+        assert ae({"Ga": 16, "Zn": 16, "O": 48}) == {"O"}
+        assert ae({"Si": 30, "O": 40}) == {"O"}
+        assert self._b("Ga", "O", {"Ga": 16, "Zn": 16, "O": 48})
+        assert not self._b("Ga", "Zn", {"Ga": 16, "Zn": 16, "O": 48})
+
+    def test_mixed_chalcogen_glasses_keep_every_chalcogen_as_an_anion(self):
+        """Review round 6: with two chalcogens and no oxidiser present, neither
+        may be promoted to cation (Ge-S-Se, Ge-Se-Te, Ge-Sb-Te)."""
+        from amorphgen.analysis.structure import anion_elements as ae
+        assert ae({"Ge": 20, "S": 10, "Se": 70}) == {"S", "Se"}
+        assert ae({"Ge": 20, "Se": 40, "Te": 40}) == {"Se", "Te"}
+        assert ae({"Ge": 2, "Sb": 2, "Te": 5}) == {"Te"}          # one chalcogen only
+        assert ae({"As": 40, "S": 30, "Se": 30}) == {"S", "Se"}   # two, neither promoted
+        assert self._b("As", "S", {"As": 40, "S": 30, "Se": 30})
+        assert self._b("As", "Se", {"As": 40, "S": 30, "Se": 30})
+        assert not self._b("S", "Se", {"As": 40, "S": 30, "Se": 30})
+        assert self._b("Ge", "Se", {"Ge": 20, "S": 10, "Se": 70})
+        assert self._b("Ge", "Te", {"Ge": 20, "Se": 40, "Te": 40})
+        assert not self._b("S", "Se", {"Ge": 20, "S": 10, "Se": 70})
+        assert not self._b("Se", "Te", {"Ge": 20, "Se": 40, "Te": 40})
+
+    def test_dopants_and_defects_do_not_flip_the_major_anion(self):
+        """A single dopant or defect atom must not turn the major anion into a
+        cation: promoting it would overshoot charge balance, so it is kept."""
+        from amorphgen.analysis.structure import anion_elements as ae
+        # promoting the major anion here would overshoot balance, so it is kept
+        assert ae({"Si": 32, "O": 64, "F": 2}) == {"O", "F"}      # F-doped silica
+        assert ae({"Na": 32, "Cl": 32, "O": 1}) == {"Cl", "O"}    # O impurity in NaCl
+        assert ae({"Li": 29, "P": 10, "O": 33, "N": 5}) == {"O", "N"}   # LiPON
+        assert self._b("Si", "O", {"Si": 32, "O": 64, "F": 2})
+        assert self._b("Na", "Cl", {"Na": 32, "Cl": 32, "O": 1})
+        assert self._b("P", "N", {"Li": 29, "P": 10, "O": 33, "N": 5})
+        assert not self._b("N", "O", {"Li": 29, "P": 10, "O": 33, "N": 5})
+        # ... while a real tellurite still promotes Te, oxidiser present
+        assert ae({"Na": 2, "Te": 1, "O": 4}) == {"O"}
+
+
+def test_metal_rich_glass_through_the_analyser_and_plotter(tmp_path):
+    """Review round 11: the analyser and the plotter must pass element COUNTS,
+    not a bare set, or the metal-fraction test cannot fire and Ni80P20 loses its
+    Ni-Ni bonds. Drives the real report and plot, so reverting the Counter call
+    sites fails here."""
+    import numpy as np
+    from ase import Atoms
+    from amorphgen.analysis import StructureAnalyser
+    rng = np.random.default_rng(0)
+    n_ni, n_p = 80, 20
+    a = Atoms("Ni80P20", positions=rng.uniform(0, 11, (n_ni + n_p, 3)),
+              cell=[11] * 3, pbc=True)
+    sa = StructureAnalyser([a], cutoff=3.0)
+    text = sa.summary()
+    body = text if isinstance(text, str) else "\n".join(text)
+    assert "Ni-Ni" in body.split("Non-bonded contacts")[0], body[:400]
+    cn = sa.coordination()
+    assert cn["Ni-Ni"]["mean"] > 0
+    assert sa.total_coordination(centre="Ni")["Ni"]["mean"] > 0
+    sa.plot(output_dir=str(tmp_path))          # the plotter takes the same path
+    assert (tmp_path / "analysis_cn.csv").exists()
+    assert "Ni-Ni" in (tmp_path / "analysis_cn.csv").read_text()
+
+
+class TestTotalCorrelationFunction:
+    """T(r) = 4 pi r rho g(r) in the diffraction convention."""
+
+    @staticmethod
+    def _fcc_cu(n=3, a=3.61):
+        from ase.build import bulk
+        return bulk("Cu", "fcc", a=a, cubic=True).repeat((n, n, n))
+
+    def test_first_peak_gives_the_known_coordination(self):
+        """For fcc Cu the first shell holds 12 atoms, and the area under
+        r*T(r) over that peak must recover it. This is what a diffraction
+        paper integrates, so it pins the normalisation, the density and the
+        transform together."""
+        from amorphgen.analysis import StructureAnalyser
+        from amorphgen.analysis.rdf import coordination_from_Tr
+        sa = StructureAnalyser([self._fcc_cu()])
+        tr = sa.total_correlation(weighting="unweighted", qmin=0.5, qmax=25.0,
+                                  nq=600, rmax=6.0, nr=600)
+        n = coordination_from_Tr(tr, 2.0, 3.2)
+        assert 10.5 <= n <= 13.5, n          # 12 with transform broadening
+
+    def test_peak_position_and_density(self):
+        from amorphgen.analysis import StructureAnalyser
+        import numpy as np
+        cu = self._fcc_cu()
+        sa = StructureAnalyser([cu])
+        tr = sa.total_correlation(weighting="unweighted", qmin=0.5, qmax=25.0, rmax=6.0)
+        r = np.asarray(tr["r"]); T = np.asarray(tr["T_r"])
+        first = r[np.argmax(np.where(r < 3.2, T, -np.inf))]
+        assert abs(first - 3.61 / np.sqrt(2)) < 0.12, first     # fcc nearest neighbour
+        assert abs(tr["rho"] - len(cu) / cu.get_volume()) < 1e-9
+        # G(r) = T(r) - 4 pi r rho, by definition
+        G = np.asarray(tr["G_r"]); g = np.asarray(tr["g_r"])
+        assert np.allclose(G, T - 4 * np.pi * r * tr["rho"], atol=1e-8)
+        assert np.allclose(T, 4 * np.pi * r * tr["rho"] * g, atol=1e-8)
+
+    def test_weighting_changes_the_curve_for_a_multi_element_system(self):
+        """The weighted g(r) is NOT the unweighted one: in IGZO the indium
+        correlations dominate the X-ray weighting."""
+        import numpy as np
+        from ase import Atoms
+        from amorphgen.analysis import StructureAnalyser
+        rng = np.random.default_rng(0)
+        a = Atoms("In8Ga8Zn8O32", positions=rng.uniform(0, 12, (56, 3)),
+                  cell=[12] * 3, pbc=True)
+        sa = StructureAnalyser([a])
+        x = np.asarray(sa.total_correlation(weighting="xray", qmin=0.6, qmax=18.0)["g_r"])
+        u = np.asarray(sa.total_correlation(weighting="unweighted", qmin=0.6, qmax=18.0)["g_r"])
+        assert not np.allclose(x, u, atol=0.05)
+
+    def test_window_and_bad_arguments(self):
+        import pytest
+        from amorphgen.analysis import StructureAnalyser
+        import numpy as np
+        sa = StructureAnalyser([self._fcc_cu()])
+        lo = np.asarray(sa.total_correlation(qmin=0.5, qmax=25.0, window="lorch")["T_r"])
+        no = np.asarray(sa.total_correlation(qmin=0.5, qmax=25.0, window=None)["T_r"])
+        assert not np.allclose(lo, no)          # the window changes the ripple
+        with pytest.raises(ValueError, match="window must be"):
+            sa.total_correlation(window="hann")
+        with pytest.raises(ValueError, match="usable S\\(Q\\) points"):
+            sa.total_correlation(qmin=30.0, qmax=20.0)   # no S(Q) survives qmin
+
+    def test_cli_tr_flag_writes_the_plot_and_csv(self, tmp_path, monkeypatch, capsys):
+        import sys
+        from ase.io import write
+        from amorphgen.cli import main
+        src = tmp_path / "cu.xyz"
+        write(str(src), self._fcc_cu(), format="extxyz")
+        plots = tmp_path / "p"
+        monkeypatch.setattr(sys, "argv", ["amorphgen", "--analyse", str(src), "--tr",
+                                          "--tr-qrange", "0.5", "25", "--tr-window", "none",
+                                          "--save-plot", str(plots)])
+        main()
+        out = capsys.readouterr().out
+        assert "T(r): xray weighting, q = 0.5-25.0" in out and "none window" in out
+        assert "first T(r) peak at r =" in out
+        assert (plots / "analysis_tr.png").exists()
+        head = (plots / "analysis_tr.csv").read_text().splitlines()
+        assert "window=None" in head[0] and "qmax=25.0" in head[0]
+        assert head[1].startswith("r_A,g_r_weighted,T_r_invA2,G_r")
+
+    def test_first_peak_is_the_first_not_the_tallest(self):
+        """In an oxide the second shell is taller than the first, so a maximum
+        over a fixed window lands on the second peak's rising edge. The helper
+        must return the first LOCAL maximum and the minima either side."""
+        import numpy as np
+        from ase import Atoms
+        from amorphgen.analysis import StructureAnalyser
+        from amorphgen.analysis.rdf import first_Tr_peak
+        rng = np.random.default_rng(3)
+        a = Atoms("In8Ga8Zn8O32", positions=rng.uniform(0, 12, (56, 3)),
+                  cell=[12] * 3, pbc=True)
+        tr = StructureAnalyser([a]).total_correlation(qmin=0.6, qmax=22.0)
+        r = np.asarray(tr["r"]); T = np.asarray(tr["T_r"])
+        pk, lo, hi = first_Tr_peak(tr)
+        assert pk is not None and lo < pk < hi
+        # it is a genuine local maximum, and earlier than the global one
+        i = int(np.argmin(np.abs(r - pk)))
+        assert T[i] >= T[i - 1] and T[i] >= T[i + 1]
+        assert pk <= r[int(np.argmax(T))]
+
+    def test_qmax_window_sensitivity_scan(self):
+        """The q range and the window belong to the measurement, not the model,
+        and both move T(r). The scan reports that spread; with a Lorch window
+        the first peak is stable, without one the truncation ripple eventually
+        splits it and the integrated count collapses."""
+        from ase import Atoms
+        import numpy as np
+        from amorphgen.analysis.rdf import scan_Tr_qmax, format_Tr_scan
+        rng = np.random.default_rng(5)
+        a = Atoms("In8Ga8Zn8O32", positions=rng.uniform(0, 12, (56, 3)),
+                  cell=[12] * 3, pbc=True)
+        rows = scan_Tr_qmax([a], qmax_values=(14.0, 18.0, 22.0), qmin=0.6)
+        assert len(rows) == 6                       # two windows x three qmax
+        lorch = [r for r in rows if r["window"] == "lorch" and r.get("r_peak")]
+        assert len(lorch) == 3
+        pk = [r["r_peak"] for r in lorch]
+        assert max(pk) - min(pk) < 0.25             # stable under the window
+        txt = format_Tr_scan(rows)
+        assert "sensitivity" in txt and "lorch" in txt and "spread" in txt
+        # a range with nothing in it is reported, not raised
+        bad = scan_Tr_qmax([a], qmax_values=(5.0,), qmin=30.0, windows=("lorch",))
+        assert "error" in bad[0] and "usable S(Q)" in bad[0]["error"]
+
+    def test_cli_tr_scan_flag(self, tmp_path, monkeypatch, capsys):
+        import sys
+        from ase.io import write
+        from amorphgen.cli import main
+        src = tmp_path / "cu.xyz"
+        write(str(src), self._fcc_cu(), format="extxyz")
+        monkeypatch.setattr(sys, "argv", ["amorphgen", "--analyse", str(src),
+                                          "--tr", "--tr-scan", "--tr-qrange", "0.5", "25"])
+        main()
+        out = capsys.readouterr().out
+        assert "T(r) transform sensitivity" in out and "spread:" in out

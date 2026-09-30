@@ -481,12 +481,22 @@ def test_run_index_sources(tmp_path, monkeypatch):
     import os
     from amorphgen.utils.common import run_index_from_cwd, run_index_for, stage_rng
     d = tmp_path / "run_0007"; d.mkdir(); monkeypatch.chdir(d)
-    assert run_index_from_cwd() == 7
+    # a pipeline run inside run_NNNN is banded, so it cannot be mistaken for a
+    # batch run of snapshot_0007 (which keeps the plain local index 7)
+    from amorphgen.utils.common import scoped_run_index as _s
+    assert run_index_from_cwd() == _s(0, 7, "pipeline") != 7
     e = tmp_path / "quench_runs"; e.mkdir(); monkeypatch.chdir(e)
     monkeypatch.delenv("SLURM_ARRAY_TASK_ID", raising=False)
     assert run_index_from_cwd() == 0
     monkeypatch.setenv("SLURM_ARRAY_TASK_ID", "12")
-    assert run_index_from_cwd() == 12
-    assert run_index_for({"run_index": 3}) == 3 and run_index_for({}) == 12
-    a = stage_rng(5, 4, 12).random(3); b = stage_rng(5, 4, 3).random(3)
+    # the array task and an explicit --run-index live in their own bands, so a
+    # task id can never be mistaken for a run_NNNN directory or a snapshot number
+    from amorphgen.utils.common import scoped_run_index, _INDEX_BAND
+    assert run_index_from_cwd() == scoped_run_index(0, 12, "pipeline-slurm") >= 2 * _INDEX_BAND
+    assert run_index_for({}) == scoped_run_index(0, 12, "pipeline-slurm")
+    assert run_index_for({"run_index": 3}) == scoped_run_index(0, 3, "pipeline")
+    assert run_index_for({"seed_index": scoped_run_index(7, 1, "batch")}) == \
+        scoped_run_index(7, 1, "batch")          # batch hands its index over ready-banded
+    a = stage_rng(5, 4, run_index_for({})).random(3)
+    b = stage_rng(5, 4, run_index_for({"run_index": 3})).random(3)
     assert not np.allclose(a, b)

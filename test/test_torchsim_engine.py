@@ -362,3 +362,64 @@ class TestPhase3:
         run_torchsim(src, cfg_override=cfg, work_dir=w, stages=[4], batch_size="auto", resume=True)
         out = capsys.readouterr().out
         assert "[Resume] chunk size 1 taken from" in out and "chunks of 1" in out
+
+
+class TestSeedReachesTheBatchedEngine:
+    """Review round 11: the run index must reach the torch-sim MD path too, or
+    two SLURM array tasks with the same --seed draw identical momenta."""
+
+    def test_run_index_changes_the_momenta(self):
+        import numpy as np
+        from ase.build import bulk
+        from amorphgen.utils.torchsim_md import batch_nvt
+        m = build_model("lennard-jones", device="cpu", classical_params=LJ)
+        def run(run_index):
+            cells = [bulk("Cu", "fcc", a=3.6, cubic=True).repeat((2, 2, 2))]
+            out = batch_nvt(cells, m, 300.0, n_steps=100, timestep_fs=1.0, seed=11,
+                            stage=4, run_index=run_index, log=lambda *a: None)
+            return out[0].get_positions()
+        a, b, again = run(0), run(1), run(0)
+        assert np.allclose(a, again)            # same index reproduces
+        assert not np.allclose(a, b)            # a different one does not
+
+    def test_hybrid_torchsim_uses_the_job_run_index(self, tmp_path, monkeypatch):
+        """Through run_torchsim: two jobs differing only by SLURM array task
+        must not produce identical structures."""
+        import numpy as np
+        from ase.build import bulk
+        from ase.io import read, write
+        from amorphgen.pipeline.batch_quench import run_torchsim
+        src = tmp_path / "s.xyz"
+        write(str(src), bulk("Cu", "fcc", a=3.6, cubic=True).repeat((2, 2, 2)), format="extxyz")
+        cfg = {"model": "lennard-jones", "device": "cpu", "seed": 4, "classical_params": LJ,
+               "eq_high": {"ensemble": "NVT", "T": 400, "steps": 100, "timestep": 1.0}}
+        out = []
+        for task in ("1", "2"):
+            monkeypatch.setenv("SLURM_ARRAY_TASK_ID", task)
+            run_torchsim([str(src)], cfg_override=dict(cfg),
+                         work_dir=str(tmp_path / f"w{task}"), stages=[4], batch_size=1)
+            runs = sorted((tmp_path / f"w{task}").rglob("stage4_eq.xyz"))
+            assert runs, list((tmp_path / f"w{task}").rglob("*"))
+            out.append(read(str(runs[0])).get_positions())
+        monkeypatch.delenv("SLURM_ARRAY_TASK_ID")
+        assert not np.allclose(out[0], out[1])
+
+
+def test_warp_allocation_failure_counts_as_out_of_memory():
+    """Review round 11: torch-sim's neighbour list (NVIDIA warp) reports a GPU
+    memory failure as RuntimeError("Failed to allocate N bytes on device
+    'cuda:0'"), which the chunk-splitting retry must recognise; a job died on
+    this in the class benchmark."""
+    from amorphgen.pipeline.opt_cell import _batch_optimize_torchsim
+    import inspect, re
+    src = inspect.getsource(_batch_optimize_torchsim)
+    m = re.search(r"def _is_oom\(exc\):(.*?)\n\n", src, re.S)
+    assert m, "the OOM predicate moved; update this test"
+    ns = {}
+    exec("def _is_oom(exc):" + m.group(1), ns)
+    is_oom = ns["_is_oom"]
+    assert is_oom(RuntimeError("Failed to allocate 180 bytes on device 'cuda:0'"))
+    assert is_oom(RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB"))
+    assert is_oom(RuntimeError("torch.OutOfMemoryError"))
+    assert not is_oom(ValueError("composition must be a dict"))
+    assert not is_oom(RuntimeError("shape mismatch"))

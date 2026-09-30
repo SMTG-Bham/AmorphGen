@@ -395,6 +395,52 @@ def stage_rng(seed, stage: int, run_index: int = 0):
         np.random.SeedSequence([int(seed), int(stage), int(run_index)]))
 
 
+# The MD seed index has to separate runs that share a ``seed``. Every source of
+# scope gets its own band, so two runs can only land on one seed stream when
+# they come from the SAME source with the same local index. The local index is
+# the snapshot number, or the position in the loop, and occupies band 0.
+_INDEX_STRIDE = 100_000
+_INDEX_BAND = 10_000_000_000        # _INDEX_STRIDE ** 2: room for any one source
+_INDEX_SOURCES = ("local", "batch", "slurm", "pipeline", "pipeline-slurm")
+
+
+def scoped_run_index(local: int, scope=None, source: str = "local") -> int:
+    """Seed index for one MD run: a local identity inside a per-source band.
+
+    ``local`` is the run's own identity (its ``snapshot_NNNN`` number, or its
+    position in the loop). ``source`` names where the enclosing scope came
+    from, and ``scope`` is that scope's number:
+
+    ``"local"``           no enclosing scope; the index is just ``local``
+    ``"batch"``           an explicit ``--run-index`` on a batch / ensemble run
+    ``"slurm"``           ``SLURM_ARRAY_TASK_ID`` on a batch / ensemble run
+    ``"pipeline"``        an explicit ``--run-index`` on the single-structure pipeline
+    ``"pipeline-slurm"``  ``SLURM_ARRAY_TASK_ID`` on the single-structure pipeline
+
+    Two runs therefore share a seed stream only when they come from the same
+    source with the same scope and the same local identity. Out-of-range values
+    are refused rather than wrapped: folding ``snapshot_100003`` onto
+    ``snapshot_0003``, or letting ``--run-index 100000`` spill into the next
+    band, would silently put two runs on one stream.
+    """
+    if source not in _INDEX_SOURCES:
+        raise ValueError(f"unknown run-index source {source!r}; "
+                         f"expected one of {_INDEX_SOURCES}")
+    local = int(local)
+    if not 0 <= local < _INDEX_STRIDE:
+        raise ValueError(
+            f"run index {local} is outside 0-{_INDEX_STRIDE - 1}: the seed "
+            f"index bands would overlap. Renumber the snapshots.")
+    if scope is None:
+        return local
+    if not 0 <= int(scope) < _INDEX_STRIDE:
+        raise ValueError(
+            f"{source} run-index scope {scope} is outside "
+            f"0-{_INDEX_STRIDE - 1}: the seed index bands would overlap.")
+    return (_INDEX_SOURCES.index(source) * _INDEX_BAND
+            + int(scope) * _INDEX_STRIDE + local)
+
+
 def run_index_from_cwd() -> int:
     """Index of a ``run_NNNN`` working directory (batch / ensemble modes).
 
@@ -403,19 +449,34 @@ def run_index_from_cwd() -> int:
     sharing one ``--seed`` still draw different velocities and noise; else 0.
     """
     import re
-    m = re.search(r"run_(\d+)", os.path.basename(os.getcwd()))
+    # fullmatch, so a directory called "myrun_2" or "run_2_old" is not mistaken
+    # for a run directory; banded as "pipeline" because only the single-structure
+    # path reaches here (batch_quench hands its index over under seed_index)
+    m = re.fullmatch(r"run_(\d+)", os.path.basename(os.getcwd()))
     if m:
-        return int(m.group(1))
+        return scoped_run_index(0, int(m.group(1)), "pipeline")
     task = os.environ.get("SLURM_ARRAY_TASK_ID")
-    return int(task) if task and task.isdigit() else 0
+    return (scoped_run_index(0, int(task), "pipeline-slurm")
+            if task and task.isdigit() else 0)
 
 
 def run_index_for(cfg: dict) -> int:
     """Run index for the MD seed stream: an explicit ``run_index`` in the
     config (set by batch_quench per run, or ``--run-index``) beats the
     working-directory / SLURM inference."""
+    # batch_quench has already banded its index and stores it under its own
+    # key. Inferring "already banded" from the magnitude instead would band a
+    # local index (a snapshot number) a second time, putting a plain batch run
+    # on the same stream as a --run-index job.
+    if cfg and cfg.get("seed_index") is not None:
+        return int(cfg["seed_index"])
     ri = cfg.get("run_index") if cfg else None
-    return int(ri) if ri is not None else run_index_from_cwd()
+    if ri is None:
+        return run_index_from_cwd()
+    # a bare --run-index reaching a stage directly is the single-structure
+    # pipeline: its own band, so it cannot collide with a batch run that the
+    # user happened to label with the same number
+    return scoped_run_index(0, int(ri), "pipeline")
 
 
 def resolve_ramp(T_start: float, T_end: float, T_step: float) -> list[float]:

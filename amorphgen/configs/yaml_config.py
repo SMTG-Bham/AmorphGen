@@ -25,6 +25,10 @@ import yaml
 
 
 # Valid top-level keys and their expected types.
+# keys AmorphGen sets internally; a user file must not smuggle one in, because
+# the seed index it carries has already been banded (utils.common.scoped_run_index)
+_INTERNAL_KEYS = frozenset({"seed_index"})
+
 _VALID_TOP_KEYS = {
     "model": str,
     "mace_model": (str, type(None)),
@@ -109,6 +113,11 @@ def _validate_config(cfg: dict, path: str) -> tuple[list[str], list[str]]:
     errors = []
 
     for key, val in cfg.items():
+        if key in _INTERNAL_KEYS:
+            errors.append(
+                f"'{key}' in {path} is set internally by AmorphGen and cannot be "
+                f"given in a config file; use 'run_index' to label a run by hand")
+            continue
         if key not in _VALID_TOP_KEYS:
             warnings.append(f"Unknown top-level key '{key}' in {path}")
             continue

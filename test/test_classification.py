@@ -468,3 +468,49 @@ def test_benchmark_density_fixes(composition, ref, lo, hi):
     m = sum(atomic_masses[atomic_numbers[e]] * n for e, n in composition.items())
     rho = m * 1.66054 / L ** 3
     assert lo <= rho / ref <= hi, rho
+
+
+@pytest.mark.parametrize("composition, expected", [
+    # the metal-rich glass rule is for transition / noble metals; s-block
+    # compounds are Zintl phases and keep their pnictide / boride treatment
+    ({"Li": 162, "P": 54}, "pnictide"),
+    ({"Na": 162, "Sb": 54}, "pnictide"),
+    ({"Cs": 162, "Sb": 54}, "pnictide"),
+    ({"Ni": 172, "P": 43}, "alloy"),
+    ({"Fe": 172, "B": 43}, "alloy"),
+    ({"Pd": 86, "Ni": 86, "P": 43}, "alloy"),
+])
+def test_metal_rich_glass_rule_excludes_s_block(composition, expected):
+    assert _classify_compound(composition) == expected
+
+
+@pytest.mark.parametrize("composition, ref, lo, hi", [
+    # Review round 12: the "non-metal as oxide cation" override must not reach
+    # the real anion of an oxyhalide, oxynitride or hydroxide. Giving Cl, N or H
+    # a covalent radius there halves the cell and doubles the density.
+    ({"Bi": 72, "O": 72, "Cl": 72}, 7.72, 0.70, 0.82),      # was 1.50 of crystal
+    ({"La": 72, "O": 72, "Cl": 72}, 5.98, 0.65, 0.80),
+    ({"Si": 108, "N": 108, "O": 54}, 2.80, 0.70, 0.85),     # was 1.98
+    ({"Na": 54, "O": 54, "H": 54}, 2.13, 0.90, 1.15),
+    # ... while a non-metal that really is the cation keeps its positive state
+    ({"S": 44, "O": 132}, 1.92, 0.92, 1.08),
+    ({"Se": 72, "O": 144}, 3.95, 0.92, 1.08),
+    ({"P": 64, "O": 160}, 2.39, 0.78, 0.95),
+    ({"Te": 72, "O": 144}, 5.10, 1.00, 1.18),
+])
+def test_oxide_cation_override_only_reaches_actual_cations(composition, ref, lo, hi):
+    from ase.data import atomic_masses, atomic_numbers
+    L = estimate_cell_length(composition)
+    m = sum(atomic_masses[atomic_numbers[e]] * n for e, n in composition.items())
+    assert lo <= (m * 1.66054 / L ** 3) / ref <= hi
+
+
+def test_real_anions_keep_their_ionic_radii():
+    """The radius actually used, so the test names the cause rather than a
+    downstream cell length."""
+    from amorphgen.utils.radii import _radius_for_density as r
+    assert r("Cl", "oxyhalide", {"Bi": 1, "O": 1, "Cl": 1}) > 1.5      # ionic, not 1.02
+    assert r("N", "nitride", {"Si": 2, "N": 2, "O": 1}) > 1.2          # ionic, not 0.71
+    assert r("S", "covalent_oxide", {"S": 1, "O": 3}) < 0.5            # S6+, promoted
+    assert r("Se", "covalent_oxide", {"Se": 1, "O": 2}) < 0.7          # Se6+/4+
+    assert r("S", "chalcogenide", {"Zn": 1, "S": 1}) > 1.0             # anion in ZnS
