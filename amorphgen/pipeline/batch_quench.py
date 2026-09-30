@@ -30,11 +30,14 @@ from ase.io import read, write, iread
 def _run_seed_index(snap_file: str, loop_idx: int, explicit=None) -> int:
     """Index that feeds one run's MD seed stream (velocities, thermostat noise).
 
-    The run's LOCAL identity is the ``snapshot_NNNN`` number in its filename
-    when it has one, and the position in the loop otherwise. Using the filename
-    number keeps a run's seed stable when the input set changes: adding a file
-    to the directory, or resuming with a different selection, must not give
-    ``run_0007`` a different seed halfway through.
+    The run's LOCAL identity is the number in its filename when it has one and
+    the position in the loop otherwise. Extracted names (``snapshot_NNNN``) and
+    the generated names a hybrid ensemble is fed (``random_NNNN``,
+    ``struct_NNNN``, ``hybrid_NNNN``) all count. Using the filename number keeps
+    a run's seed stable when the input set changes: adding a file to the
+    directory, or resuming with a different selection, must not give
+    ``run_0007`` a different seed halfway through. A name outside that set falls
+    back to the loop position, which is stable only for a fixed input set.
 
     That local index is then banded by where the run's scope comes from (see
     :func:`~amorphgen.utils.common.scoped_run_index`): an explicit
@@ -43,7 +46,7 @@ def _run_seed_index(snap_file: str, loop_idx: int, explicit=None) -> int:
     the same local identity.
     """
     from ..utils.common import scoped_run_index
-    m = re.match(r"snapshot[_-]?(\d+)",
+    m = re.match(r"(?:snapshot|random|struct|hybrid)[_-]?(\d+)",
                  os.path.splitext(os.path.basename(snap_file))[0])
     local = int(m.group(1)) if m else loop_idx
     if explicit is not None:
@@ -304,7 +307,11 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
     seed = cfg.get("seed")
     # the batched engine runs a whole chunk on one noise stream, so the index
     # that has to separate jobs is the JOB's: --run-index, or the SLURM array
-    # task, resolved exactly as the ASE path resolves it
+    # task. An explicit --run-index lands in the same band as the ASE path; a
+    # bare SLURM array task does not, because run_index_for bands it as
+    # "pipeline-slurm" with local 0 while the ASE path uses the "slurm" band
+    # with the snapshot number. That costs nothing here: one chunk is one
+    # stream, so there is no per-snapshot index for it to agree with.
     from ..utils.common import run_index_for, scoped_run_index
     _explicit = cfg.get("run_index")
     job_index = (scoped_run_index(0, int(_explicit), "batch")   # same band as the ASE path

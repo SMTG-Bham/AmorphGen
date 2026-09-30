@@ -430,9 +430,35 @@ orphan: true
   far the first peak and its integrated count move (`rdf.scan_Tr_qmax()`,
   `rdf.format_Tr_scan()`). Those two are properties of the measurement, not of the model,
   so a comparison should carry that spread rather than imply a precision the transform
-  does not have. On a-IGZO the first peak sits at 2.08-2.13 A across qmax 12-25 with a
-  Lorch window; without one the truncation ripple splits it above qmax 20 and the count
-  collapses from 2.9 to 0.7, which the table makes obvious.
+  does not have. On a-IGZO the first peak sits at 2.07-2.12 A across qmax 12-25 with a
+  Lorch window and 2.07-2.15 A without one, where the ripple narrows the integration
+  window and the count drifts from 2.8 down to 1.7.
+- **The T(r) first-peak finder no longer locks onto the truncation ripple.** A peak now
+  has to stand out, with a prominence of at least a fifth of the largest in the curve,
+  sit above 1 A, and have `g(r)` above 0.5. Height alone could not do it: `T(r)` grows as
+  `4 pi rho r`, so a fraction of the maximum is a threshold on r rather than on the
+  structure, and the ripple that precedes the first shell cleared it. Over 96 transforms
+  of eight amorphous systems at six values of qmax the old rule missed the first shell by
+  more than 0.35 A in 25 cases, every one of them without a Lorch window; the new rule
+  misses 2, both at qmax 12 and for different reasons: one skips a weak first shell in
+  favour of the taller second, the other is residual ripple. The integration window is
+  also clamped at 1 A, so a Lorch-broadened first shell with no clear minimum before it
+  no longer prints a lower bound down at 0.6 A. The unwindowed transform of a-Al2O3
+  reported a first peak at
+  1.3 to 1.5 A with a coordination number of 0.01, against a real Al-O shell at 1.82 with
+  3.7. The bar for `g(r)` is deliberately well below 1, because with one heavy scatterer
+  the real first shell can sit under the average: the Cu-O shell of Cu2O has a weighted
+  `g` of 0.81. Every `none` row of `--tr-scan` and every `--tr-window none` summary was
+  affected, and the scan's advice line blamed the q range instead.
+- **Behaviour change, hybrid-ensemble seeds.** `_run_seed_index` promised that a run's
+  MD seed survives a change to the input set, but it read the index only from a
+  `snapshot_NNNN` name, so the `random_NNNN` files a hybrid ensemble is fed fell back to
+  the loop position. It now reads `snapshot_`, `random_`, `struct_` and `hybrid_` names.
+  A hybrid ensemble resumed across this change gets different seeds for its remaining
+  runs than for those already finished; start such a set again if that matters.
+- **The T(r) summary now reaches the saved report.** `--save-report` writes the file
+  before the S(q) and T(r) blocks run, so the peak line and the `--tr-scan` table were
+  printed but never saved. Both are appended to the file now, as the ring statistics are.
 - **A relaxation no longer reports a false placement stall.** The density line added
   with the warning above was printed after `--relax` had moved the cell, so it compared
   the relaxed density with the placement target and claimed "placement stalled and the

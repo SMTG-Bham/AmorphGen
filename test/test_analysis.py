@@ -886,13 +886,19 @@ class TestTotalCorrelationFunction:
         src = tmp_path / "cu.xyz"
         write(str(src), self._fcc_cu(), format="extxyz")
         plots = tmp_path / "p"
+        report = tmp_path / "report.txt"
         monkeypatch.setattr(sys, "argv", ["amorphgen", "--analyse", str(src), "--tr",
                                           "--tr-qrange", "0.5", "25", "--tr-window", "none",
-                                          "--save-plot", str(plots)])
+                                          "--save-plot", str(plots),
+                                          "--save-report", str(report)])
         main()
         out = capsys.readouterr().out
         assert "T(r): xray weighting, q = 0.5-25.0" in out and "none window" in out
-        assert "first T(r) peak at r =" in out
+        assert "first peak at r =" in out
+        # the summary belongs in the saved report too, not only on screen
+        saved = report.read_text()
+        assert "T(r) (xray, q = 0.5-25.0 1/A, none window)" in saved
+        assert "first peak at r =" in saved or "no resolved first peak" in saved
         assert (plots / "analysis_tr.png").exists()
         head = (plots / "analysis_tr.csv").read_text().splitlines()
         assert "window=None" in head[0] and "qmax=25.0" in head[0]
@@ -921,8 +927,8 @@ class TestTotalCorrelationFunction:
     def test_qmax_window_sensitivity_scan(self):
         """The q range and the window belong to the measurement, not the model,
         and both move T(r). The scan reports that spread; with a Lorch window
-        the first peak is stable, without one the truncation ripple eventually
-        splits it and the integrated count collapses."""
+        the first peak is stable, without one the truncation ripple narrows the
+        integration window and the count drifts down."""
         from ase import Atoms
         import numpy as np
         from amorphgen.analysis.rdf import scan_Tr_qmax, format_Tr_scan
@@ -940,6 +946,54 @@ class TestTotalCorrelationFunction:
         # a range with nothing in it is reported, not raised
         bad = scan_Tr_qmax([a], qmax_values=(5.0,), qmin=30.0, windows=("lorch",))
         assert "error" in bad[0] and "usable S(Q)" in bad[0]["error"]
+
+    def test_first_peak_rejects_the_truncation_ripple(self):
+        """Without a Lorch window T(r) carries a ripple before the first shell.
+        T grows as 4 pi rho r, so a height threshold set as a fraction of the
+        maximum is a threshold on r and the ripple clears it; the ripple is
+        rejected on prominence instead. This is the a-Al2O3 failure, which used
+        to report 1.3 to 1.5 A with a count of 0.01 for an Al-O shell at 1.82."""
+        import numpy as np
+        from amorphgen.analysis.rdf import first_Tr_peak
+
+        r = np.linspace(0.05, 8.0, 800)
+        rho = 0.07
+
+        def shell(r0, amp, w):
+            return amp * np.exp(-((r - r0) / w) ** 2)
+
+        g = shell(1.20, 0.55, 0.10) + shell(1.90, 4.00, 0.12) + shell(3.20, 2.20, 0.25)
+        res = {"r": r.tolist(), "g_r": g.tolist(), "rho": rho,
+               "T_r": (4 * np.pi * r * rho * g).tolist()}
+        T = np.asarray(res["T_r"])
+
+        # the ripple is a local maximum that clears a plain height threshold,
+        # which is why height alone picked it
+        i_ripple = int(np.argmin(np.abs(r - 1.20)))
+        assert T[i_ripple] > 0.05 * T.max()
+
+        pk, lo, hi = first_Tr_peak(res)
+        assert abs(pk - 1.90) < 0.08, f"picked {pk}, expected the shell at 1.90"
+        assert lo < 1.90 < hi
+
+    def test_first_peak_keeps_a_real_shell_below_the_mean_density(self):
+        """A heavy scatterer can put the real first shell below g = 1: in Cu2O
+        the X-ray weighting is dominated by Cu-Cu and the Cu-O shell has a
+        weighted g of 0.81. The density test must not reject it."""
+        import numpy as np
+        from amorphgen.analysis.rdf import first_Tr_peak
+
+        r = np.linspace(0.05, 8.0, 800)
+        rho = 0.08
+
+        def shell(r0, amp, w):
+            return amp * np.exp(-((r - r0) / w) ** 2)
+
+        g = shell(1.95, 0.80, 0.13) + shell(2.65, 2.40, 0.20)
+        res = {"r": r.tolist(), "g_r": g.tolist(), "rho": rho,
+               "T_r": (4 * np.pi * r * rho * g).tolist()}
+        pk, _, _ = first_Tr_peak(res)
+        assert abs(pk - 1.95) < 0.08, f"picked {pk}, expected the weak shell at 1.95"
 
     def test_cli_tr_scan_flag(self, tmp_path, monkeypatch, capsys):
         import sys

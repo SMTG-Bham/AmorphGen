@@ -186,10 +186,6 @@ class StructureAnalyser:
             cations only.
         """
         from collections import Counter
-        try:
-            from ..pipeline.random_gen import _classify_bond
-        except ImportError:
-            from amorphgen.pipeline.random_gen import _classify_bond
 
         from collections import Counter
         from .structure import is_bonding_pair
@@ -610,10 +606,6 @@ class StructureAnalyser:
 
         cn = self.coordination()
         if cn:
-            try:
-                from ..pipeline.random_gen import _classify_bond
-            except ImportError:
-                from amorphgen.pipeline.random_gen import _classify_bond
             from collections import Counter
             from .structure import is_bonding_pair
             _comp = Counter(self.atoms_list[0].get_chemical_symbols())
@@ -744,10 +736,6 @@ class StructureAnalyser:
         lines.append(bar)
 
         # Determine bonding pairs for CN
-        try:
-            from ..pipeline.random_gen import _classify_bond
-        except ImportError:
-            from amorphgen.pipeline.random_gen import _classify_bond
 
         from collections import Counter
         from .structure import is_bonding_pair

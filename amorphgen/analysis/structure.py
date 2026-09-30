@@ -43,15 +43,11 @@ def build_neighbour_dict(atoms, cutoff, get_cutoff_fn):
     return nbr_dict, syms
 
 
-# Highest positive oxidation state, for the charge-balance test that decides
-# which elements act as anions in a given compound. The Shannon table lists
-# only the anionic state for S, N, H and the halogens, so the common positive
-# states of the p-block are given here.
 # a same-element metal pair is a first-shell bond above this metal fraction
 _METAL_RICH_BOND_FRACTION = 0.70
 
 
-from ..utils.radii import anion_elements, _max_positive_os      # noqa: F401  (re-exported)
+from ..utils.radii import anion_elements      # noqa: F401  (re-exported)
 
 
 def is_bonding_pair(s1: str, s2: str, composition) -> bool:
@@ -181,10 +177,6 @@ def compute_all_angles(atoms_list, max_cutoff, get_cutoff_fn,
     """Compute all bond angles."""
     bonding_pairs = None
     if bonding_only:
-        try:
-            from ..pipeline.random_gen import _classify_bond
-        except ImportError:
-            from amorphgen.pipeline.random_gen import _classify_bond
 
         from collections import Counter
         unique = sorted(set(atoms_list[0].get_chemical_symbols()))
