@@ -965,7 +965,10 @@ amorphgen --hybrid-ensemble --input-dir /scratch/geo2_seeds/random_opt/ \
 ```
 
 Ready-made BlueBEAR scripts for generation arrays, batched relaxation, batched
-MD and the GPU test suite are in `examples/`.
+MD and the GPU test suite are in `examples/`. Set `AMORPHGEN_VENV`, select your
+account with `sbatch --account=your-project`, and create `logs/` before submitting.
+See the [HPC guide](docs/guides/hpc.md#configuring-the-bundled-examples) for
+repository paths and cluster-specific setup.
 
 ---
 

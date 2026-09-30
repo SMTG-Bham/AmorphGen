@@ -8,16 +8,16 @@
 #   stage 7    = final opt with a FREE CUBIC cell (config cell_filter: cubic)
 # so the model chooses the final volume. Output in VASP format.
 #
-# Submit FROM the directory holding this script + the config (examples_iro2_new/):
-#   cd examples_iro2_new && sbatch run_iro2_hybrid_cubic7_r2scan_bluebear.slurm
+# Submit FROM the directory holding this script + the config (my_iro2_run/):
+#   cd my_iro2_run && sbatch run_iro2_hybrid_cubic7_r2scan_bluebear.slurm
 # Finals collected in iro2_hybrid_cubic7/task_NN/final/ (VASP).
 # ----------------------------------------------------------------------------
 
 #SBATCH --job-name=amg_iro2_hyb_c7
-# Defaults are the Birmingham BlueBEAR project this was developed on. To run it
-# elsewhere set AMORPHGEN_ROOT and AMORPHGEN_VENV, and give your own project with
-#   sbatch --account=<your-project> <this script>
-#SBATCH --account=scanlodo-amorphous-oxides
+# Export AMORPHGEN_VENV=/path/to/venv before submitting (see docs/guides/hpc.md).
+# For repository files, AMORPHGEN_ROOT defaults to the submission directory.
+# Choose your account at submission: sbatch --account=your-project <this-script>
+# Adapt the BlueBEAR modules and QoS below to your cluster.
 #SBATCH --qos=bbgpu
 #SBATCH --time=06:00:00
 #SBATCH --array=0-19
@@ -33,7 +33,7 @@ set -eu
 module purge
 module load bear-apps/2023a/live
 module load Python/3.11.3-GCCcore-12.3.0
-source "${AMORPHGEN_VENV:-/rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/venvs/amorphgen}/bin/activate"
+source "${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}/bin/activate"
 
 cd "${SLURM_SUBMIT_DIR:-.}"
 mkdir -p logs

@@ -2,10 +2,10 @@
 # GPU tests of the torch-sim engines (test/test_torchsim_gpu.py) on one BlueBEAR
 # GPU, plus the Tier 3 MACE integration tests. ~10 minutes.
 #SBATCH --job-name=amg_gputest
-# Defaults are the Birmingham BlueBEAR project this was developed on. To run it
-# elsewhere set AMORPHGEN_ROOT and AMORPHGEN_VENV, and give your own project with
-#   sbatch --account=<your-project> <this script>
-#SBATCH --account=scanlodo-amorphous-oxides
+# Export AMORPHGEN_VENV=/path/to/venv before submitting (see docs/guides/hpc.md).
+# For repository files, AMORPHGEN_ROOT defaults to the submission directory.
+# Choose your account at submission: sbatch --account=your-project <this-script>
+# Adapt the BlueBEAR modules and QoS below to your cluster.
 #SBATCH --qos=bbgpu
 #SBATCH --time=00:30:00
 #SBATCH --ntasks=1
@@ -19,9 +19,9 @@ mkdir -p logs
 module purge
 module load bear-apps/2024a/live
 module load Python/3.12.3-GCCcore-13.3.0
-source "${AMORPHGEN_VENV:-/rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312}/bin/activate"
-cd "${AMORPHGEN_ROOT:-/rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/AmorphGen}"
-python -m pip install -q pytest      # the venv has no test runner (job 55164159 found none)
+source "${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}/bin/activate"
+cd "${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}"
+python -m pip install -q pytest      # ensure the test runner is available
 python -c "import torch, torch_sim; print('torch', torch.__version__, '| cuda', torch.cuda.is_available(), '|', torch.cuda.get_device_name(0), '| torch-sim', torch_sim.__version__)"
 python -m pytest test/test_torchsim_gpu.py -v -s --tb=short -p no:cacheprovider
 python -m pytest test/test_torchsim_engine.py test/test_mace_integration.py -v --tb=short --run-mace -p no:cacheprovider

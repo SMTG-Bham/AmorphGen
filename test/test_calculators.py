@@ -213,7 +213,7 @@ class TestChgnetDefaultDtype:
         assert _mod.TORCH_DTYPE is torch.float32
 
 
-# ─── Backend availability / fail-fast (DESIGN_MLIP_OPTIONAL.md D2/D4) ──────
+# ─── Backend availability / fail-fast checks ─────────────────────────────
 
 class TestBackendAvailability:
     """require_backend / available_backends / list_models markers."""
@@ -235,8 +235,7 @@ class TestBackendAvailability:
         assert require_backend("buckingham") == "classical"
 
     def test_require_backend_missing_raises_with_install_hint(self, monkeypatch):
-        """The fail-fast message must contain a copy-pasteable install line
-        (invariant 4 of DESIGN_MLIP_OPTIONAL.md)."""
+        """The fail-fast message must contain a copy-pasteable install line."""
         import amorphgen.utils.calculators as calc
         monkeypatch.setattr(calc, "backend_available",
                             lambda b: b == "classical")

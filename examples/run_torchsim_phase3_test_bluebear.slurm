@@ -8,10 +8,10 @@
 #      --resume. Look for "[Stage N] resuming from step" in the second run and
 #      check that the per-run logs continue without a gap.
 #SBATCH --job-name=ts_phase3
-# Defaults are the Birmingham BlueBEAR project this was developed on. To run it
-# elsewhere set AMORPHGEN_ROOT and AMORPHGEN_VENV, and give your own project with
-#   sbatch --account=<your-project> <this script>
-#SBATCH --account=scanlodo-amorphous-oxides
+# Export AMORPHGEN_VENV=/path/to/venv before submitting (see docs/guides/hpc.md).
+# For repository files, AMORPHGEN_ROOT defaults to the submission directory.
+# Choose your account at submission: sbatch --account=your-project <this-script>
+# Adapt the BlueBEAR modules and QoS below to your cluster.
 #SBATCH --qos=bbgpu
 #SBATCH --time=00:40:00
 #SBATCH --ntasks=1
@@ -25,14 +25,14 @@ mkdir -p logs
 module purge
 module load bear-apps/2024a/live
 module load Python/3.12.3-GCCcore-13.3.0
-source "${AMORPHGEN_VENV:-/rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312}/bin/activate"
-PKG=${AMORPHGEN_ROOT:-/rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/AmorphGen}
-python -m pip install -q pytest      # the venv has no test runner (job 55164159 found none)
+source "${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}/bin/activate"
+PKG=${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
+python -m pip install -q pytest      # ensure the test runner is available
 python -c "import torch, torch_sim; print('torch', torch.__version__, '| cuda', torch.cuda.is_available(), '|', torch.cuda.get_device_name(0), '| torch-sim', torch_sim.__version__)"
 
 echo "=== 1. GPU tests ==="
-( cd $PKG && python -m pytest test/test_torchsim_gpu.py -v -s --tb=short -p no:cacheprovider )
-( cd $PKG && python -m pytest test/test_torchsim_engine.py test/test_mace_integration.py -q --tb=short --run-mace -p no:cacheprovider )
+( cd "$PKG" && python -m pytest test/test_torchsim_gpu.py -v -s --tb=short -p no:cacheprovider )
+( cd "$PKG" && python -m pytest test/test_torchsim_engine.py test/test_mace_integration.py -q --tb=short --run-mace -p no:cacheprovider )
 
 echo "=== 2. auto batch size: batched relaxation of 4 x 350-atom IGZO ==="
 IN=igzo_100/subset10; T=phase3_test; rm -rf $T; mkdir -p $T/in4

@@ -2,6 +2,34 @@
 
 AmorphGen is designed for deployment on GPU-enabled HPC clusters via SLURM.
 
+## Configuring the bundled examples
+
+The `examples/*.slurm` scripts use BlueBEAR module and QoS names. Adapt those
+settings to your cluster, choose your own allocation account at submission,
+and export the path to a virtualenv containing AmorphGen and the required
+backends:
+
+```bash
+export AMORPHGEN_VENV=/path/to/your/venv
+export AMORPHGEN_ROOT=/path/to/AmorphGen
+cd "$AMORPHGEN_ROOT"
+mkdir -p logs
+sbatch --account=your-project examples/run_ensemble_resume_bluebear.slurm
+```
+
+`AMORPHGEN_VENV` is required; the scripts stop with a setup message if it is
+unset or empty. Use a virtualenv compatible with the Python module loaded by
+the script (Python 3.12 or newer for torch-sim). Scripts that read files from
+the repository use `AMORPHGEN_ROOT`, defaulting to `SLURM_SUBMIT_DIR` (or the
+current directory when run directly). Run inputs and outputs remain relative
+to the submission directory; follow each script's input/config instructions.
+Create `logs/` there **before** calling `sbatch`, so SLURM can open its log files.
+
+The scripts have no embedded allocation account. Pass `--account=your-project`
+on each submission, or set `export SBATCH_ACCOUNT=your-project` when submitting
+several jobs, including dependency chains. Keep these settings in your shell
+or a local submission wrapper. `#SBATCH` directives do not expand shell variables.
+
 ## SLURM job script
 
 ```bash

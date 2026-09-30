@@ -97,9 +97,9 @@ sevennet = [
     "sevenn>=0.10",
 ]
 
-# DEPRECATED alias (matplotlib moved into the core dependencies; see
-# DESIGN_MLIP_OPTIONAL.md D6). Kept as a no-op for one release so existing
-# `pip install amorphgen[analysis]` lines keep working; remove after v1.1.
+# DEPRECATED alias (matplotlib moved into the core dependencies).
+# Kept as a no-op for one release so existing `pip install amorphgen[analysis]`
+# lines keep working; remove after v1.1.
 analysis = []
 
 # Convenience bundles

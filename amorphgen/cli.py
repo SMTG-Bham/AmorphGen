@@ -1118,9 +1118,9 @@ def _collect_ensemble_final(quench_dir: str, final_dir: str, output_format: str,
 def _requires_calculator(args) -> bool:
     """Will this invocation construct a calculator?
 
-    Gates the fail-fast backend check (DESIGN_MLIP_OPTIONAL.md, D2). Modes
-    that only read/transform/analyse structures never need a backend and must
-    keep working on a torch-free install.
+    Gates the fail-fast backend check. Modes that only read, transform, or
+    analyse structures never need a backend and must keep working on a
+    torch-free install.
     """
     # Calculator-free modes (checked first — they may combine with input_file)
     if (args.list_models or args.rank_from_log or args.convert
@@ -1217,9 +1217,9 @@ def main():
     # Calculator-requiring modes abort BEFORE any setup work (no work dir, no
     # structure loading) with a copy-pasteable install hint. Backend knowledge
     # lives in utils.calculators (require_backend); this is just the gate.
-    # See DESIGN_MLIP_OPTIONAL.md (D2). The same gate refuses a precision the
-    # model can't run (CHGNet + float64), which --mq-ensemble would otherwise
-    # only hit in phase 3, after stages 1-4 of MD.
+    # The same gate refuses a precision the model can't run (CHGNet + float64),
+    # which --mq-ensemble would otherwise only hit in phase 3, after stages
+    # 1-4 of MD.
     if _requires_calculator(args):
         from .utils.calculators import (require_backend, require_dtype,
                                         BackendNotInstalledError)

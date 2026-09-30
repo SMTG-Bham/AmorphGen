@@ -11,10 +11,10 @@
 # placement cannot. ~2 h per task; both commands carry --resume, so resubmit
 # after a walltime kill.
 #SBATCH --job-name=pcm
-# Defaults are the Birmingham BlueBEAR project this was developed on. To run it
-# elsewhere set AMORPHGEN_ROOT and AMORPHGEN_VENV, and give your own project with
-#   sbatch --account=<your-project> <this script>
-#SBATCH --account=scanlodo-amorphous-oxides
+# Export AMORPHGEN_VENV=/path/to/venv before submitting (see docs/guides/hpc.md).
+# For repository files, AMORPHGEN_ROOT defaults to the submission directory.
+# Choose your account at submission: sbatch --account=your-project <this-script>
+# Adapt the BlueBEAR modules and QoS below to your cluster.
 #SBATCH --qos=bbgpu
 #SBATCH --time=03:00:00
 #SBATCH --ntasks=1
@@ -29,13 +29,13 @@ mkdir -p logs
 module purge
 module load bear-apps/2024a/live
 module load Python/3.12.3-GCCcore-13.3.0
-source "${AMORPHGEN_VENV:-/rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312}/bin/activate"
-PKG=${AMORPHGEN_ROOT:-/rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/AmorphGen}
+source "${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}/bin/activate"
+PKG=${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
 
 case ${SLURM_ARRAY_TASK_ID:-0} in
   0) SYS=gete;   COMP="GeTe*108";  CN="Ge=4,Te=3"; T_ANNEAL=800; RHO=5.7
-     REF="--reference $PKG/examples/reference_a_GeTe.yaml" ;;
-  1) SYS=sb2te3; COMP="Sb2Te3*44"; CN="Sb=3,Te=3"; T_ANNEAL=700; RHO=6.1; REF="" ;;
+     REF=(--reference "$PKG/examples/reference_a_GeTe.yaml") ;;
+  1) SYS=sb2te3; COMP="Sb2Te3*44"; CN="Sb=3,Te=3"; T_ANNEAL=700; RHO=6.1; REF=() ;;
 esac
 # Density is pinned to the literature amorphous value (a-GeTe 5.6-5.9,
 # a-Sb2Te3 ~6.2 g/cm3; the chalcogenide estimate is 5-10 % low). The minimum
@@ -52,7 +52,7 @@ amorphgen --random-gen --composition "$COMP" -n $N --target-cn "$CN" --target-de
     --seed $SEED --relax $MODEL --engine torchsim -C cubic -f 0.05 -o $SYS --resume
 
 # 2. the unannealed set: what placement + relaxation alone gives
-amorphgen --analyse --input-dir $SYS/random_opt $ANALYSE $REF \
+amorphgen --analyse --input-dir $SYS/random_opt $ANALYSE "${REF[@]}" \
     --save-report $SYS/analysis_unannealed/report.txt --save-plot $SYS/analysis_unannealed/
 
 # 3. anneal at T_ANNEAL (10 ps), quench to 300 K, 1 ps at 300 K, relax; all batched
@@ -63,7 +63,7 @@ MD="--eq-high-ensemble NVT --eq-high-T $T_ANNEAL --eq-high-steps 20000 \
     $MODEL --seed $SEED --engine torchsim --batch-size auto $MD --resume
 
 # 4. the annealed set
-amorphgen --analyse --input-dir $SYS/anneal_${T_ANNEAL}K/final $ANALYSE $REF \
+amorphgen --analyse --input-dir $SYS/anneal_${T_ANNEAL}K/final $ANALYSE "${REF[@]}" \
     --save-report $SYS/analysis_annealed/report.txt --save-plot $SYS/analysis_annealed/
 
 echo "=== done $(date). Compare: $SYS/analysis_unannealed/report.txt vs $SYS/analysis_annealed/report.txt"

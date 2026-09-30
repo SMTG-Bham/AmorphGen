@@ -6,10 +6,10 @@
 # classes_v2/ so the before (classes/) and after tables can be compared.
 # Also retries any first-pass system that has no relaxed structures.
 #SBATCH --job-name=cls_refix
-# Defaults are the Birmingham BlueBEAR project this was developed on. To run it
-# elsewhere set AMORPHGEN_ROOT and AMORPHGEN_VENV, and give your own project with
-#   sbatch --account=<your-project> <this script>
-#SBATCH --account=scanlodo-amorphous-oxides
+# Export AMORPHGEN_VENV=/path/to/venv before submitting (see docs/guides/hpc.md).
+# For repository files, AMORPHGEN_ROOT defaults to the submission directory.
+# Choose your account at submission: sbatch --account=your-project <this-script>
+# Adapt the BlueBEAR modules and QoS below to your cluster.
 #SBATCH --qos=bbgpu
 #SBATCH --time=02:00:00
 #SBATCH --ntasks=1
@@ -23,14 +23,14 @@ mkdir -p logs classes_v2
 module purge
 module load bear-apps/2024a/live
 module load Python/3.12.3-GCCcore-13.3.0
-source "${AMORPHGEN_VENV:-/rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312}/bin/activate"
-PKG=${AMORPHGEN_ROOT:-/rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/AmorphGen}
-SYS=$PKG/examples/class_benchmark_systems.txt
+source "${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}/bin/activate"
+PKG=${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
+SYS="$PKG/examples/class_benchmark_systems.txt"
 # EMPTY after the revert of 2026-09-29: no density rule has changed since the
 # last pass, so classes/ + classes_v2/ are current. Put system names here (space
 # separated) when a rule changes and they need regenerating.
 REFIX=""
-grep -v "^#" $SYS | grep -wE "$(echo $REFIX | tr ' ' '|')" > classes_v2/systems.txt
+grep -v "^#" "$SYS" | grep -wE "$(echo $REFIX | tr ' ' '|')" > classes_v2/systems.txt
 relax_and_analyse () {   # $1 = dir
     amorphgen --batch-opt --input-dir $1/random_initial -o $1/random_opt \
         -m mace-mpa-0 -d cuda --default-dtype float32 --engine torchsim --batch-size auto \
@@ -44,19 +44,19 @@ while read CLASS NAME COMP RHO KIND; do
     /usr/bin/time -f "placement wall %e s" amorphgen --random-gen --composition "$COMP" -n 5 --seed 2026 -o $D --resume
     relax_and_analyse $D
 done < classes_v2/systems.txt
-python $PKG/examples/collect_class_benchmark.py classes_v2 classes_v2/systems.txt 2>&1 | grep -v "Composition\]"
+python "$PKG/examples/collect_class_benchmark.py" classes_v2 classes_v2/systems.txt 2>&1 | grep -v "Composition\]"
 echo "=== first-pass systems with no relaxed structures: retry"
-grep -v "^#" $SYS | while read CLASS NAME COMP RHO KIND; do
+grep -v "^#" "$SYS" | while read CLASS NAME COMP RHO KIND; do
     D=classes/$NAME
     [ -d $D/random_initial ] && [ "$(ls $D/random_opt/*_opt.xyz 2>/dev/null | wc -l)" -eq 0 ] && { echo "== retry $NAME"; relax_and_analyse $D; }
 done
-python $PKG/examples/collect_class_benchmark.py classes $SYS 2>&1 | grep -v "Composition\]" | tail -3
+python "$PKG/examples/collect_class_benchmark.py" classes "$SYS" 2>&1 | grep -v "Composition\]" | tail -3
 # merged view for the paper: every system in the current list, taken from
 # classes_v2/ where it was redone or added and from classes/ otherwise
 rm -rf classes_final; mkdir -p classes_final
-grep -v "^#" $SYS | while read CLASS NAME COMP RHO KIND; do
+grep -v "^#" "$SYS" | while read CLASS NAME COMP RHO KIND; do
     if [ -d classes_v2/$NAME/random_opt ]; then ln -s ../classes_v2/$NAME classes_final/$NAME
     elif [ -d classes/$NAME ]; then ln -s ../classes/$NAME classes_final/$NAME; fi
 done
-python $PKG/examples/collect_class_benchmark.py classes_final $SYS 2>&1 | grep -v "Composition\]"
+python "$PKG/examples/collect_class_benchmark.py" classes_final "$SYS" 2>&1 | grep -v "Composition\]"
 echo "=== done $(date): classes/ (first pass), classes_v2/ (redone + added), classes_final/class_benchmark.tsv (merged, current list)"

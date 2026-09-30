@@ -447,7 +447,7 @@ def _detect_backend(model: str) -> str:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Backend availability (fail-fast support — see DESIGN_MLIP_OPTIONAL.md, D2/D4)
+# Backend availability for fail-fast checks and model-list install hints
 # ═════════════════════════════════════════════════════════════════════════════
 
 # Import name and pip-extra per MLIP backend. Single source of backend
@@ -680,8 +680,7 @@ def list_models() -> None:
 
     Shows every known model regardless of what is installed (discovery),
     with a marker per backend section saying whether it is usable right now
-    and, if not, the exact install command (diagnosis). See
-    DESIGN_MLIP_OPTIONAL.md (D4).
+    and, if not, the exact install command (diagnosis).
     """
     bar = "-" * 72
     print(f"\n{bar}")

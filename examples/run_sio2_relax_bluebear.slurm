@@ -4,10 +4,10 @@
 #      direct method, rings, connectivity, dimers, reference ranges.
 #      Resumable: resubmit if the walltime hits.
 #SBATCH --job-name=sio2_relax
-# Defaults are the Birmingham BlueBEAR project this was developed on. To run it
-# elsewhere set AMORPHGEN_ROOT and AMORPHGEN_VENV, and give your own project with
-#   sbatch --account=<your-project> <this script>
-#SBATCH --account=scanlodo-amorphous-oxides
+# Export AMORPHGEN_VENV=/path/to/venv before submitting (see docs/guides/hpc.md).
+# For repository files, AMORPHGEN_ROOT defaults to the submission directory.
+# Choose your account at submission: sbatch --account=your-project <this-script>
+# Adapt the BlueBEAR modules and QoS below to your cluster.
 #SBATCH --qos=bbgpu
 #SBATCH --time=03:00:00
 #SBATCH --ntasks=1
@@ -21,7 +21,7 @@ mkdir -p logs
 module purge
 module load bear-apps/2024a/live
 module load Python/3.12.3-GCCcore-13.3.0
-source "${AMORPHGEN_VENV:-/rds/projects/s/scanlodo-amorphous-oxides/venvs/amorphgen-py312}/bin/activate"
+source "${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}/bin/activate"
 OUT=sio2_100
 amorphgen --batch-opt --input-dir $OUT/random_initial -o $OUT/random_opt \
     -m mace-mpa-0 -d cuda --default-dtype float64 -C cubic -O LBFGS -f 0.05 --opt-steps 1000 \
