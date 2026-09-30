@@ -159,3 +159,6 @@ Tutorials/_*/
 *.synctex.gz
 *.toc
 texput.log
+
+# local agent/editor instructions, not part of the distribution
+CLAUDE.md
