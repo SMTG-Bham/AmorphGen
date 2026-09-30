@@ -58,7 +58,7 @@ request to `main` and `dev`:
 | Job | Checks |
 |---|---|
 | `lint` | syntax errors and undefined names (ruff) in the package, tests, docs config and tutorial notebooks |
-| `test` | the torch-free suite on Python 3.10 to 3.14 on Linux, and on 3.14 on macOS and Windows |
+| `test` | the torch-free suite on Python 3.10 to 3.14 on Linux, and on 3.14 on macOS |
 | `backends` | the full suite with CPU-only PyTorch, the torch-sim engine and CHGNet, with a coverage report |
 | `min-deps` | the suite on Python 3.10 with every dependency at the lowest version `pyproject.toml` allows |
 | `package` | the sdist and wheel build, the README links as PyPI renders them, and the sdist's tests run against the installed wheel |

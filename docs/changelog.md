@@ -337,7 +337,7 @@ orphan: true
   Both install through the `pyproject.toml` extras, so the dependencies are declared in
   one place. `conda env create -f build_tools/environment.yml`.
 - **Wider CI.** Every push and pull request to `main` and `dev` now also runs the
-  torch-free suite on macOS and Windows; the torch-sim engine, CHGNet and pymatgen tests
+  torch-free suite on macOS; the torch-sim engine, CHGNet and pymatgen tests
   on CPU-only PyTorch (previously skipped in CI), with a coverage report; the suite with
   every dependency at the lowest version `pyproject.toml` allows; the suite against the
   built wheel; and a ruff check for syntax errors and undefined names. The docs build
@@ -345,10 +345,13 @@ orphan: true
   environments are built and tested when they or the extras change, and the weekly
   canary covers SevenNet (`7net-0`) as well as CHGNet. See `CONTRIBUTING.md`.
 - **Python 3.13 and 3.14.** The torch-free suite now runs on Python 3.10 to 3.14 on
-  Linux, and on 3.14 (was 3.12) on macOS and Windows, and the classifiers list 3.13 and
+  Linux, and on 3.14 (was 3.12) on macOS, and the classifiers list 3.13 and
   3.14. The `backends` job and the `build_tools/` conda environments stay on 3.12:
   CHGNet 0.4.2 publishes wheels up to 3.12 only, so on 3.13 and 3.14 pip compiles it,
   which needs a C compiler.
+- **Supported platforms stated.** AmorphGen supports Linux and macOS, the platforms CI
+  tests; native Windows is not supported (use WSL). The installation docs and the
+  classifiers now say so.
 - **`CITATION.cff` and `CODE_OF_CONDUCT.md`.** GitHub's "Cite this repository" button
   now gives the reference the README asks for, in APA and BibTeX. The code of conduct
   adopts the Contributor Covenant 3.0 and says where to report a problem. A test checks

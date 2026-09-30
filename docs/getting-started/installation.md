@@ -2,6 +2,8 @@
 
 ## Requirements
 
+- Linux or macOS. Windows is not supported natively; use
+  [WSL](https://learn.microsoft.com/windows/wsl/) instead.
 - Python 3.10 to 3.14. CHGNet publishes wheels up to 3.12 only; on 3.13 and
   3.14 pip compiles it from source, which needs a C compiler.
 - ASE (Atomic Simulation Environment)

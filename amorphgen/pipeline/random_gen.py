@@ -1373,7 +1373,7 @@ def batch_random(
         lf.flush()
 
     # UTF-8, not the locale encoding: the auto-derive line has non-ASCII
-    # (→, ρ, Δχ) that cp1252 (the Windows default) cannot encode
+    # (→, ρ, Δχ) that a non-UTF-8 locale (e.g. Latin-1) cannot encode
     lf = open(logfile, "a" if resume else "w", encoding="utf-8")
     try:
         _log(f"\n{bar}", lf)

@@ -16,11 +16,6 @@ concurrency:
 permissions:
   contents: read
 
-# bash on every OS, so a failing command fails its step on Windows too
-defaults:
-  run:
-    shell: bash
-
 jobs:
   # Hard errors only (syntax errors, undefined names, invalid comparisons) in
   # the package, the tests, docs/conf.py and the tutorial notebooks. Style is
@@ -42,8 +37,8 @@ jobs:
         ruff check --select E9,F63,F7,F82 --output-format github .
 
   # The torch-free suite (Tier 1 + Tier 2) on every supported Python on Linux,
-  # and on the newest one on macOS and Windows, where the bare install
-  # (random generation and analysis on a laptop) is used.
+  # and on the newest one on macOS, where the bare install (random generation
+  # and analysis on a laptop) is used.
   test:
     name: test (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
@@ -55,8 +50,6 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         include:
         - os: macos-latest
-          python-version: "3.14"
-        - os: windows-latest
           python-version: "3.14"
 
     steps:

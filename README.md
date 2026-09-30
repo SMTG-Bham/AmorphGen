@@ -143,6 +143,8 @@ For ensembles on a GPU there is a second execution engine, [torch-sim](https://g
 
 ## Installation
 
+AmorphGen supports Linux and macOS. Windows is not supported natively; use [WSL](https://learn.microsoft.com/windows/wsl/) instead.
+
 | Tasks | Install | Size |
 |---|---|---|
 | generate random structures, analyse trajectories (RDF, CN, S(q), plots), run classical LJ/Buckingham pipelines | `pip install -e .` | ~80 MB, **no PyTorch** |
@@ -887,7 +889,7 @@ Application case studies (these assume you have done the workflow tutorials):
 ```
 AmorphGen/
 ├── .github/workflows/
-│   └── test.yml                    ← CI (Linux/macOS/Windows, backends, min deps, wheel)
+│   └── test.yml                    ← CI (Linux/macOS, backends, min deps, wheel)
 ├── amorphgen/
 │   ├── __init__.py                 ← v1.0.0rc4
 │   ├── cli.py                      ← CLI entry point (amorphgen command)
