@@ -1,6 +1,21 @@
 # Tutorials
 
-Jupyter notebook tutorials demonstrating AmorphGen workflows.
+Jupyter notebooks demonstrate AmorphGen workflows. Clone the repository to
+keep the notebooks and their companion files together, then install a backend
+and JupyterLab in the same environment:
+
+```bash
+git clone https://github.com/SMTG-Bham/AmorphGen.git
+cd AmorphGen
+python -m pip install -e ".[mace,chgnet]" jupyterlab
+jupyter lab Tutorials/
+```
+
+Select that environment as the notebook kernel and run cells in order. For
+Tutorial 6's classical calculations, the base package is sufficient; the MACE
+refinement cell needs the MACE extra. See {doc}`../getting-started/installation`
+for platform requirements and {doc}`../getting-started/quickstart` for CLI
+examples.
 
 **Start here**:
 
@@ -8,7 +23,8 @@ Jupyter notebook tutorials demonstrating AmorphGen workflows.
 |----------|-------------|---------|--------|
 | [Tutorial 1: Quick-start tutorial](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T1_5min_intro/tutorial_1_5min_intro.ipynb) | Orientation: what AmorphGen does, the three workflows, decision tree, one live demo | CHGNet | a-SiO₂ |
 
-Workflow tutorials (each reports the wall time measured on the CPU it was validated on):
+Workflow tutorials (runtime depends on the system, backend, hardware and
+simulation settings):
 
 | Tutorial | Description | Backend | System |
 |----------|-------------|---------|--------|
@@ -16,7 +32,7 @@ Workflow tutorials (each reports the wall time measured on the CPU it was valida
 | [Tutorial 3: Explicit control + ensemble analysis](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T3_random_gen/tutorial_3_random_generation.ipynb) | The opposite end of T2: explicit minsep (from crystal-phase bond lengths) + explicit target density (from cited amorphous-thin-film references). 5-structure ensembles per system; quantitative RDF / energy / CN / bond-angle analysis vs the crystalline reference | MACE | In₂O₃, TiO₂, Al₂O₃, Ga₂O₃ |
 | [Tutorial 4: Melt-and-quench](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T4_MQ_via_7_steps/tutorial_4_melt_quench.ipynb) | Full 7-stage pipeline | CHGNet (CPU) / MACE (GPU) | SiO₂ |
 | [Tutorial 5: Hybrid batch quench](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T5_mix_random_MQ/tutorial_5_batch_quench.ipynb) | Random gen → equilibrate → batch quench | CHGNet | TiO₂ |
-| [Tutorial 6: Classical potentials](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T6_classical_potential/tutorial_6_classical_potential.ipynb) | Buckingham+Coulomb relaxation, hybrid workflow | Classical | SiO₂, Al₂O₃, TiO₂ |
+| [Tutorial 6: Classical potentials](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T6_classical_potential/tutorial_6_classical_potential.ipynb) | Buckingham+Coulomb relaxation, hybrid workflow | Classical; optional MACE refinement | SiO₂, Al₂O₃, TiO₂ |
 
 Application case studies (these assume you have done the workflow tutorials):
 

@@ -1,7 +1,3 @@
----
-orphan: true
----
-
 # Changelog
 
 ## Unreleased

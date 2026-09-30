@@ -23,7 +23,7 @@
 | batched GPU relaxation and MD of ensembles (`--engine torchsim`) | `pip install "amorphgen[mace,torchsim]"` (Python 3.12+, and a C/C++ compiler) |
 
 On a torch-free install, `--device auto` resolves to CPU. Classical potentials
-work without PyTorch; commands requesting an unavailable MLIP backend report
+work on CPU without PyTorch; commands requesting an unavailable MLIP backend report
 the required install command.
 `amorphgen --list-models` shows every model with installed/missing markers.
 
@@ -163,7 +163,7 @@ pip install -e ".[mace,chgnet]"
 | MACE    | `mace-torch` | CUDA yes | CPU; see MPS note below |
 | CHGNet  | `chgnet`    | CUDA yes | CPU + MPS yes |
 | SevenNet | `sevenn`   | CUDA yes | CPU; see MPS note below |
-| Classical (LJ, Buckingham) | built-in | N/A | CPU yes |
+| Classical (LJ, Buckingham) | built-in | Optional CUDA path with PyTorch | CPU yes |
 | torch-sim engine (`--engine torchsim`) | `torch-sim-atomistic` | CUDA yes | CPU only, no MPS |
 
 On Apple Silicon, `--device auto` can select MPS. MACE and SevenNet default
@@ -201,5 +201,12 @@ import amorphgen
 print(amorphgen.__version__)  # installed package version
 
 from amorphgen.utils.calculators import list_models
-list_models()  # prints all available models grouped by backend
+list_models()  # prints registered models and backend installation status
+```
+
+Or verify the CLI without loading or downloading a model:
+
+```bash
+amorphgen --version
+amorphgen --list-models
 ```

@@ -177,7 +177,7 @@ amorphgen --analyse --input-dir optimised/ \
 amorphgen --analyse --input-dir optimised/ \
     --reference examples/reference_a_Ga2O3.yaml
 
-# Structure factor S(q): direct (Debye) method, neutron weighting, saved as PNG + CSV
+# Structure factor S(q): direct reciprocal-space sum, neutron weighting, PNG + CSV
 amorphgen --analyse --input-dir optimised/ --sq --sq-weighting neutron --save-plot plots/
 
 # Same neutron weighting, using the Fourier-transform-of-g(r) route

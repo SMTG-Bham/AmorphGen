@@ -27,217 +27,110 @@ AmorphGen exposes three routes to amorphous structures: **random placement** fro
 
 ---
 
-## What it does
-
-Making an amorphous model normally means writing your own MD scripts, picking a potential for each new composition and babysitting a multi-stage run. AIMD is accurate but too slow for more than a handful of structures; classical MD is fast but needs a fitted potential for every composition.
-
-AmorphGen wraps the whole thing in one command. You give it a formula or a crystal structure; it runs either random placement plus relaxation or a 7-stage melt-quench, using MACE, CHGNet or SevenNet as the potential (or Lennard-Jones and Buckingham+Coulomb if you have parameters). Minimum separations, density, temperatures and cooling rates have sensible automatic values and can all be overridden from the command line or a YAML file.
-
-MD runs save structures and trajectories; random generation saves the placed structures and, when requested, relaxed outputs. The analysis mode provides RDF, coordination, angles, rings and S(q). Structures are written as VASP, CIF or extended XYZ, so they go straight into DFT or a further relaxation at a higher level of theory.
-
-It has been used for oxides (SiO₂, In₂O₃, TiO₂, Ga₂O₃, Al₂O₃, InGaZnO₄), halides (LiF, Li₂ZrCl₆), GaAs, Si, and nitrides (GaN, BN), mostly to prepare structures for DFT or to screen across compositions.
-
----
-
 ## Get started
+
+Generate one structure from a composition with the base package:
+
+```bash
+pip install amorphgen
+
+# 16 formula units of In2O3 = 80 atoms
+amorphgen --random-gen --composition "In2O3*16" --seed 42 \
+    --format vasp --work-dir in2o3_random
+```
+
+The structure is written to `in2o3_random/random_initial/`. To relax an ensemble,
+install a calculator backend and add `--relax`:
 
 ```bash
 pip install "amorphgen[mace]"
-
-# Generate 1 random In2O3 structure (80 atoms, VASP format)
-amorphgen --random-gen --composition "In2O3*16" -n 1 --format vasp
-
-# Generate and relax with MACE
-amorphgen --random-gen --composition "In2O3*16" --relax --device cpu --format vasp
-
-# Generate 20 structures for ensemble statistics
-amorphgen --random-gen --composition "In2O3*16" -n 20 --format vasp
+amorphgen --random-gen --composition "In2O3*16" -n 5 --seed 42 \
+    --relax --model mace-mpa-0 --device cpu --format vasp \
+    --work-dir in2o3_relaxed
 ```
 
-See the {doc}`getting-started/installation` and {doc}`getting-started/quickstart` guides for full details.
+Initial structures go in `in2o3_relaxed/random_initial/` and relaxed structures
+in `in2o3_relaxed/random_opt/`. Placement provides starting configurations;
+check the relaxed density, bonding and convergence before using them in a study.
 
----
+See {doc}`getting-started/installation` for platform and backend requirements,
+and {doc}`getting-started/quickstart` for the other workflows.
+
+```{note}
+These docs follow the repository's `main` branch, which can contain features
+added after the latest PyPI release. See {doc}`changelog` for release boundaries
+and the installation guide for installing from source.
+```
 
 ## Choose a workflow
 
-AmorphGen exposes three workflows. Pick the one that matches your starting point:
-
-::::{grid} 3
+::::{grid} 1 1 3 3
 :gutter: 3
 
-:::{grid-item-card} 1. Random generation
-:text-align: center
+:::{grid-item-card} Random generation
+:link: guides/random-generation
+:link-type: doc
+
+Start with a **composition**. Place atoms using estimated density, minimum
+separations and coordination targets, with optional relaxation using a potential.
 
 `--random-gen`
-
-Place atoms into a cubic cell with automated minimum separations, density, and target CN from ionic, covalent or metallic radii. Optional relax with any backend.
 :::
 
-:::{grid-item-card} 2. Melt-and-Quench (MQ)
-:text-align: center
+:::{grid-item-card} Melt-and-quench
+:link: guides/pipeline
+:link-type: doc
 
-`--mq-ensemble` (or default)
+Start with a **crystal**. Run the seven-stage pipeline, or share stages 1–4
+before running separate quenches from high-temperature snapshots.
 
-7-stage MD pipeline starting from a crystal: optimise → pre-eq → heat → high-T eq → quench → low-T eq → final optimise.
+Default pipeline or `--mq-ensemble`
 :::
 
-:::{grid-item-card} 3. Hybrid
-:text-align: center
+:::{grid-item-card} Hybrid ensemble
+:link: guides/hybrid-workflow
+:link-type: doc
+
+Start with **disordered structures**. Run high-temperature equilibration,
+quenching, low-temperature equilibration and final relaxation (stages 4–7)
+for each input.
 
 `--hybrid-ensemble`
-
-Anneal a directory of disordered structures (e.g. random-gen outputs) through stages 4–7. Cheaper than MQ because it skips the slow heat ramp.
 :::
 
 ::::
 
-::::{grid} 2
-:gutter: 3
+The {doc}`guides/best-practices` guide covers choosing and checking a protocol.
+For multiple quenches, see {doc}`guides/mq-ensemble` or {doc}`guides/batch-quench`.
 
-:::{grid-item-card} MLIP and Classical Potentials
-:text-align: center
+## Analyse and configure
 
-Swap calculators with a single flag. Supports MACE, CHGNet, SevenNet (MLIPs) and Lennard-Jones, Buckingham+Coulomb (classical).
-:::
-
-:::{grid-item-card} Structure Analysis
-:text-align: center
-
-RDF, coordination numbers, bond angles, ring statistics, energy ranking. CLI or Python API.
-:::
-
-::::
-
----
-
-## Pipeline overview
-
-### 1. Random generation (`--random-gen`)
-
-```text
-Composition  (e.g. "In2O3*16"  or  In=32,O=48)
-         │
-   ┌─────▼──────────────────────────────────────────┐
-   │  Auto-derive  minsep, density, target CN       │
-   │  from ionic / covalent / metallic radii           │
-   └─────┬──────────────────────────────────────────┘
-         │
-   ┌─────▼──────────────────────────────────────────┐
-   │  Random / coordination-aware placement         │
-   └─────┬──────────────────────────────────────────┘
-         │
-   ┌─────▼──────────────────────────────────────────┐
-   │  Optional relax  (--relax)                     │
-   └─────┬──────────────────────────────────────────┘
-         │
-   N amorphous structures  (.xyz / .vasp / .cif)
-```
-
-See {doc}`guides/random-generation`.
-
-### 2. Melt-quench (MQ)
-
-```text
-Crystalline input  (POSCAR / .xyz / .cif / .extxyz)
-         │
-   ┌─────▼──────────────────────────────────────────┐
-   │  Stage 1  Structure optimisation               │
-   │           optimizer + cell_filter              │
-   └─────┬──────────────────────────────────────────┘
-         │
-   ┌─────▼──────────────────────────────────────────┐
-   │  Stage 2  Pre-melt equilibration at T-low      │
-   │           NVT/NPT                              │
-   └─────┬──────────────────────────────────────────┘
-         │
-   ┌─────▼──────────────────────────────────────────┐
-   │  Stage 3  Melt  –  NPT/NVT heat ramp           │
-   │           T-low → T_melt                       │
-   └─────┬──────────────────────────────────────────┘
-         │
-   ┌─────▼──────────────────────────────────────────┐
-   │  Stage 4  High-T equilibration   T_melt        │
-   │           NVT/NPT                              │
-   └─────┬──────────────────────────────────────────┘
-         │
-   ┌─────▼──────────────────────────────────────────┐
-   │  Stage 5  Quench  –  NVT cooling ramp          │
-   │           T_melt → T-low                       │
-   └─────┬──────────────────────────────────────────┘
-         │
-   ┌─────▼──────────────────────────────────────────┐
-   │  Stage 6  Low-T equilibration   T-low          │
-   │           NVT/NPT                              │
-   └─────┬──────────────────────────────────────────┘
-         │
-   ┌─────▼──────────────────────────────────────────┐
-   │  Stage 7  Final optimisation (amorphous)       │
-   │           optimizer + cell_filter              │
-   └─────┬──────────────────────────────────────────┘
-         │
-   stage7_opt.cif  +  stage7_opt.xyz
-```
-
-`--mq-ensemble` extends MQ: stages 1–4 run once, then N separate quenches (stages 5–6–7) are launched from snapshots of the stage-4 trajectory. See {doc}`guides/pipeline` and {doc}`guides/mq-ensemble`.
-
-### 3. Hybrid: random → MQ stages 4-7 (`--hybrid-ensemble`)
-
-```text
-Directory of disordered structures  (e.g. --random-gen outputs)
-         │
-   ┌─────▼──────────────────────────────────────────┐
-   │  Stage 4  High-T equilibration   T_melt        │
-   │           NVT/NPT, configured duration          │
-   └─────┬──────────────────────────────────────────┘
-         │
-   ┌─────▼──────────────────────────────────────────┐
-   │  Stage 5  Quench  –  NVT cooling ramp          │
-   │           T_melt → T-low                       │
-   └─────┬──────────────────────────────────────────┘
-         │
-   ┌─────▼──────────────────────────────────────────┐
-   │  Stage 6  Low-T equilibration   T-low          │
-   └─────┬──────────────────────────────────────────┘
-         │
-   ┌─────▼──────────────────────────────────────────┐
-   │  Stage 7  Final optimisation (amorphous)       │
-   └─────┬──────────────────────────────────────────┘
-         │
-   N amorphous structures  (one per input)
-```
-
-See {doc}`guides/hybrid-workflow`.
-
----
-
-## Features
-
-- Random structure generation: generate amorphous structures from just a chemical formula (e.g. to model amorphous In₂O₃ for 16 formula units, `--composition "In2O3*16"`). Minimum separations, density, and coordination targets are derived automatically from ionic, covalent or metallic radii according to material class.
-- 7-stage melt-and-quench pipeline: from crystalline POSCAR to relaxed amorphous structure in a single command. Configurable temperatures, cooling rates, ensembles, and timesteps.
-- `--mq-ensemble`: generate N amorphous structures from one crystalline input in a single CLI call: shared stages 1-4, then N separate quenches via auto-extracted snapshots from the stage-4 trajectory.
-- `--hybrid-ensemble`: generate an amorphous ensemble starting from disordered structures (e.g. random-gen outputs). Anneals each at high T, quenches, equilibrates, and relaxes.
-- Multiple calculator backends: MACE, CHGNet, SevenNet (MLIPs) and Lennard-Jones, Buckingham+Coulomb (classical). Swap with `--model` flag.
-- Structure analysis: built-in RDF, coordination numbers, bond angles, ring statistics, and energy ranking. Gaussian smearing for experimental comparison.
-- Plots: vector PDF output (`--save-pdf`), 300 DPI defaults, colour-blind-safe palette.
-- Energy ranking: `--rank-from-log` parses random-gen / pipeline log files and ranks structures by total energy without re-evaluating the calculator.
-- HPC ready: `--resume` recovers from SLURM walltime limits. Smart checkpoint detection restarts from the last completed stage.
-- CLI and Python API: every feature accessible from both the command line and Python. Full YAML configuration support.
-
----
+- {doc}`guides/analysis`: RDFs, coordination, bond angles, rings, structure factors
+  and plots, using the CLI or Python API.
+- {doc}`guides/yaml-config`: save a protocol, set temperatures and cooling rates,
+  and control reproducibility.
+- {doc}`guides/hpc`: run and resume jobs on a cluster.
+- {doc}`tutorials/index`: notebooks demonstrating the workflows.
+- {doc}`validation/index`: a worked comparison with reference data and its limits.
 
 ## Supported backends
 
-| Backend | Install | Model name |
-|---------|---------|------------|
-| **MACE** | `pip install "amorphgen[mace]"` | `mace-mpa-0` |
-| **CHGNet** | `pip install "amorphgen[chgnet]"` | `chgnet` |
-| **SevenNet** | `pip install "amorphgen[sevennet]"` | `sevennet`, `7net-mf-ompa` |
-| **Classical** | built-in | `buckingham`, `lennard-jones` |
-| **torch-sim engine** (Python ≥ 3.12; batched ensembles) | `pip install "amorphgen[mace,torchsim]"` | `--engine torchsim` with MACE, SevenNet or LJ |
+| Backend | Install | Example `--model` value |
+|---------|---------|-------------------------|
+| MACE | `pip install "amorphgen[mace]"` | `mace-mpa-0` |
+| CHGNet | `pip install "amorphgen[chgnet]"` | `chgnet` |
+| SevenNet | `pip install "amorphgen[sevennet]"` | `sevennet`, `7net-mf-ompa` |
+| Classical | Included in `pip install amorphgen` | `buckingham`, `lennard-jones` |
 
-```bash
-amorphgen --list-models   # see all 20+ model variants
-```
+Classical potentials require parameters appropriate to the system. See
+{doc}`guides/backends` for model selection and backend compatibility, or run
+`amorphgen --list-models` for the registered model names.
+
+The optional **torch-sim engine** batches relaxation and hybrid ensembles with
+MACE, SevenNet or Lennard-Jones. For MACE, install
+`pip install "amorphgen[mace,torchsim]"` and select `--engine torchsim`.
+It requires Python 3.12 or newer; hybrid MD supports NVT only. See the
+[installation instructions](getting-started/installation.md#the-torch-sim-engine).
 
 ---
 
@@ -276,6 +169,7 @@ data you compare against.
 ---
 
 ```{toctree}
+:hidden:
 :maxdepth: 2
 :caption: Getting Started
 
@@ -284,6 +178,7 @@ getting-started/quickstart
 ```
 
 ```{toctree}
+:hidden:
 :maxdepth: 2
 :caption: User Guide
 
@@ -302,6 +197,7 @@ guides/hpc
 ```
 
 ```{toctree}
+:hidden:
 :maxdepth: 2
 :caption: Tutorials
 
@@ -309,6 +205,7 @@ tutorials/index
 ```
 
 ```{toctree}
+:hidden:
 :maxdepth: 2
 :caption: Validation
 
@@ -316,6 +213,7 @@ validation/index
 ```
 
 ```{toctree}
+:hidden:
 :maxdepth: 2
 :caption: API Reference
 
@@ -329,10 +227,21 @@ api/utils
 ```
 
 ```{toctree}
+:hidden:
+:maxdepth: 1
+:caption: Methodology
+
+notes/sq_xrd_methodology
+notes/sq_xrd_credits
+```
+
+```{toctree}
+:hidden:
 :maxdepth: 1
 :caption: Development
 
 contributing
+changelog
 ```
 
 ## Indices and tables

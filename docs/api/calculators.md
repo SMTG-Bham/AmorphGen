@@ -72,6 +72,11 @@ requirement conflicts with the MACE extra. Use `amorphgen --list-models` or
 
 Built-in pair potentials for initial structure preparation. No extra install needed.
 
+These calculators provide energy and forces, but no stress tensor. Use
+`cell_filter: none` for optimisation and `ensemble: NVT` for MD; cell
+relaxation and NPT require a calculator that provides stress. CPU execution
+uses NumPy; GPU execution requires PyTorch.
+
 | Model name | Potential | Parameters required |
 |------------|-----------|-------------------|
 | `lennard-jones` / `lj` | 4*eps*[(sig/r)^12 - (sig/r)^6] | `epsilon`, `sigma` per pair |

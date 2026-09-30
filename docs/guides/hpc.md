@@ -1,6 +1,7 @@
 # HPC deployment
 
-AmorphGen is designed for deployment on GPU-enabled HPC clusters via SLURM.
+AmorphGen runs on GPU-enabled HPC clusters through SLURM. Install the package
+and the backend used by your job first; see {doc}`../getting-started/installation`.
 
 ## Configuring the bundled examples
 
@@ -32,6 +33,10 @@ or a local submission wrapper. `#SBATCH` directives do not expand shell variable
 
 ## SLURM job script
 
+Adapt the resource requests and environment paths to your cluster. This example
+initialises conda explicitly because batch shells may not read your interactive
+shell configuration:
+
 ```bash
 #!/bin/bash
 #SBATCH --job-name=amorphgen
@@ -41,15 +46,23 @@ or a local submission wrapper. `#SBATCH` directives do not expand shell variable
 #SBATCH --time=24:00:00
 #SBATCH --account=your-account
 
-module load CUDA/11.8.0
-conda activate /path/to/your/env
+set -euo pipefail
+export PYTHONUNBUFFERED=1
 
-amorphgen POSCAR --model mace-mpa-0 --device cuda
+# Load any compiler/Python modules required by your cluster environment.
+source /path/to/miniforge3/etc/profile.d/conda.sh
+conda activate amorphgen
+
+amorphgen POSCAR --model mace-mpa-0 --device cuda \
+    --work-dir my_run --resume
 ```
 
 ## Resuming timed-out jobs
 
-The `--resume` flag enables smart checkpoint detection for both pipeline and batch-quench modes. It scans the work directory for completed stage outputs and automatically skips them.
+`--resume` reuses completed stage outputs and saved MD frames in the work
+directory. Resubmit with the same input, model, configuration and work directory;
+use a new directory when changing the simulation protocol. Do not run two jobs
+against the same output directory at once.
 
 ### Pipeline mode
 
@@ -91,7 +104,8 @@ in batched chunks. Relaxed structures are written after every chunk and MD
 trajectories every 100 steps, so a walltime kill loses at most one chunk of
 relaxation or 100 MD steps: `--resume` skips finished runs, continues a
 partly done MD stage from the last frame common to the chunk, and reuses the
-chunk size recorded in `batch_size.json` so the chunking is identical.
+chunk size recorded in `quench_runs/batch_size.json` under the hybrid work
+directory. Keep the input list and chunk size unchanged when resuming.
 Resubmitting the same job script until the log reports the ensemble complete
 is the intended way to run a large ensemble through a short queue. Put
 `export PYTHONUNBUFFERED=1` in the script, otherwise the progress messages
@@ -127,9 +141,14 @@ For running many structures in parallel (e.g. 100 AIRSS structures), use a SLURM
 #SBATCH --time=12:00:00
 #SBATCH --array=1-100
 
+set -euo pipefail
+export PYTHONUNBUFFERED=1
+source /path/to/miniforge3/etc/profile.d/conda.sh
+conda activate amorphgen
 SAMPLE=${SLURM_ARRAY_TASK_ID}
 
 amorphgen "inputs/sample-${SAMPLE}.xyz" \
+    --model mace-mpa-0 --device cuda \
     --stages 1 4 5 6 7 \
     --config config.yaml \
     --work-dir "results/sample_${SAMPLE}" \

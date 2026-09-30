@@ -48,16 +48,22 @@ The electronegativity scale follows Pauling's original definition from bond-diss
 
 #### Edge cases at the classifier boundary
 
-The Δχ = 1.0 threshold sits exactly where chemistry genuinely gets ambiguous: bonds with Δχ in the ~0.85–1.15 band have mixed ionic/covalent character. Testing the 50-system JOSS validation set, 54 of 55 cation–anion pairs (98%) agree between the per-pair Pauling classifier and the per-composition material-class radii bucket. The disagreement, and a few other compounds outside the 50-set that sit at the boundary, are listed below:
+The Δχ = 1.0 threshold is a heuristic, so pairs near it can receive different
+classifications from the per-pair bond rule and the composition-based density
+rule. Examples include:
 
-| System | Pair | Δχ | Material class expects | Pauling rule says | Reality |
+| System | Pair | Δχ | Material class expects | Pauling rule says | Context |
 |---|---|---|---|---|---|
 | MgH₂ | Mg–H | 0.89 | ionic (hydride) | covalent | Rutile structure, predominantly ionic |
 | MnS  | Mn–S | 1.03 | covalent (chalcogenide) | ionic | α-MnS is rocksalt, ionic-leaning |
 | TiC  | Ti–C | 1.01 | covalent (carbide) | ionic | Rocksalt interstitial carbide, mixed bonding |
 | BN   | B–N  | 1.00 | ionic (nitride) | ionic (stays, strict `<`) | Sits exactly on cutoff |
 
-These disagreements are **benign**: the bond classifier governs which radii produce the per-pair `minsep`, while the material classifier governs which radii produce the density estimate. The two answer different questions, and any modest inconsistency at the boundary is absorbed by the subsequent MLIP relaxation. If you generate one of these systems and the auto-derived density looks off (typically ±15–20% from experiment), set `--target-density` explicitly to bypass the auto path for that composition.
+The bond classifier selects radii for the per-pair `minsep`; the material
+classifier selects radii for the density estimate. Check both derived values
+for these boundary cases. Subsequent relaxation may change the local
+structure and density, but does not guarantee agreement with experiment.
+Set `--target-density` explicitly when a validated density is available.
 
 #### Nonmetal cations: oxoanions and hydroxides
 
@@ -116,10 +122,10 @@ split are decided by a cation-radius rule; `high_valent_oxide` is gated on
 oxidation state ≥ 5. Compositions that match no specific class fall back to a
 generic packing factor of 0.52 (Shannon ionic).
 
-Density is the weakest-calibrated part of the auto chain: it sizes a sensible
-starting cell, but a subsequent MLIP cell relaxation will correct it. Use
-`--target-density` to set the density explicitly when the experimental value is
-known.
+The density estimate sets the starting cell. Subsequent cell relaxation can
+change it according to the chosen potential; validate the relaxed density
+separately. Use `--target-density` when an experimental value is known, and
+`--retry-mode reduce-minsep` or `none` when placement must retain that density.
 
 ### Coordination-aware placement ("SC")
 
@@ -177,31 +183,35 @@ amorphgen --random-gen --composition "SiO2*16" --n-structures 10 \
 
 ## Placement-stall policy (`--retry-mode`)
 
-Random sequential placement cannot always reach the requested density with
-fully physical hard-sphere minseps: it jams when the hard-sphere fraction of
-the floors approaches 0.38, which is where dense oxides (MgO, BeO), alloys,
-borides and large-cation nitrides sit at their estimated density.
+Random sequential placement can stall when the requested density and minimum
+separations leave too little space for the remaining atoms.
 
 The first response to a stall, in the default `expand` mode, is a soft pack:
 the structure is placed again in the same cell with every floor scaled by
 0.72, then every pair closer than its floor is pushed apart iteratively until
-all pairs reach 98.5 percent of their floors. Overlap removal from a soft
-start reaches a hard-sphere fraction of about 0.6, so the requested density
-is kept; MgO goes from 1.99 g/cm3 (after expansion) to its estimated 2.67, and
-CuZr, TiB2 and ZrN behave the same way. The structure carries
-`info["soft_pack"] = True`. Only if the floors cannot be reached does the
-cell expand, and the two policies below then apply:
+all pairs reach at least 98.5 percent of their floors. A successful soft pack
+keeps the current cell and sets `info["soft_pack"] = True`. If soft packing
+fails, `expand` grows the cell. The other modes skip soft packing and follow
+their own retry policies:
 
 | Mode | Cell | Minseps | Use when |
 |---|---|---|---|
-| `expand` (default) | grows 5% per retry (≤4) | all kept physical | the density is an estimate: a later MLIP relaxation densifies back |
-| `reduce-minsep` | **held exactly fixed** | non-bonded pairs (same-element, anion–anion) softened 5% per retry (≤4, ~19% max); cation–anion **bonds never touched** | the density is the experiment: fixed-density film studies, isochoric comparisons, where silent cell expansion would corrupt the comparison |
-| `none` | held exactly fixed | all kept exact, nothing is ever adjusted | strict studies where both density AND minseps are controlled variables: a stall fails (or, in a batch, skips the structure after seed resampling) instead of adjusting anything, an honest "this combination is not placeable" |
+| `expand` (default) | cell edge grows 5% per retry (up to 4 retries) | requested floors; soft packing accepts 98.5% of them | the starting density may change during placement |
+| `reduce-minsep` | held fixed | same-element separations reduced 5% per retry (up to 4 retries, about 19% total); unlike-element cation–anion floors retained | density must stay fixed during placement |
+| `none` | held fixed | requested floors retained | both cell and minimum separations must stay fixed; a stall raises an error |
 
-In `reduce-minsep` mode the too-close non-bonded contacts are left for the
-relaxation to resolve, run at fixed cell (`--cell-filter none`) to keep the
-density pinned through relaxation too. `batch_random`'s escalation ladder is
-mode-aware: in `reduce-minsep` mode it never touches `density_scale`.
+Same-element separations may represent bonds in elemental networks or alloys,
+so inspect the resulting contacts when using `reduce-minsep`. Run relaxation
+at fixed cell (`--cell-filter none`) to preserve the density through that step.
+
+The table describes retries inside `generate_random`. `batch_random` also
+resamples seeds and, after repeated failures, can reduce the auto-estimated
+density and then same-element metal/metalloid separations. Explicit density
+or cell settings disable the batch density reductions, but `expand` can
+still grow the cell inside `generate_random`. With `reduce-minsep`, the batch
+never changes density; with `none`, it only resamples seeds before skipping
+unplaceable indices. Inspect `random_gen.log` for adjustments and skipped
+structures.
 
 ## Python API
 
@@ -257,15 +267,22 @@ including runs without metadata. Unreadable `run_metadata.json` files cause an
 error; restore the metadata or use a separate output directory. Use `--batch-opt`
 to relax structures from an earlier generation run.
 
-`--indices SPEC` restricts a run to given structure indices, inclusive ranges
-and lists both work (`80-90`, `0,5,7-9`). Because every index has its own seed
-derived from `--seed`, the structures produced are identical to the ones a full
-run would have produced for those indices, so an ensemble can be split across
-jobs or machines and merged afterwards:
+`--indices SPEC` restricts a run to given structure indices; inclusive ranges
+and lists both work (`80-90`, `0,5,7-9`). Every index has a seed derived from
+`--seed`. With the same placement settings, split jobs reproduce the placements
+from a full run unless batch-level retry escalation changes those settings.
+Escalation state is not saved across resumes, so a resumed or split run that
+hits that path is not guaranteed to match a continuous run.
+
+Give concurrent jobs separate output directories to keep their logs and
+metadata separate, then collect their non-overlapping structure files:
 
 ```bash
-amorphgen --random-gen --composition "InGaZnO4*50" -n 100 --seed 2026 --indices 0-49  -o igzo   # job A
-amorphgen --random-gen --composition "InGaZnO4*50" -n 100 --seed 2026 --indices 50-99 -o igzo   # job B
+amorphgen --random-gen --composition "InGaZnO4*50" -n 100 --seed 2026 --indices 0-49  -o igzo_a
+amorphgen --random-gen --composition "InGaZnO4*50" -n 100 --seed 2026 --indices 50-99 -o igzo_b
+
+mkdir -p igzo/random_initial
+cp igzo_a/random_initial/*.xyz igzo_b/random_initial/*.xyz igzo/random_initial/
 
 # relax only some of them later (files whose name ends in the index)
 amorphgen --batch-opt --input-dir igzo/random_initial --indices 80-90 -m mace-mpa-0 -o igzo/random_opt

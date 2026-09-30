@@ -13,5 +13,6 @@ random_gen:
     Zr: 8
     Cl: 48
   n_structures: 5
+  target_cn: {}  # plain random placement; disable automatic SC targets
   target_density: 2.4
   output_format: vasp

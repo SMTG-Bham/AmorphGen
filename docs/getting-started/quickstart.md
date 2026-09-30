@@ -7,20 +7,23 @@ package.
 
 ## 1. Melt-and-quench pipeline
 
-Run the full 7-stage pipeline on a crystalline input structure:
+Run the full 7-stage pipeline on a crystalline input structure. These examples
+use an NVIDIA GPU; use `--device cpu` (or `device="cpu"` in Python) for CPU
+execution. The default MD stages can take substantial time; use
+{doc}`../guides/yaml-config` to set a protocol appropriate for your material:
 
 ::::{tab-set}
 
 :::{tab-item} CLI
 ```bash
 # Full pipeline
-amorphgen POSCAR --model mace-mpa-0 --device cuda
+amorphgen POSCAR --model mace-mpa-0 --device cuda --work-dir my_run
 
 # With a YAML configuration you have saved
 amorphgen POSCAR --config pipeline.yaml
 
 # Resume an interrupted run in the same work directory
-amorphgen POSCAR --model mace-mpa-0 --device cuda --resume
+amorphgen POSCAR --model mace-mpa-0 --device cuda --work-dir my_run --resume
 ```
 :::
 
@@ -48,9 +51,9 @@ atoms = pipe.run(resume=True)
 |-------|------|-------------|
 | 1 | Optimise | Relax positions (+ cell with FrechetCellFilter) |
 | 2 | Pre-melt equilibration | NVT at 300 K |
-| 3 | Melt | Heat ramp to high temperature (configurable rate in K/ps) |
+| 3 | Melt | NPT heating ramp with a Berendsen barostat by default |
 | 4 | High-T equilibration | NPT (MTK) at melt temperature by default |
-| 5 | Quench | Cool to target temperature (configurable rate in K/ps) |
+| 5 | Quench | NVT cooling ramp to the target temperature by default |
 | 6 | Low-T equilibration | Equilibrate at low temperature |
 | 7 | Final optimisation | Final relaxation |
 
@@ -157,25 +160,28 @@ the last written chunk or MD frame. See {doc}`../guides/backends`.
 ```python
 from amorphgen.utils import get_calculator
 
-# MACE (default).  device="auto" picks CUDA → MPS → CPU automatically;
-# pass "cpu" / "cuda" / "mps" explicitly to override.
-calc = get_calculator(model="mace-mpa-0", device="auto")
+# MACE (default). Use "cuda" for an NVIDIA GPU; CPU works with the
+# default float64 precision on all supported platforms.
+calc = get_calculator(model="mace-mpa-0", device="cpu")
 
 # CHGNet
 calc = get_calculator(model="chgnet", device="auto")
 
 # SevenNet
-calc = get_calculator(model="7net-mf-ompa", device="auto")
+calc = get_calculator(model="7net-mf-ompa", device="cpu")
 
 # Classical potentials (no GPU needed, parameters via YAML or dict)
-calc = get_calculator("buckingham", classical_params={
-    "params": {("Si", "O"): {"A": 18003.76, "rho": 0.2052, "C": 133.54}},
+calc = get_calculator("buckingham", device="cpu", classical_params={
+    "params": {
+        ("Si", "O"): {"A": 18003.76, "rho": 0.2052, "C": 133.54},
+        ("O", "O"): {"A": 1388.77, "rho": 0.3623, "C": 175.0},
+    },
     "charges": {"Si": 2.4, "O": -1.2},
     "cutoff": 10.0,
 })
 
 # Custom fine-tuned model
-calc = get_calculator(model_path="/path/to/custom.model")
+calc = get_calculator(model_path="/path/to/custom.model", device="cpu")
 ```
 
 ## Accessing radii data

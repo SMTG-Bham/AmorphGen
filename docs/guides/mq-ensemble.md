@@ -15,17 +15,17 @@ The key efficiency win: **stages 1-4 (opt + premelt + heat + high-T equilibratio
 ```bash
 amorphgen GaO.xyz --mq-ensemble --n-structures 20 \
     --config mq.yaml --device cuda --model chgnet --format vasp \
-    -o ga2o3_mq/
+    --resume -o ga2o3_mq/
 ```
 
 That's the entire workflow. Internally:
 
 1. **Stages 1-4** run once on `GaO.xyz`, writing `ga2o3_mq/shared/` (incl. `stage4_eq_traj.xyz`).
-2. **N=20** uniformly-spaced snapshots are extracted from the stage-4 trajectory into `ga2o3_mq/snapshots/`.
+2. **Up to N=20** uniformly spaced snapshots are extracted from the stage-4 trajectory into `ga2o3_mq/snapshots/`.
 3. **Stages 5-6-7** run independently on each snapshot, output to `ga2o3_mq/quench_runs/run_NNNN/`.
 4. **Final amorphous structures** are collected to `ga2o3_mq/final/mq_NNNN.<format>`.
 
-`--resume` is honoured at every step. Re-running the same command picks up wherever it stopped without redoing completed work.
+`--resume` skips completed simulation work and resumes interrupted MD from saved frames. Snapshot extraction and final collection are repeated. Keep the inputs, protocol and snapshot selection unchanged when resuming; use a new output directory for a different ensemble.
 
 ## Output layout
 
@@ -47,6 +47,7 @@ ga2o3_mq/
 │   │   ├── stage6_eq.xyz
 │   │   ├── stage7_opt.cif
 │   │   ├── stage7_opt.xyz
+│   │   ├── stage7_opt.vasp       # requested by --format vasp
 │   │   └── final_amorphous.xyz
 │   └── ...
 └── final/
@@ -75,12 +76,13 @@ preserves the usual ensemble layout.
 A clean per-task command looks like:
 
 ```bash
+TASK=$(printf "%04d" "$SLURM_ARRAY_TASK_ID")
 mkdir -p inputs_per_task/task_${TASK}
 cp snapshots/snapshot_${TASK}_frame*.xyz inputs_per_task/task_${TASK}/
 amorphgen --batch-quench \
   --snapshot-dir inputs_per_task/task_${TASK} \
   --config mq.yaml --batch-stages 5 6 7 \
-  --model chgnet --device cuda \
+  --model chgnet --device cuda --resume \
   -o quench_runs/run_${TASK}   # separate output directory for each task
 ```
 
@@ -168,7 +170,7 @@ final_opt:
   fmax: 0.05
   max_steps: 200
   optimizer: LBFGS
-  cell_filter: FrechetCellFilter   # full cell relax for accurate density
+  cell_filter: FrechetCellFilter   # relax cell and positions; validate density
 ```
 
 ## Equivalent two-step manual workflow
@@ -192,11 +194,11 @@ amorphgen --batch-quench --snapshot-dir shared/stage4_eq_traj.xyz \
 For a cluster with multiple GPUs, run the two halves as separate slurm jobs so the per-snapshot quenches can execute in parallel via a slurm array:
 
 ```bash
-# Job 1: stages 1-4 (single GPU, ~10 h on A100 for 100 ps eq_high)
+# Job 1: stages 1-4 (one shared trajectory)
 sbatch shared.slurm
 # Note the JOBID
 
-# Job 2: array of 20 quench tasks (20 GPUs concurrent, ~5 h wall)
+# Job 2: array of 20 quench tasks (concurrency depends on allocation)
 sbatch --dependency=afterok:<JOBID> quench_array.slurm
 ```
 
@@ -209,10 +211,12 @@ amorphgen --extract-snapshots shared/stage4_eq_traj.xyz -n 20 -o snapshots/
 
 Job 2 is an array (`#SBATCH --array=0-19`) whose tasks each set `TASK=$(printf "%04d" $SLURM_ARRAY_TASK_ID)` and run the per-task command from the job-array tip above. This is the same dispatch as `--mq-ensemble`, split for HPC parallelism; `examples/run_quench_array_bluebear.slurm` is a complete job 2 for one cluster.
 
-| Pattern | Wall time | Best for |
+| Pattern | Execution | Best for |
 |---------|-----------|----------|
-| `--mq-ensemble` (single command) | ~30 h sequential | Local / single-GPU |
-| Two slurm jobs (shared + array) | ~15 h with 20 concurrent GPUs | HPC with array support |
+| `--mq-ensemble` (single command) | Shared melt, then sequential quenches | Local / single-GPU |
+| Two SLURM jobs (shared + array) | Shared melt, then independently scheduled quenches | HPC with array support |
+
+Measure one representative run to estimate wall time; system size, model, protocol and available GPU concurrency all affect it.
 
 ## Resume behaviour
 
@@ -227,14 +231,14 @@ Job 2 is an array (`#SBATCH --array=0-19`) whose tasks each set `TASK=$(printf "
 
 | Use case | Recommended mode |
 |----------|------------------|
-| **Compare directly to published DFT melt-quench** | `--mq-ensemble` (full crystal → liquid → quench protocol) |
+| Follow a crystal → liquid → quench protocol | `--mq-ensemble` (full crystal → liquid → quench protocol) |
 | Generate amorphous structures from random starting points | `--hybrid-ensemble` ({doc}`hybrid-workflow`) |
 | Single amorphous structure (no ensemble) | Default pipeline (no flag, just `amorphgen INPUT --config ...`) |
 | Quench existing snapshots or frames from a trajectory | `--batch-quench --snapshot-dir PATH` |
 
 ## Validation
 
-For a defensible JOSS/paper-quality validation, pair `--mq-ensemble` with the analysis mode and a reference YAML containing literature ranges:
+To compare structural metrics with reference ranges, pair `--mq-ensemble` with analysis and a reference YAML:
 
 ```bash
 amorphgen --analyse --input-dir ga2o3_mq/final/ \
@@ -243,4 +247,4 @@ amorphgen --analyse --input-dir ga2o3_mq/final/ \
     --save-report mq_report.txt --save-plot mq_plots/ --save-pdf
 ```
 
-This produces a publication-quality structural analysis (RDF, CN, bond angles) and a validation table comparing each metric to literature ranges. See {doc}`yaml-config` for the reference YAML format.
+This writes structural analysis (RDF, CN, bond angles) and a table comparing available metrics with the supplied ranges. Check the provenance of each range and use additional validation appropriate to the intended application. See {doc}`yaml-config` for the reference YAML format.

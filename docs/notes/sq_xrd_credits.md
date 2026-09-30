@@ -1,7 +1,3 @@
----
-orphan: true
----
-
 # Scattering methods and citations
 
 AmorphGen implements standard scattering conventions in

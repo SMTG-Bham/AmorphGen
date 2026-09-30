@@ -403,7 +403,7 @@ random_gen:
   target_cn:                 # optional, enables coordination-aware placement
     Si: 4
     O: 2
-  cn_tolerance: 0            # 0=strict (default), 1=allow +1 over-coordination
+  cn_tolerance: 0            # strict upper target; 1 allows +1 over-coordination
   output_format: xyz         # xyz (.xyz, extxyz format), vasp, cif
   relax: true                # optimise after generation
   cell_filter: cubic         # cell constraint for relaxation

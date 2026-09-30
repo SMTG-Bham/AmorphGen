@@ -1,7 +1,3 @@
----
-orphan: true
----
-
 # S(q) and XRD: methodology notes
 
 This page describes the two structure-factor implementations in
@@ -54,7 +50,9 @@ $$S(q)-1=4\pi\rho\int_0^{r_{\max}}[g(r)-1]
 \frac{\sin(qr)}{qr}\,r^2\,\mathrm{d}r.$$
 
 The implementation transforms the unsmoothed RDF with 500 radial bins and
-uses $(N-1)/V$ for its finite-system density prefactor. By default, `rmax`
+uses $(N-1)/V$ from the first structure for its finite-system density
+prefactor. For ensembles with varying volumes, this is a single density
+applied to the averaged RDF. By default, `rmax`
 is half the shortest cell-vector length, rounded down to 0.1 Å. Truncation
 can change peak heights and introduce ripples. Its size and direction depend
 on the structure and chosen range; there is no general factor-of-two

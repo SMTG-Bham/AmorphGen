@@ -4,7 +4,7 @@ Quench multiple snapshot structures through the final stages of the pipeline in 
 
 ## Use case
 
-After a high-temperature equilibration, you may want to extract multiple uncorrelated snapshots and quench each independently. This produces an ensemble of amorphous structures from a single melt trajectory.
+After a high-temperature equilibration, you may want to extract multiple snapshots and quench each separately. Choose the frame spacing from the liquid’s decorrelation time; uniform sampling alone does not establish independence. This produces an ensemble of amorphous structures from a single melt trajectory.
 
 ## CLI usage
 
@@ -13,11 +13,23 @@ amorphgen --batch-quench \
     --snapshot-dir snapshots/ \
     --model mace-mpa-0 \
     --device cuda \
-    --batch-stages 5 6 7 \
-    --resume
+    --batch-stages 5 6 7 --n-runs 20 \
+    --resume -o batch_run/
 ```
 
-The `--resume` flag skips structures that have already been completed, which is essential for HPC jobs with walltime limits.
+The `--resume` flag skips runs containing `final_amorphous.xyz` (or the legacy `.extxyz` equivalent) and resumes interrupted MD from saved trajectory frames. Reuse the same inputs, configuration and selection when resuming.
+
+`--n-runs` defaults to 20 and selects at most that many inputs. Use `--select uniform` (default) or `--select last`. A directory is searched in order for `*.xyz`, `*.extxyz`, `*.vasp`, `*.cif`, then `POSCAR*`; only the first matching format is used. Keep inputs in one format to avoid accidentally excluding files.
+
+`--snapshot-dir` also accepts a trajectory file. Frames are extracted to `batch_run/snapshots_extracted/`; `--burn-in-frames` discards leading frames before selection:
+
+```bash
+amorphgen --batch-quench --snapshot-dir shared/stage4_eq_traj.xyz \
+    --config mq.yaml --n-runs 20 --burn-in-frames 50 \
+    --batch-stages 5 6 7 --resume -o batch_run/
+```
+
+Choose burn-in and frame spacing for the trajectory; the values above are examples. To anneal already-disordered inputs before quenching, use `--batch-stages 4 5 6 7`.
 
 ## Python API
 

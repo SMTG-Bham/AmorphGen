@@ -14,6 +14,11 @@ per-structure density violin, saved as up to four PNG figures plus CSV
 companions. The density plot and CSV require at least two structures;
 angle output requires valid bond-angle triplets.
 
+Directory input reads `.xyz`, `.extxyz`, `.vasp` and `.cif` files in that
+directory. Files with the same stem count once, in that format priority
+order. Each file contributes its last frame; to analyse a trajectory as an
+ensemble, first extract snapshots or pass a list of frames to the Python API.
+
 ## Recipes
 
 Common cases:
@@ -42,8 +47,8 @@ plots/
 └── analysis_density.{png,pdf,csv}    # per-structure density violin
 ```
 
-The CSV files contain the plotted data (r, g(r), CN counts, angle
-histograms, per-structure densities) so you can re-plot in any tool.
+The CSV files contain RDF values, coordination percentages, raw angle
+observations and per-structure densities so you can re-plot in any tool.
 
 :::::
 
@@ -129,7 +134,7 @@ Python equivalent:
 from amorphgen.analysis import StructureAnalyser
 
 sa = StructureAnalyser("igzo_final/", cutoff="In-O=2.6")       # rest auto-rdf
-print(sa.summary())
+sa.summary()
 sa.total_coordination(centre="O", partners=["In", "Ga"])
 sq = sa.structure_factor_direct(weighting="xray", sigma_q=0.05, partials=True)
 sq["partials"]["In-O"]
@@ -166,9 +171,10 @@ amorphgen --analyse \
     --per-structure
 ```
 
-If the structure files don't carry per-atom energies in their headers
-(VASP, CIF), AmorphGen automatically reads ``random_gen.log`` in the
-parent directory (when present) to fill in the E/atom column.
+If the structure files don't carry energies (VASP, CIF), AmorphGen looks
+for ``random_gen.log`` alongside the files and in their parent directory
+to fill in the E/atom column. Keep the original ``random_NNNN`` filenames
+so the log entries can be matched to the correct structures.
 
 :::::
 
@@ -241,8 +247,8 @@ Output: `comparison/ga2o3_rdf.{png,pdf,csv}`,
 --save-plot`, but each figure overlays all listed ensembles with
 distinct colours from the Okabe-Ito palette.
 
-See {doc}`/validation/index` for fully-worked examples of this on four
-material systems.
+See {doc}`/validation/index` for a Ga₂O₃ comparison and the available
+reference data.
 
 :::::
 
@@ -270,8 +276,8 @@ with more H than host atoms retain the usual rules.
 ## Cutoff
 
 The cutoff defines what counts as a "first-shell" bond and affects
-coordination, bond-length statistics, and bond-angle triplets. Default
-in v1.0.0+ is `auto-rdf`, which finds the first minimum of each partial
+coordination, bond-length statistics, and bond-angle triplets. The default
+is `auto-rdf`, which finds the first minimum of each partial
 RDF, the standard convention in neutron-diffraction analysis of
 glasses. The minimum is read at a resolution of 0.25 Å, so a flat step
 or a noise dip on the falling side of the first peak, common in small
@@ -555,15 +561,16 @@ amorphgen --analyse \
     [--total-rdf] \
     [--sq] [--sq-weighting {xray,neutron,unweighted}] \
     [--sq-method {direct,ft}] [--sq-smooth SIGMA_Q] [--sq-partials] \
-    [--pair-panels] [--total-cn SPEC ...] \
-    [--check-dimers] \
+    [--pair-panels] [--total-cn SPEC] \
+    [--tr] [--tr-qrange QMIN QMAX] [--tr-window {lorch,none}] [--tr-scan] \
+    [--check-dimers] [--rings [PAIR]] [--voronoi [ELEMENT]] [--connectivity] \
     [--dpi N] \
     [--show-title]
 ```
 
 | Flag | What it does |
 |---|---|
-| `--input-dir DIR` | Directory of structure files (``.xyz``, ``.extxyz``, ``.cif``, ``.vasp``). Globs everything matching these extensions. |
+| `--input-dir DIR` | Read structure files in this directory. Same-stem duplicates count once, preferring ``.xyz``, then ``.extxyz``, ``.vasp`` and ``.cif``. |
 | `--cutoff MODE` | `auto-rdf` (default: first minimum of each partial g(r)), `auto` (radii table), a number in Å, or per-pair overrides such as `"In-O=2.6,Zn-O=2.3"` that keep `auto-rdf` for the other pairs (`"auto,In-O=2.6"` or `"2.4,In-O=2.6"` change the base). |
 | `--per-structure` | Print a per-structure table (one row per file: density, E/atom, CN). |
 | `--save-report FILE` | Write the full text report (densities, bond distances, coordination, angles) to a file. |
@@ -577,10 +584,10 @@ amorphgen --analyse \
 | `--sq-method` | `direct` (default): reciprocal-lattice sum. `ft`: Fourier transform of g(r), with finite-r truncation effects. |
 | `--sq-smooth SIGMA_Q` | Gaussian re-binning width in Å⁻¹ for the direct S(q) (default 0.05; 0 = raw). Raw values are kept in the CSV. |
 | `--sq-partials` | With `--sq` (direct method): the Faber-Ziman partial structure factors S_ab(q) of every element pair. First peaks printed, `s_<pair>` columns in `analysis_sq.csv`, `analysis_sq_partials.png`. |
-| `--tr` | Total correlation function T(r) = 4πrρg(r), the curve diffraction papers plot beside S(q). The weighted S(q) is Fourier-transformed over the measured q range, so the result is directly comparable with published data, unlike the unweighted g(r) of `--total-rdf`. `analysis_tr.png` plus a CSV with r, the weighted g(r), T(r) and the reduced PDF G(r). |
+| `--tr` | Total correlation function T(r) = 4πrρg(r), obtained by transforming the direct S(q). Match the reference's scattering weights, normalization, q range and window before comparing. Writes `analysis_tr.png` and a CSV with r, the weighted g(r), T(r) and the reduced PDF G(r). |
 | `--tr-qrange QMIN QMAX` | Integration limits for `--tr` (default 0.3 20). Set them to the experiment's own range: qmax fixes the real-space resolution and the truncation ripple. |
 | `--tr-window {lorch,none}` | Window for the `--tr` transform. `lorch` damps the qmax truncation ripple at the cost of broader peaks; match whichever the paper used. |
-| `--tr-scan` | Sweep qmax and the window and report how far the first T(r) peak and its integrated count move. The q range belongs to the measurement rather than the model, so this is the honest error bar on a comparison. Without a window the truncation ripple narrows the integration window and the count drifts down, which the table makes visible. |
+| `--tr-scan` | With `--tr`, sweep qmax and the window and report changes in the first T(r) peak and its integrated scattering-weighted count. This measures sensitivity to transform settings, not a statistical error bar or a species-resolved coordination number. |
 | `--pair-panels` | One small panel per element pair for the partial g(r) (`analysis_rdf_panels.png`) and, with `--sq-partials`, for S_ab(q) (`analysis_sq_partials_panels.png`). |
 | `--total-cn SPEC` | Total first-shell coordination of one element over several partner types, repeatable: `O` counts every bonded partner, `O:In+Ga` only the named ones. Printed, and plotted as `analysis_cn_total.png` + CSV. |
 | `--check-dimers` | Report unphysical close contacts (O–O peroxide, N–N) per structure. |
@@ -592,7 +599,9 @@ amorphgen --analyse \
 
 ## Outputs explained
 
-For each ensemble, ``--analyse --save-plot DIR`` writes:
+For each ensemble, ``--analyse --save-plot DIR`` writes the applicable files
+below. PDF copies require ``--save-pdf``; optional descriptors require the
+listed flags.
 
 | File | What's in it |
 |---|---|
@@ -608,6 +617,7 @@ For each ensemble, ``--analyse --save-plot DIR`` writes:
 | `analysis_density.png` / `.pdf` | Per-structure density violin with jittered scatter and mean ± std label (at least two structures). |
 | `analysis_density.csv` | One row per structure: ``structure_index, density_g_per_cm3`` (at least two structures). |
 | `analysis_sq.png` / `.pdf`, `analysis_sq.csv` | With ``--sq``: S(q) and, for the direct method, the number of q-vectors per bin; raw values are also saved when smoothing is enabled. |
+| `analysis_tr.png` / `.pdf`, `analysis_tr.csv` | With ``--tr``: the total correlation function and its scattering-weighted g(r) and reduced PDF G(r). |
 | `analysis_rings.png` / `.csv` | With ``--rings``: ring-size distribution (size, count, percent of edges). |
 | `analysis_voronoi.csv` | With ``--voronoi``: the ten most common Voronoi indices with counts and percentages. |
 | `analysis_connectivity.csv` | With ``--connectivity``: corner/edge/face link percentages and the edge-sharing cation fraction, overall and per structure. |
@@ -621,7 +631,7 @@ comparison workflow:
 from amorphgen.analysis import StructureAnalyser
 
 sa = StructureAnalyser("hybrid_ga2o3/final/")   # accepts a dir OR list of files
-print(sa.summary())                                         # print structural summary
+sa.summary()                                # prints and returns the structural summary
 
 # Individual descriptors
 rho = sa.density()
