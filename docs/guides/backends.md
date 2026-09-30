@@ -243,5 +243,6 @@ What differs from the ASE path:
   equivalent to the ASE path, not identical.
 
 GPU tests for both engines live in `test/test_torchsim_gpu.py` (skipped without
-CUDA); `examples/run_gpu_tests_bluebear.slurm` runs them, plus the Tier 3 MACE
+CUDA); its MACE checks also require `--run-mace`, which permits model downloads.
+`examples/run_gpu_tests_bluebear.slurm` runs them, plus the Tier 3 MACE
 integration tests, on one BlueBEAR GPU in about ten minutes.

@@ -51,3 +51,88 @@ def test_named_foundation_model_still_resolves_without_model_path(name, mace_stu
     wrapper.assert_called_once_with(model=foundation.return_value, device="cpu", dtype="float32",
                                     compute_stress=True)
     assert result is wrapper.return_value
+
+
+@pytest.mark.parametrize("name", ["chgnet", "buckingham", "buck"])
+def test_unsupported_models_raise_clearly(name, mace_stubs):
+    with pytest.raises(ValueError, match="no torch-sim implementation"):
+        engine.build_model(name, device="cpu")
+
+
+def test_mps_is_rejected_without_torchsim(monkeypatch):
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace())
+    with pytest.raises(ValueError, match="MPS"):
+        engine.resolve_torch_device("mps")
+
+
+@pytest.fixture
+def batch_inputs(tmp_path, monkeypatch):
+    """Keep chunk handling on the real file path, substituting only the backend."""
+    from ase.build import bulk
+    from ase.io import write
+
+    src = tmp_path / "in"
+    src.mkdir()
+    for index in range(4):
+        atoms = bulk("Cu", "fcc", a=3.6, cubic=True)
+        atoms.info["input_index"] = index
+        write(src / f"s{index}.xyz", atoms, format="extxyz")
+    monkeypatch.setattr(engine, "build_model", Mock(return_value=object()))
+    # GPU cleanup must tolerate a bare installation too.
+    monkeypatch.setitem(sys.modules, "torch", None)
+    return src, tmp_path / "out"
+
+
+@pytest.mark.parametrize("message", [
+    "CUDA out of memory. Tried to allocate 2.00 GiB",
+    "Failed to allocate 180 bytes on device 'cuda:0'",
+    "torch.OutOfMemoryError",
+])
+def test_out_of_memory_splits_chunks_and_preserves_every_output(
+    batch_inputs, monkeypatch, message,
+):
+    import numpy as np
+    from ase.calculators.singlepoint import SinglePointCalculator
+    from ase.io import read
+    from amorphgen.pipeline.opt_cell import batch_optimize
+
+    src, dest = batch_inputs
+    attempts = []
+
+    def relax(atoms_list, *args, **kwargs):
+        attempts.append([a.info["input_index"] for a in atoms_list])
+        if len(atoms_list) > 1:
+            raise RuntimeError(message)
+        for atoms in atoms_list:
+            atoms.calc = SinglePointCalculator(
+                atoms, energy=-float(atoms.info["input_index"] + 1),
+                forces=np.zeros((len(atoms), 3)),
+            )
+        return atoms_list
+
+    monkeypatch.setattr(engine, "batch_relax", relax)
+    outputs = batch_optimize(str(src), str(dest), engine="torchsim", batch_size=4)
+    assert attempts == [[0, 1, 2, 3], [0, 1], [0], [1], [2, 3], [2], [3]]
+    assert outputs == [str(dest / f"s{i}_opt.xyz") for i in range(4)]
+    for index, path in enumerate(outputs):
+        atoms = read(path)
+        assert atoms.info["input_index"] == index
+        assert atoms.get_potential_energy() == -(index + 1)
+        assert (dest / f"s{index}_opt.log").is_file()
+
+
+@pytest.mark.parametrize("error, batch_size", [
+    (RuntimeError("shape mismatch"), 4),
+    (ValueError("composition must be a dict"), 4),
+    (RuntimeError("CUDA out of memory"), 1),
+])
+def test_batch_errors_propagate_without_retry(batch_inputs, monkeypatch, error, batch_size):
+    from amorphgen.pipeline.opt_cell import batch_optimize
+
+    src, dest = batch_inputs
+    relax = Mock(side_effect=error)
+    monkeypatch.setattr(engine, "batch_relax", relax)
+    with pytest.raises(type(error), match=str(error)):
+        batch_optimize(str(src), str(dest), engine="torchsim", batch_size=batch_size)
+    relax.assert_called_once()
+    assert not list(dest.glob("*_opt.xyz"))

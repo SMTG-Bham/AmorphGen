@@ -6,7 +6,7 @@ Tests for batch_optimize and CLI --batch-opt, --analyse.
 
 import os
 import pytest
-from ase.io import write
+from ase.io import read, write
 from ase.build import bulk
 from ase.calculators.emt import EMT
 
@@ -25,7 +25,7 @@ class TestBatchOptimize:
             write(str(d / f"struct_{i:04d}.extxyz"), atoms, format="extxyz")
         return str(d)
 
-    def test_batch_optimize_runs(self, input_dir, tmp_path):
+    def test_batch_optimize_writes_outputs_for_each_structure(self, input_dir, tmp_path):
         from amorphgen.pipeline.opt_cell import batch_optimize
         calc = EMT()
         out_dir = str(tmp_path / "output")
@@ -37,17 +37,13 @@ class TestBatchOptimize:
         assert len(paths) == 3
         for p in paths:
             assert os.path.exists(p)
-
-    def test_batch_optimize_output_files(self, input_dir, tmp_path):
-        from amorphgen.pipeline.opt_cell import batch_optimize
-        calc = EMT()
-        out_dir = str(tmp_path / "output")
-        batch_optimize(input_dir=input_dir, output_dir=out_dir, calc=calc)
-        # Should have .cif, .xyz, .log for each structure
-        files = os.listdir(out_dir)
-        assert any(f.endswith(".cif") for f in files)
-        assert any(f.endswith(".xyz") for f in files)
-        assert any(f.endswith(".log") for f in files)
+            assert read(p).get_chemical_formula() == "Cu4"
+        output = tmp_path / "output"
+        for index in range(3):
+            for extension in ("cif", "xyz", "log"):
+                path = output / f"struct_{index:04d}_opt.{extension}"
+                assert path.is_file(), f"Missing {path.name}"
+                assert path.stat().st_size > 0
 
     def test_batch_optimize_empty_dir(self, tmp_path):
         from amorphgen.pipeline.opt_cell import batch_optimize
@@ -58,16 +54,6 @@ class TestBatchOptimize:
 
 
 class TestCLIAnalyse:
-
-    @pytest.fixture
-    def structure_dir(self, tmp_path):
-        """Create structures for --analyse testing."""
-        d = tmp_path / "structures"
-        d.mkdir()
-        for i in range(2):
-            atoms = bulk("Cu", "fcc", a=3.6, cubic=True) * (2, 2, 2)
-            write(str(d / f"cu_{i:04d}.xyz"), atoms, format="extxyz")
-        return str(d)
 
     def test_cli_parse_analyse_flag(self):
         from amorphgen.cli import _get_parser

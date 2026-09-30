@@ -23,5 +23,5 @@ source "${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}/bin/a
 cd "${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}"
 python -m pip install -q pytest      # ensure the test runner is available
 python -c "import torch, torch_sim; print('torch', torch.__version__, '| cuda', torch.cuda.is_available(), '|', torch.cuda.get_device_name(0), '| torch-sim', torch_sim.__version__)"
-python -m pytest test/test_torchsim_gpu.py -v -s --tb=short -p no:cacheprovider
+python -m pytest test/test_torchsim_gpu.py --run-mace -v -s --tb=short -p no:cacheprovider
 python -m pytest test/test_torchsim_engine.py test/test_mace_integration.py -v --tb=short --run-mace -p no:cacheprovider

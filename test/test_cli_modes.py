@@ -7,8 +7,6 @@ run on Tier 2 hardware (no GPU).
 """
 from __future__ import annotations
 
-import os
-import shutil
 import sys
 import numpy as np
 from pathlib import Path
@@ -70,6 +68,7 @@ class TestRandomGenMode:
         _run_cli([
             "--random-gen",
             "--composition", "Si=8",
+            "--seed", "0",
             "-n", "2",
             "-o", str(out_dir),
             "--format", "vasp",
@@ -148,7 +147,7 @@ class TestConvertMode:
             "-o", str(out_dir),
         ], monkeypatch)
         files = list(out_dir.glob("*.vasp"))
-        assert len(files) >= 1
+        assert len(files) == 1
         atoms = read(files[0])
         assert len(atoms) == 4
 
@@ -311,7 +310,12 @@ class TestRankFromLogMode:
         _run_cli(["--rank-from-log", str(log)], monkeypatch)
         out = capsys.readouterr().out
         # Lowest-energy entry should be 0001 (-53.123).
-        assert "0001" in out
+        assert "Best : random_0001_opt" in out
+        assert "Worst: random_0002_opt" in out
+        rows = [line.split() for line in out.splitlines()
+                if line.strip() and line.split()[0].isdigit()]
+        assert [int(row[1]) for row in rows] == [1, 0, 2]
+        assert [float(row[2]) for row in rows] == [-53.123, -52.789, -51.876]
 
 
 class TestRingsAndVoronoiFlags:

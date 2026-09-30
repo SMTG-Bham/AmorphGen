@@ -16,7 +16,6 @@ from amorphgen.pipeline.random_gen import (
     _classify_bond, _estimate_density, _get_ionic_radius,
     _get_metallic_radius, _auto_dmax,
     SHANNON_IONIC_RADII, METALLIC_RADII, ELEMENTAL_DENSITIES,
-    NONMETALS, METALLOIDS,
 )
 
 
@@ -46,18 +45,11 @@ class TestDefaultMinsep:
         result = _default_minsep(["Si", "O"])
         assert all(v > 0 for v in result.values())
 
-    def test_scale_factor(self):
-        # For elements without known radii, scale acts as fallback
-        # For known elements, bonding-type scale factors are used
-        r1 = _default_minsep(["Cu"])
-        key = list(r1.keys())[0]
-        # Cu-Cu should use metallic radii with SCALE_FACTORS["metallic"] = 0.85
-        assert r1[key] > 0
-        # Verify the fallback scale works for unknown elements
-        # by checking that known elements produce consistent results
-        r2 = _default_minsep(["Cu"], scale=0.5)
-        # Both should give the same result (scale is only a fallback)
-        assert abs(r2[key] - r1[key]) < 0.01
+    def test_fallback_scale_does_not_override_known_metallic_radius(self):
+        default = _default_minsep(["Cu"])
+        scaled = _default_minsep(["Cu"], scale=0.5)
+        assert default["Cu-Cu"] > 0
+        assert scaled == default
 
 
 class TestEstimateCellLength:
@@ -93,7 +85,6 @@ class TestEstimateCellLength:
         assert abs(L1 - L2) < 1e-9
 
     def test_density_scale_invalid_raises(self):
-        import pytest
         with pytest.raises(ValueError):
             _estimate_cell_length({"Si": 64}, density_scale=0)
         with pytest.raises(ValueError):
@@ -201,6 +192,7 @@ class TestBatchRandom:
             n_structures=3,
             output_dir=str(tmp_work_dir / "batch"),
             cell_length_ang=6.0,
+            seed=0,
         )
         assert len(paths) == 3
         for p in paths:
@@ -213,6 +205,7 @@ class TestBatchRandom:
             n_structures=2,
             output_dir=str(tmp_work_dir / "batch2"),
             cell_length_ang=6.0,
+            seed=0,
         )
         for p in paths:
             atoms = read(p)
@@ -225,6 +218,7 @@ class TestBatchRandom:
             output_dir=str(tmp_work_dir / "vasp_out"),
             output_format="vasp",
             cell_length_ang=6.0,
+            seed=0,
         )
         assert paths[0].endswith(".vasp")
         assert os.path.isfile(paths[0])
@@ -236,6 +230,7 @@ class TestBatchRandom:
             output_dir=str(tmp_work_dir / "cif_out"),
             output_format="cif",
             cell_length_ang=6.0,
+            seed=0,
         )
         assert paths[0].endswith(".cif")
 
@@ -252,7 +247,7 @@ class TestBatchRandom:
     def test_log_file_created(self, tmp_work_dir):
         out = str(tmp_work_dir / "log_test")
         batch_random(composition={"Cu": 5}, n_structures=1,
-                     output_dir=out, cell_length_ang=6.0)
+                     output_dir=out, cell_length_ang=6.0, seed=0)
         assert os.path.isfile(os.path.join(out, "random_gen.log"))
 
 

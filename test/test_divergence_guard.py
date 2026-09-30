@@ -17,6 +17,7 @@ from ase import units
 from ase.build import bulk
 from ase.calculators.calculator import Calculator, all_changes
 from ase.calculators.emt import EMT
+from ase.calculators.singlepoint import SinglePointCalculator
 from ase.md.langevin import Langevin
 
 from amorphgen.utils.common import assert_finite, attach_outputs, DivergenceError
@@ -38,20 +39,6 @@ class NaNCalculator(Calculator):
         }
 
 
-class InfForceCalculator(NaNCalculator):
-    """Finite energy but Inf forces — the other non-finite failure mode."""
-
-    def calculate(self, atoms=None, properties=("energy",),
-                  system_changes=all_changes):
-        Calculator.calculate(self, atoms, properties, system_changes)
-        n = len(self.atoms)
-        self.results = {
-            "energy": -1.0,
-            "free_energy": -1.0,
-            "forces": np.full((n, 3), np.inf),
-        }
-
-
 # ── assert_finite unit behaviour ──────────────────────────────────────────────
 
 def test_assert_finite_passes_on_healthy_state():
@@ -61,17 +48,19 @@ def test_assert_finite_passes_on_healthy_state():
     assert_finite(atoms, context="unit test")
 
 
-def test_assert_finite_raises_on_nan():
+@pytest.mark.parametrize("energy, force, message", [
+    (np.nan, 0.0, "potential energy"),
+    (np.inf, 0.0, "potential energy"),
+    (-1.0, np.nan, "forces"),
+    (-1.0, np.inf, "forces"),
+    (np.nan, np.nan, "potential energy and forces"),
+], ids=["nan-energy", "inf-energy", "nan-forces", "inf-forces", "both"])
+def test_assert_finite_rejects_nonfinite_energy_or_forces(energy, force, message):
     atoms = bulk("Cu", cubic=True)
-    atoms.calc = NaNCalculator()
-    with pytest.raises(DivergenceError):
-        assert_finite(atoms)
-
-
-def test_assert_finite_raises_on_inf_forces():
-    atoms = bulk("Cu", cubic=True)
-    atoms.calc = InfForceCalculator()
-    with pytest.raises(DivergenceError):
+    atoms.calc = SinglePointCalculator(
+        atoms, energy=energy, forces=np.full((len(atoms), 3), force),
+    )
+    with pytest.raises(DivergenceError, match=f"Non-finite {message}"):
         assert_finite(atoms)
 
 
@@ -107,17 +96,16 @@ def test_md_observer_raises_before_writing_nan(tmp_path):
     traj = tmp_path / "stage_traj.xyz"
     logger, writer = attach_outputs(dyn, atoms, str(tmp_path / "stage.log"), str(traj))
 
-    with pytest.raises(DivergenceError):
-        dyn.run(5)
-    logger.close(); writer.close()
+    try:
+        with pytest.raises(DivergenceError):
+            dyn.run(5)
+    finally:
+        logger.close()
+        writer.close()
 
-    # The guard runs before the trajectory writer, so no NaN frame is persisted.
-    if traj.exists():
-        from ase.io import read
-        frames = read(str(traj), index=":")
-        frames = frames if isinstance(frames, list) else [frames]
-        for fr in frames:
-            assert np.isfinite(fr.get_positions()).all()
+    # Energy and forces are invalid before the first step, even though the
+    # positions are finite. No frame should reach the trajectory writer.
+    assert not traj.exists()
 
 
 # ── Relax path: the optimiser step loop guards the output ─────────────────────
@@ -132,3 +120,5 @@ def test_optimizer_raises_on_nan(tmp_path, monkeypatch):
                    "max_steps": 5, "cell_filter": "none"}}
     with pytest.raises(DivergenceError):
         opt_cell.run(atoms, cfg_override=cfg, calc=NaNCalculator())
+    assert not (tmp_path / "stage1_opt.xyz").exists()
+    assert not (tmp_path / "stage1_opt.cif").exists()

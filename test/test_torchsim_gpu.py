@@ -3,12 +3,11 @@
 Skipped automatically without CUDA. On BlueBEAR:
     sbatch examples/run_gpu_tests_bluebear.slurm
 or, in an interactive GPU session:
-    python -m pytest test/test_torchsim_gpu.py -v
-The MACE tests also need `pip install "amorphgen[mace]"` (mace-torch).
+    python -m pytest test/test_torchsim_gpu.py --run-mace -v
+The MACE tests require --run-mace and `pip install "amorphgen[mace]"`
+(mace-torch); the first opt-in run may download model weights.
 """
-import os
 import sys
-import time
 
 import numpy as np
 import pytest
@@ -45,6 +44,7 @@ class TestLJOnCuda:
                           cell_filter="cubic", log=lambda *a: None)
         st = ts.io.atoms_to_state(out, device=model.device, dtype=model.dtype)
         stress = model(st)["stress"].detach().cpu().numpy()
+        assert len(out) == len(stress) == 8
         for o, s in zip(out, stress):
             assert o.info["max_force"] < 0.02
             assert abs(np.trace(s) / 3) * 160.21766 < 0.02              # |P| < 0.02 GPa
@@ -54,17 +54,28 @@ class TestLJOnCuda:
         model = build_model("lennard-jones", device="cuda", classical_params=LJ)
         out = batch_nvt([_cu(k, 1.0) for k in range(4)], model, 300.0, n_steps=500,
                         timestep_fs=1.0, seed=1, log=lambda *a: None)
+        assert len(out) == 4
         assert all(np.abs(a.get_momenta()).sum() > 0 for a in out)
         assert all(120 < a.get_temperature() < 500 for a in out)
 
 
-# Module level: pytest deprecates class-scoped fixtures defined as instance methods.
 @pytest.fixture(scope="class")
-def model():
+def mace_backend():
     pytest.importorskip("mace")
+    original_dtype = torch.get_default_dtype()
+    try:
+        yield
+    finally:
+        torch.set_default_dtype(original_dtype)
+
+
+@pytest.fixture(scope="class")
+def model(mace_backend):
     return build_model("mace-mpa-0", device="cuda", dtype="float64")
 
 
+@pytest.mark.mace
+@pytest.mark.usefixtures("mace_backend")
 class TestMaceOnCuda:
     def test_relax_matches_ase_mace_energy(self, model):
         """torch-sim relaxation reaches the force/pressure tolerance, and ASE's
@@ -74,27 +85,25 @@ class TestMaceOnCuda:
         out = batch_relax(ats, model, fmax=0.1, max_steps=300, cell_filter="cubic",
                           log=lambda *a: None)
         calc = mace_mp(model="medium-mpa-0", default_dtype="float64", device="cuda")
+        assert len(out) == len(ats)
         for a in out:
             b = a.copy(); b.calc = calc
             assert abs(b.get_potential_energy() - a.get_potential_energy()) / len(a) < 1e-3
-            assert np.abs(b.get_forces()).max() < 0.1 + 0.02
+            assert np.linalg.norm(b.get_forces(), axis=1).max() < 0.1 + 0.02
             P = -np.trace(b.get_stress(voigt=False)) / 3 / units.GPa
             assert abs(P) < 0.05
 
     # the 50-step pre-relax only takes the worst forces off before the MD
     @pytest.mark.filterwarnings("ignore:All systems have reached the maximum number of steps")
-    def test_batched_md_temperature_and_speed(self, model):
+    def test_batched_md_temperature(self, model):
         ats = [_sio2(s) for s in range(1, 5)]
         ats = batch_relax(ats, model, fmax=0.5, max_steps=50, cell_filter="none", log=lambda *a: None)
-        t = time.time()
         out = batch_nvt(ats, model, 1500.0, n_steps=200, timestep_fs=0.5, seed=3, log=lambda *a: None)
-        dt = time.time() - t
+        assert len(out) == 4
         assert all(np.abs(a.get_momenta()).sum() > 0 for a in out)
         assert 600 < np.mean([a.get_temperature() for a in out]) < 2400
-        print(f"\n[gpu] batched MD: 4 x 48 atoms, 200 steps in {dt:.1f} s "
-              f"({1000 * dt / 200 / 4:.1f} ms per step per structure)")
 
-    def test_hybrid_cli_end_to_end(self, model, tmp_path, monkeypatch):
+    def test_hybrid_cli_end_to_end(self, tmp_path, monkeypatch):
         from amorphgen.cli import main
         src = tmp_path / "in"; src.mkdir()
         for s in (1, 2, 3):

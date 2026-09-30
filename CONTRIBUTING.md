@@ -50,15 +50,25 @@ pytest test/ -v --tb=short
 
 # Run with MACE integration tests (requires mace-torch + GPU recommended)
 pytest test/ -v --tb=short --run-mace
+
+# Run only the real MACE tests (may download foundation models)
+pytest test/ -m mace --run-mace
+
+# Run CUDA torch-sim tests, including MACE (requires CUDA + torch-sim + MACE)
+pytest test/test_torchsim_gpu.py --run-mace
 ```
 
-Tests requiring an uninstalled optional backend are skipped. GitHub Actions
+Tests requiring an uninstalled optional backend are skipped. Real MACE tests,
+including those in the CUDA suite, require `--run-mace`; having a GPU alone
+does not opt in to model downloads. Unknown test markers and configuration
+options are errors, so misspelled test settings cannot silently pass.
+GitHub Actions
 tests the core package on Python 3.10 to 3.14 and runs backend tests in
 separate jobs on every push and pull request to `main` and `dev`:
 
 | Job | Checks |
 |---|---|
-| `lint` | syntax errors and undefined names (ruff) in the package, tests, docs config and tutorial notebooks |
+| `lint` | syntax errors and undefined names (ruff) in the package, tests, docs config and tutorial notebooks; unused imports/variables and redefined names in tests |
 | `test` | the torch-free suite on Python 3.10 to 3.14 on Linux, and on 3.14 on macOS |
 | `backends` | the full suite with CPU-only PyTorch, the torch-sim engine and CHGNet, with a coverage report |
 | `min-deps` | the core suite on Python 3.10 with direct dependencies at their lowest allowed versions |

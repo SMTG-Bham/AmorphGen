@@ -10,8 +10,10 @@ from amorphgen.pipeline.random_gen import batch_random
 
 class TestRandomGenResume:
 
-    def test_resume_skips_existing(self, tmp_path):
+    def test_resume_skips_existing(self, tmp_path, monkeypatch):
         """Generate 5, delete 2, resume should produce 5 total."""
+        from unittest.mock import Mock
+        from amorphgen.pipeline import random_gen
         out = str(tmp_path / "structures")
         initial = os.path.join(out, "random_initial")   # v1.0.0rc2 subdir
         comp = {"Si": 8, "O": 16}
@@ -20,17 +22,20 @@ class TestRandomGenResume:
         paths1 = batch_random(comp, n_structures=5, output_dir=out, seed=42)
         assert len(paths1) == 5
 
-        # Read structure 0 and 1 for later comparison
-        atoms0_before = read(os.path.join(initial, "random_0000.xyz"))
-        atoms2_before = read(os.path.join(initial, "random_0002.xyz"))
+        existing = sorted((tmp_path / "structures" / "random_initial").glob("*.xyz"))[:3]
+        before = {path: path.read_bytes() for path in existing}
 
         # Delete structures 3 and 4
         os.remove(os.path.join(initial, "random_0003.xyz"))
         os.remove(os.path.join(initial, "random_0004.xyz"))
 
         # Resume: should regenerate 3 and 4, skip 0-2
+        generate = Mock(wraps=random_gen.generate_random)
+        monkeypatch.setattr(random_gen, "generate_random", generate)
         paths2 = batch_random(comp, n_structures=5, output_dir=out,
                               seed=42, resume=True)
+        assert sorted(paths2) == sorted(paths1)
+        assert generate.call_count == 2
 
         # Should have 5 paths total (3 existing + 2 new)
         all_files = sorted(f for f in os.listdir(initial)
@@ -39,10 +44,7 @@ class TestRandomGenResume:
         assert len(all_files) == 5
 
         # Existing structures should be unchanged
-        atoms0_after = read(os.path.join(initial, "random_0000.xyz"))
-        atoms2_after = read(os.path.join(initial, "random_0002.xyz"))
-        assert np.allclose(atoms0_before.positions, atoms0_after.positions)
-        assert np.allclose(atoms2_before.positions, atoms2_after.positions)
+        assert {path: path.read_bytes() for path in existing} == before
 
     def test_resume_regenerates_corrupted(self, tmp_path):
         """Corrupted (empty) file should be regenerated."""
@@ -75,8 +77,9 @@ class TestRandomGenResume:
                              seed=42, resume=True)
         assert len(paths) == 3
 
-    def test_resume_all_complete(self, tmp_path):
+    def test_resume_all_complete(self, tmp_path, monkeypatch):
         """Resume when all structures exist should skip everything."""
+        from amorphgen.pipeline import random_gen
         out = str(tmp_path / "structures")
         comp = {"Si": 8, "O": 16}
 
@@ -84,6 +87,10 @@ class TestRandomGenResume:
         batch_random(comp, n_structures=3, output_dir=out, seed=42)
 
         # Resume: everything exists
+        def unexpected_generation(*args, **kwargs):
+            pytest.fail("Completed structures must not be regenerated")
+
+        monkeypatch.setattr(random_gen, "generate_random", unexpected_generation)
         paths = batch_random(comp, n_structures=3, output_dir=out,
                              seed=42, resume=True)
         assert len(paths) == 3
@@ -202,12 +209,12 @@ class TestSeedReproducibility:
             a = read(os.path.join(fresh, "random_initial", f"random_{i:04d}.xyz"))
             b = read(os.path.join(resumed, "random_initial", f"random_{i:04d}.xyz"))
             assert a.get_chemical_symbols() == b.get_chemical_symbols()
-            assert np.allclose(a.get_positions(), b.get_positions())
+            np.testing.assert_array_equal(a.get_positions(), b.get_positions())
+            np.testing.assert_array_equal(a.cell, b.cell)
 
 
-def test_batch_path_keeps_auto_cn_tolerance_and_cn_aware_minsep(tmp_path, monkeypatch):
-    """batch_random must forward the automatic CN tolerance and build the same
-    CN-aware minsep table as generate_random (regression for the CLI path)."""
+def test_batch_path_keeps_auto_cn_and_tolerance(tmp_path, monkeypatch):
+    """batch_random must forward the automatic CN targets and tolerance."""
     import amorphgen.pipeline.random_gen as rg
     from ase import Atoms
     captured = {}

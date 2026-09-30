@@ -147,7 +147,7 @@ namespaces = false
 
 [tool.pytest.ini_options]
 testpaths = ["test"]
-addopts = ["-v", "--tb=short"]
+addopts = ["-v", "--tb=short", "--strict-markers", "--strict-config"]
 # Warnings raised inside dependencies, which AmorphGen cannot act on; its own
 # code raises none of them. Matched by message only: pytest.warns re-emits the
 # warnings it does not match under the module name "warnings", which a module

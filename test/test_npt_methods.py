@@ -118,6 +118,7 @@ def test_npt_method_runs_5_steps(method):
         npt_method=method,
     )
     dyn.run(5)
+    assert dyn.nsteps == 5
     # Sanity: positions are finite and atoms haven't exploded.
     pos = atoms.get_positions()
     assert pos.shape == (len(atoms), 3)
@@ -244,6 +245,7 @@ def test_taup_factor_5_step_run(method):
         npt_method=method, taup_factor=30.0, compressibility_GPa=200.0,
     )
     dyn.run(5)
+    assert dyn.nsteps == 5
     pos = atoms.get_positions()
     assert pos.shape == (len(atoms), 3)
     assert (abs(pos) < 100.0).all(), f"{method}: atoms wandered far"

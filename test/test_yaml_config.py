@@ -4,10 +4,8 @@ tests/test_yaml_config.py
 Tests for YAML configuration loading and validation.
 """
 
-import os
 from importlib.resources import as_file, files
 import pytest
-import tempfile
 
 from amorphgen.configs import load_yaml_config
 from amorphgen.configs.yaml_config import _validate_config
@@ -123,20 +121,22 @@ class TestConfigValidation:
         warnings, errors = _validate_config(cfg, "test.yaml")
         assert any("device" in e and "gpu" in e for e in errors)
 
-    def test_valid_devices(self):
-        for dev in ("cuda", "cpu", "mps", "auto"):
-            warnings, errors = _validate_config({"device": dev}, "test.yaml")
-            assert not any("device" in e for e in errors)
+    @pytest.mark.parametrize("device", ["cuda", "cpu", "mps", "auto"])
+    def test_valid_devices(self, device):
+        warnings, errors = _validate_config({"device": device}, "test.yaml")
+        assert warnings == []
+        assert errors == []
 
     def test_invalid_ensemble_errors(self):
         cfg = {"melt": {"ensemble": "NVE"}}
         warnings, errors = _validate_config(cfg, "test.yaml")
         assert any("ensemble" in e and "NVE" in e for e in errors)
 
-    def test_valid_ensembles(self):
-        for ens in ("NVT", "NPT"):
-            warnings, errors = _validate_config({"melt": {"ensemble": ens}}, "test.yaml")
-            assert not any("ensemble" in e for e in errors)
+    @pytest.mark.parametrize("ensemble", ["NVT", "NPT", "nvt", "npt"])
+    def test_valid_ensembles(self, ensemble):
+        warnings, errors = _validate_config({"melt": {"ensemble": ensemble}}, "test.yaml")
+        assert warnings == []
+        assert errors == []
 
     def test_negative_temperature_errors(self):
         cfg = {"eq_premelt": {"T": -100}}

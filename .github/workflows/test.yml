@@ -19,7 +19,8 @@ permissions:
 jobs:
   # Hard errors only (syntax errors, undefined names, invalid comparisons) in
   # the package, the tests, docs/conf.py and the tutorial notebooks. Style is
-  # not enforced.
+  # not enforced. Tests also reject unused imports/variables and redefinitions
+  # that can hide dead setup or accidentally overwrite a test.
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -35,6 +36,7 @@ jobs:
       run: |
         python -m pip install ruff
         ruff check --select E9,F63,F7,F82 --output-format github .
+        ruff check --select F401,F811,F841 --output-format github test/
 
   # The torch-free suite (Tier 1 + Tier 2) on every supported Python on Linux,
   # and on the newest one on macOS, where the bare install (random generation

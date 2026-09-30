@@ -4,7 +4,6 @@ tests/test_utils.py
 Tier 1 unit tests for amorphgen.utils (no calculator needed).
 """
 
-import os
 import pytest
 import numpy as np
 from ase import Atoms
@@ -12,9 +11,13 @@ from ase.build import bulk
 
 from amorphgen.utils.common import (
     make_cubic, resolve_ramp, merge_config,
-    MDLogger, TrajectoryWriter, TRAJ_FORMATS,
+    TrajectoryWriter, TRAJ_FORMATS,
     resolve_device,
 )
+from amorphgen.utils.calculators import (
+    _detect_backend, MACE_FOUNDATION_MODELS, MODEL_DESCRIPTIONS,
+)
+from amorphgen.configs import DEFAULT_CONFIG
 
 
 class TestResolveDevice:
@@ -41,10 +44,6 @@ class TestResolveDevice:
 
         monkeypatch.setattr(builtins, "__import__", no_torch)
         assert resolve_device("auto") == "cpu"
-from amorphgen.utils.calculators import (
-    _detect_backend, MACE_FOUNDATION_MODELS, MODEL_DESCRIPTIONS,
-)
-from amorphgen.configs import DEFAULT_CONFIG
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -138,28 +137,21 @@ class TestResolveRamp:
 
 class TestMakeCubic:
 
-    def test_preserves_volume(self):
-        atoms = bulk("Cu", "fcc", a=3.6, cubic=True) * (2, 2, 2)
-        vol_before = atoms.get_volume()
-        atoms = make_cubic(atoms)
-        vol_after = atoms.get_volume()
-        assert abs(vol_before - vol_after) < 0.01
+    @pytest.mark.parametrize("cell", [
+        [[4, 0, 0], [0, 5, 0], [0, 0, 6]],
+        [[4, 0, 0], [1, 5, 0], [0.5, 1, 6]],
+    ], ids=["orthorhombic", "skewed"])
+    def test_reshapes_cell_preserving_volume_and_fractional_positions(self, cell):
+        scaled = [[0.1, 0.2, 0.3], [0.8, 0.7, 0.6]]
+        atoms = Atoms("Cu2", scaled_positions=scaled, cell=cell, pbc=True)
+        volume = atoms.get_volume()
 
-    def test_cell_is_cubic(self):
-        atoms = bulk("Cu", "fcc", a=3.6, cubic=True) * (2, 2, 2)
-        atoms = make_cubic(atoms)
-        L = atoms.cell[0, 0]
-        assert abs(atoms.cell[1, 1] - L) < 1e-10
-        assert abs(atoms.cell[2, 2] - L) < 1e-10
-        # Off-diagonals should be zero
-        assert abs(atoms.cell[0, 1]) < 1e-10
-        assert abs(atoms.cell[0, 2]) < 1e-10
+        result = make_cubic(atoms)
 
-    def test_preserves_atom_count(self):
-        atoms = bulk("Cu", "fcc", a=3.6, cubic=True) * (2, 2, 2)
-        n = len(atoms)
-        atoms = make_cubic(atoms)
-        assert len(atoms) == n
+        assert len(result) == 2
+        assert result.get_volume() == pytest.approx(volume)
+        np.testing.assert_allclose(result.cell, np.eye(3) * volume ** (1 / 3))
+        np.testing.assert_allclose(result.get_scaled_positions(), scaled)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -264,9 +256,13 @@ class TestBackendDetection:
 class TestModelRegistry:
 
     def test_mace_models_have_descriptions(self):
-        for name in MACE_FOUNDATION_MODELS:
-            if name in MODEL_DESCRIPTIONS:
-                assert len(MODEL_DESCRIPTIONS[name]) > 10
+        # Short aliases intentionally share a checkpoint with a described
+        # canonical name. Every distinct model must still be documented.
+        described_checkpoints = {
+            checkpoint for name, checkpoint in MACE_FOUNDATION_MODELS.items()
+            if name in MODEL_DESCRIPTIONS and len(MODEL_DESCRIPTIONS[name]) > 10
+        }
+        assert described_checkpoints == set(MACE_FOUNDATION_MODELS.values())
 
     def test_descriptions_cover_all_backends(self):
         backends = {d.split()[0] for d in MODEL_DESCRIPTIONS.values()}
@@ -345,7 +341,8 @@ class TestNoDeprecatedAseMdCalls:
         atoms = bulk("Cu", "fcc", a=3.6, cubic=True).repeat((2, 2, 2)); atoms.calc = EMT()
         with warnings.catch_warnings():
             warnings.filterwarnings("error", message=".*fixcm")
-            dyn = build_md_dynamics(atoms, ensemble="NVT", T=300.0)
+            dyn = build_md_dynamics(atoms, ensemble="NVT", T=300.0,
+                                    rng=np.random.default_rng(0))
         assert dyn.fix_com is False
         assert not atoms.constraints    # no FixCom: IsotropicMTKNPT refuses constrained atoms
         dyn.run(5)
@@ -395,19 +392,14 @@ class TestNoDeprecatedAseCellFilter:
 
 
 class TestReviewFixesPhysics:
-    """Regressions for the 2026-09 review: ramp rate, negative rate, smoothing edges,
-    block test, torn checkpoint, model-name case, convert collisions."""
+    """Regressions for ramp rate, smoothing edges, block averaging,
+    torn checkpoints and case-insensitive model names."""
 
     def test_ramp_rate_is_exact(self):
         # 3000 -> 300 K, T_step 1000, 1000 steps per segment at 1 fs = 3 ps -> 900 K/ps
         temps = resolve_ramp(3000, 300, 1000)
         assert temps == [2000.0, 1000.0, 300.0]           # no segment at T_start
         assert 2700 / (len(temps) * 1000 * 1e-3) == pytest.approx(900.0)
-
-    def test_negative_rate_does_not_collapse_quench(self):
-        # the stage code takes abs(rate); reproduce its arithmetic
-        rate = abs(float(-100)); steps = int(round(abs(-100) / (rate * 1.0 / 1000)))
-        assert steps == 1000
 
     def test_smoothed_rdf_has_no_edge_dip(self):
         from ase.build import bulk
@@ -478,7 +470,6 @@ def test_torn_traj_format_repair_keeps_binary_format(tmp_path):
 def test_run_index_sources(tmp_path, monkeypatch):
     """run_NNNN/ cwd, then SLURM_ARRAY_TASK_ID, then 0; an explicit config
     run_index beats them all, so array tasks sharing a --seed differ."""
-    import os
     from amorphgen.utils.common import run_index_from_cwd, run_index_for, stage_rng
     d = tmp_path / "run_0007"; d.mkdir(); monkeypatch.chdir(d)
     # a pipeline run inside run_NNNN is banded, so it cannot be mistaken for a
