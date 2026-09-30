@@ -61,6 +61,9 @@ build/
 # Jupyter Notebooks
 # ======================
 .ipynb_checkpoints/
+# JupyterLab Desktop per-user window layout, not part of the tutorials
+.jupyter/
+*.jupyterlab-workspace
 *.ipynb_checkpoints
 
 # ======================
@@ -156,3 +159,6 @@ Tutorials/_*/
 *.synctex.gz
 *.toc
 texput.log
+
+# local agent/editor instructions, not part of the distribution
+CLAUDE.md

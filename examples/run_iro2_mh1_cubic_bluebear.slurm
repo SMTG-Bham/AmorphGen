@@ -15,6 +15,9 @@
 # ----------------------------------------------------------------------------
 
 #SBATCH --job-name=amg_iro2_mh1
+# Defaults are the Birmingham BlueBEAR project this was developed on. To run it
+# elsewhere set AMORPHGEN_ROOT and AMORPHGEN_VENV, and give your own project with
+#   sbatch --account=<your-project> <this script>
 #SBATCH --account=scanlodo-amorphous-oxides
 #SBATCH --qos=bbgpu
 #SBATCH --time=03:00:00
@@ -30,7 +33,7 @@ set -eu
 module purge
 module load bear-apps/2023a/live
 module load Python/3.11.3-GCCcore-12.3.0
-source /rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/venvs/amorphgen/bin/activate
+source "${AMORPHGEN_VENV:-/rds/projects/s/scanlodo-amorphous-oxides/kaewmeec/venvs/amorphgen}/bin/activate"
 
 mkdir -p logs
 echo "host: $(hostname)"; nvidia-smi -L
