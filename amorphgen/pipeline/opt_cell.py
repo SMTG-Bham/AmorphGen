@@ -23,7 +23,7 @@ from ase.filters import UnitCellFilter
 from ase.geometry import cell_to_cellpar
 
 from ..utils import get_calculator, merge_config
-from ..utils.common import assert_finite
+from ..utils.common import assert_finite, stage_file
 from ..configs import DEFAULT_CONFIG
 
 OPTIMIZERS = {
@@ -58,7 +58,8 @@ def _log(msg, lf=None):
         lf.flush()
 
 
-def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt", **kwargs):
+def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt",
+        work_dir=None, **kwargs):
     """
     Optimise a structure using a chosen optimizer + cell filter.
 
@@ -69,6 +70,9 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt", **kwargs):
     calc : ASE calculator, optional
     stage_key : str
         Config section to read ("opt").
+    work_dir : str or path-like, optional
+        Directory for the log, trajectory and output structures, created if
+        missing. Default: the current directory.
 
     Returns
     -------
@@ -113,8 +117,8 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt", **kwargs):
         default_log = f"{stage_prefix}_opt.log"
         default_traj = f"{stage_prefix}_opt.traj"
 
-    logfile = cfg.get("logfile", default_log)
-    trajfile = cfg.get("traj_file", default_traj)
+    logfile = stage_file(cfg.get("logfile", default_log), work_dir)
+    trajfile = stage_file(cfg.get("traj_file", default_traj), work_dir)
 
     with open(logfile, "w") as lf:
         from ..utils.common import compute_density_gcm3
@@ -146,8 +150,8 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt", **kwargs):
             target = atoms
         elif filter_name == "cubic":
             # Keep cubic shape (a=b=c, 90 deg) but allow volume to change
-            from ase.filters import ExpCellFilter
-            target = ExpCellFilter(atoms, hydrostatic_strain=True)
+            from ..utils.common import cubic_cell_filter
+            target = cubic_cell_filter(atoms)
             _log("  [cell] Cubic: isotropic volume only, shape fixed", lf)
         elif filter_name == "ExpCellFilter":
             from ase.filters import ExpCellFilter
@@ -207,8 +211,8 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt", **kwargs):
         default_cif = f"{stage_prefix}_opt.cif"
         default_xyz = f"{stage_prefix}_opt.xyz"
 
-    out_cif = cfg.get("output_cif", default_cif)
-    out_xyz = cfg.get("output_xyz", default_xyz)
+    out_cif = stage_file(cfg.get("output_cif", default_cif), work_dir)
+    out_xyz = stage_file(cfg.get("output_xyz", default_xyz), work_dir)
     write(out_cif, atoms)
     write(out_xyz, atoms, format="extxyz")
     final_density = compute_density_gcm3(atoms)
@@ -223,6 +227,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt", **kwargs):
             out_fmt = f"{base}_opt{fmt_ext}"
         else:
             out_fmt = f"{stage_prefix}_opt{fmt_ext}"
+        out_fmt = stage_file(out_fmt, work_dir)
         # Don't overwrite if we already wrote this extension
         if out_fmt not in (out_cif, out_xyz):
             if fmt_str == "vasp":
@@ -284,8 +289,12 @@ def batch_optimize(
             if files:
                 break
     if not files:
+        from .random_gen import random_gen_dir_hint
         print(f"[BatchOpt] No structure files found in {input_dir}/")
         print(f"  Searched: {pattern}, *.extxyz, *.vasp, *.cif")
+        hint = random_gen_dir_hint(input_dir)
+        if hint:
+            print(hint)
         return []
 
     if indices:

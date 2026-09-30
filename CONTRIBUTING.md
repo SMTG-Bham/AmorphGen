@@ -22,13 +22,24 @@ guidelines for contributing to this project.
 
 ## Development setup
 
-AmorphGen requires Python ≥ 3.10. Install all dependencies including test tools:
+AmorphGen requires Python ≥ 3.10. The conda development environment installs
+your clone in editable mode with MACE, CHGNet, the torch-sim engine, pytest and
+the Sphinx toolchain:
+
+```bash
+conda env create -f build_tools/environment_dev.yml
+conda activate amorphgen-dev
+```
+
+Or install all dependencies including test tools into an environment of your
+own with pip:
 
 ```bash
 pip install -e ".[all,dev]"
 ```
 
-This installs all MLIP backends (MACE, CHGNet, SevenNet) plus pytest.
+This installs the MACE and CHGNet backends plus pytest. SevenNet conflicts with
+MACE and needs an environment of its own.
 
 ## Running tests
 
@@ -40,8 +51,42 @@ pytest test/ -v --tb=short
 pytest test/ -v --tb=short --run-mace
 ```
 
-All tests must pass on Python 3.10, 3.11, and 3.12 before a pull request
-will be merged. GitHub Actions CI runs automatically on all pull requests.
+All tests must pass on Python 3.10 to 3.14 before a pull request will be
+merged. GitHub Actions CI runs automatically on every push and pull
+request to `main` and `dev`:
+
+| Job | Checks |
+|---|---|
+| `lint` | syntax errors and undefined names (ruff) in the package, tests, docs config and tutorial notebooks |
+| `test` | the torch-free suite on Python 3.10 to 3.14 on Linux, and on 3.14 on macOS and Windows |
+| `backends` | the full suite with CPU-only PyTorch, the torch-sim engine and CHGNet, with a coverage report |
+| `min-deps` | the suite on Python 3.10 with every dependency at the lowest version `pyproject.toml` allows |
+| `package` | the sdist and wheel build, the README links as PyPI renders them, and the sdist's tests run against the installed wheel |
+| `light-install` | a bare `pip install` (no extras) stays torch-free |
+
+The documentation builds with Sphinx warnings as errors (`docs.yml`), the
+conda environments in `build_tools/` are built and tested whenever they or
+`pyproject.toml` change (`conda.yml`), and a weekly canary relaxes a structure
+with CHGNet and SevenNet (`canary.yml`). The MACE tests (`--run-mace`) and the
+CUDA tests (`test/test_torchsim_gpu.py`) need a model download or a GPU and are
+run outside CI, before releases.
+
+To run the `backends` or `min-deps` job locally:
+
+```bash
+# backends; the torch-sim tests need a C/C++ compiler on PATH (the conda
+# development environment installs one)
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install -e ".[torchsim,chgnet,dev]"
+pytest test/
+
+# min-deps, in a fresh Python 3.10 environment (needs uv)
+uv pip install --resolution lowest-direct -e ".[dev]"
+pytest test/
+```
+
+When `min-deps` fails, the code needs a newer version of a dependency than
+`pyproject.toml` declares: raise that lower bound.
 
 ## Code style
 
@@ -149,8 +194,9 @@ amorphgen/
 
 ## Code of conduct
 
-Please be respectful and constructive in all interactions. We are committed
-to providing a welcoming and inclusive experience for everyone.
+Everyone taking part in AmorphGen is expected to follow the
+[code of conduct](https://github.com/SMTG-Bham/AmorphGen/blob/main/CODE_OF_CONDUCT.md),
+which also says how to report a problem.
 
 ## Questions?
 

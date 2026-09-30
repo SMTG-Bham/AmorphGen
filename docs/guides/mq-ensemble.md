@@ -75,7 +75,7 @@ mkdir -p inputs_per_task/task_${TASK}
 cp snapshots/snapshot_${TASK}_frame*.xyz inputs_per_task/task_${TASK}/
 amorphgen --batch-quench \
   --snapshot-dir inputs_per_task/task_${TASK} \
-  --config mq_stages_567.yaml --stages 5 6 7 \
+  --config mq.yaml --stages 5 6 7 \
   --model chgnet --device cuda \
   -o quench_runs        # shared across all array tasks
 ```
@@ -98,7 +98,8 @@ The defaults below match the common DFT-MD melt-quench protocol used in much of 
 ```yaml
 model: chgnet                       # or mace-mpa-0, sevennet, ...
 device: cuda
-default_dtype: float64
+# default_dtype is left at auto: float32 for chgnet (the only precision it
+# runs at), float64 for MACE and SevenNet
 
 # Stage 1: relax the crystalline supercell
 opt:
@@ -181,14 +182,21 @@ For a cluster with multiple GPUs, run the two halves as separate slurm jobs so t
 
 ```bash
 # Job 1: stages 1-4 (single GPU, ~10 h on A100 for 100 ps eq_high)
-sbatch 01_shared_bluebear.slurm
+sbatch shared.slurm
 # Note the JOBID
 
 # Job 2: array of 20 quench tasks (20 GPUs concurrent, ~5 h wall)
-sbatch --dependency=afterok:<JOBID> 02_quench_array_bluebear.slurm
+sbatch --dependency=afterok:<JOBID> quench_array.slurm
 ```
 
-Example slurm scripts for BlueBEAR and Sulis ship in the AmorphGen repo under `examples/hpc/`. Both use `amorphgen --extract-snapshots` and `amorphgen --batch-quench --snapshot-dir snapshots/` internally, same dispatch as `--mq-ensemble`, just split for HPC parallelism.
+`shared.slurm` and `quench_array.slurm` are your own job scripts; {doc}`hpc` has a SLURM header to start from. Job 1 runs step 1 of the two-step workflow above, then extracts the snapshots:
+
+```bash
+amorphgen GaO.xyz --config mq.yaml --stages 1 2 3 4 --resume -o shared/
+amorphgen --extract-snapshots shared/stage4_eq_traj.xyz -n 20 -o snapshots/
+```
+
+Job 2 is an array (`#SBATCH --array=0-19`) whose tasks each set `TASK=$(printf "%04d" $SLURM_ARRAY_TASK_ID)` and run the per-task command from the job-array tip above. This is the same dispatch as `--mq-ensemble`, split for HPC parallelism; `examples/run_quench_array_bluebear.slurm` is a complete job 2 for one cluster.
 
 | Pattern | Wall time | Best for |
 |---------|-----------|----------|

@@ -16,6 +16,13 @@ import numpy as np
 from ase import units
 from ase.io import read, write
 
+try:  # ASE >= 3.29
+    from ase.md.velocitydistribution import thermalize_momenta
+except ImportError:  # ASE 3.25-3.28: the same function, renamed in 3.29
+    from ase.md.velocitydistribution import (
+        MaxwellBoltzmannDistribution as thermalize_momenta,
+    )
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Density helper
@@ -117,6 +124,21 @@ def make_cubic(atoms):
     return atoms
 
 
+def cubic_cell_filter(atoms):
+    """Cell filter for ``cell_filter="cubic"``: volume relaxes, shape stays.
+
+    ``FrechetCellFilter`` with hydrostatic strain, in place of the
+    ``ExpCellFilter`` that ASE deprecated in 3.23. Under hydrostatic strain
+    the two return the same forces; ``exp_cell_factor=1`` keeps
+    ExpCellFilter's scale for the cell rows (the virial, ``|P| V``), which
+    the optimisation loops' ``max|force| < fmax`` test includes. Frechet's
+    default divides them by the number of atoms, which loosens the pressure
+    criterion by that factor, to ~0.1 GPa at fmax = 0.01 eV/A.
+    """
+    from ase.filters import FrechetCellFilter
+    return FrechetCellFilter(atoms, hydrostatic_strain=True, exp_cell_factor=1.0)
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # MD dynamics builder
 # ═════════════════════════════════════════════════════════════════════════════
@@ -178,7 +200,9 @@ def build_md_dynamics(atoms, ensemble: str = "NVT", T: float = 300.0,
     timestep : float
         Time step in fs.
     friction : float
-        Langevin friction coefficient (for NVT).
+        Langevin friction coefficient (for NVT).  The Langevin thermostat
+        leaves the centre of mass free (``fixcm=False``); pass ``fixcm``
+        in ``kwargs`` to override.
     ttime : float
         Thermostat time constant in fs.  For ``"berendsen"`` it is
         ``taut``; for ``"mtk"`` and ``"parrinello-rahman"`` it is the
@@ -244,6 +268,14 @@ def build_md_dynamics(atoms, ensemble: str = "NVT", T: float = 300.0,
     if ensemble.upper() == "NVT":
         if rng is not None:
             kwargs["rng"] = rng          # seeded thermostat noise
+        # ASE's default fixcm=True pins the centre of mass by projecting it
+        # out of the thermostat noise, which does not sample NVT exactly
+        # (deprecated in ASE 3.28). Unpinned, the centre of mass diffuses: a
+        # rigid translation that leaves the structure unchanged, and that
+        # compute_msd subtracts. ASE's suggested FixCom constraint would stay
+        # on the atoms, and IsotropicMTKNPT (the stage-4 default) refuses
+        # constrained atoms.
+        kwargs.setdefault("fixcm", False)
         dyn = Langevin(atoms, timestep=dt, temperature_K=T,
                        friction=friction / units.fs, **kwargs)
         return dyn
@@ -793,6 +825,20 @@ def merge_config(defaults: dict, overrides: dict | None) -> dict:
             else:
                 cfg[k] = v
     return cfg
+
+
+def stage_file(name: str, work_dir=None) -> str:
+    """Path a stage runner writes its file ``name`` to.
+
+    Relative names stay in the current directory, which is the run's work
+    dir once MeltQuenchPipeline or batch_quench has changed into it. A stage
+    called on its own is given ``work_dir`` instead: ``name`` goes inside it
+    (created if missing), unless ``name`` is absolute.
+    """
+    if work_dir is None:
+        return name
+    os.makedirs(work_dir, exist_ok=True)
+    return os.path.join(work_dir, name)
 
 
 # ═════════════════════════════════════════════════════════════════════════════

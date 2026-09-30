@@ -299,3 +299,56 @@ class TestRequiresCalculator:
         assert _requires_calculator(self._args(mq_ensemble=True))
         assert _requires_calculator(self._args(hybrid_ensemble=True))
         assert _requires_calculator(self._args(input_file="POSCAR"))      # pipeline
+
+
+class TestDtypeFailFast:
+    """require_dtype and its CLI gate: CHGNet + float64 must fail before any
+    work starts, not in --mq-ensemble phase 3 after stages 1-4 of MD."""
+
+    def test_chgnet_float64_raises(self):
+        from amorphgen.utils.calculators import require_dtype
+        with pytest.raises(NotImplementedError, match="composition_model"):
+            require_dtype("chgnet", "float64")
+
+    @pytest.mark.parametrize("model, dtype", [
+        ("chgnet", None), ("chgnet", "auto"), ("chgnet", "float32"),
+        ("mace-mpa-0", "float64"), ("lj", "float64"),
+    ])
+    def test_supported_combinations_pass(self, model, dtype):
+        from amorphgen.utils.calculators import require_dtype
+        require_dtype(model, dtype)
+
+    def test_model_path_implies_mace(self):
+        from amorphgen.utils.calculators import require_dtype
+        require_dtype("chgnet", "float64", model_path="/tmp/custom.model")
+
+    class _ReachedStages(Exception):
+        """Raised in place of stages 1-4, i.e. when the gate let the run through."""
+
+    def _mq_ensemble(self, tmp_path, monkeypatch, yaml_text):
+        import sys
+        import amorphgen.utils.calculators as calc
+        import amorphgen.pipeline.run_pipeline as rp
+        from amorphgen.cli import main
+
+        def _pipeline(*args, **kwargs):
+            raise self._ReachedStages
+        monkeypatch.setattr(calc, "backend_available", lambda b: True)
+        monkeypatch.setattr(rp, "MeltQuenchPipeline", _pipeline)
+        cfg = tmp_path / "mq.yaml"
+        cfg.write_text(yaml_text)
+        monkeypatch.setattr(sys, "argv", ["amorphgen", "POSCAR", "--mq-ensemble",
+                                          "--config", str(cfg), "-o", str(tmp_path / "mq")])
+        main()
+
+    def test_cli_refuses_chgnet_float64_before_stages(self, tmp_path, monkeypatch, capsys):
+        with pytest.raises(SystemExit) as exc:
+            self._mq_ensemble(tmp_path, monkeypatch,
+                              "model: chgnet\ndefault_dtype: float64\n")
+        assert exc.value.code == 1
+        assert "default_dtype='float64'" in capsys.readouterr().out
+        assert not (tmp_path / "mq").exists()          # no setup work done
+
+    def test_cli_lets_chgnet_auto_through(self, tmp_path, monkeypatch):
+        with pytest.raises(self._ReachedStages):
+            self._mq_ensemble(tmp_path, monkeypatch, "model: chgnet\n")

@@ -31,6 +31,7 @@ from ..utils.radii import (
     NONMETALS, METALLOIDS, ELEMENTAL_DENSITIES, SCALE_FACTORS,
     # Functions (aliased with underscore for internal use)
     classify_bond as _classify_bond,
+    cation_nonmetals as _cation_nonmetals,
     get_ionic_radius as _get_ionic_radius,
     get_metallic_radius as _get_metallic_radius,
     get_effective_radius as _get_effective_radius,
@@ -39,6 +40,7 @@ from ..utils.radii import (
     estimate_cell_length as _estimate_cell_length,
     auto_target_cn as _auto_target_cn,
     format_auto_derive_summary as _format_auto_derive_summary,
+    _hydrogenated_host,
 )
 
 logger = logging.getLogger(__name__)
@@ -174,8 +176,8 @@ def _build_cell_filter(atoms, cell_filter: str):
     if cell_filter == "none" or cell_filter is None:
         return atoms
     elif cell_filter == "cubic":
-        from ase.filters import ExpCellFilter
-        return ExpCellFilter(atoms, hydrostatic_strain=True)
+        from ..utils.common import cubic_cell_filter
+        return cubic_cell_filter(atoms)
     elif cell_filter == "ExpCellFilter":
         from ase.filters import ExpCellFilter
         return ExpCellFilter(atoms)
@@ -202,7 +204,8 @@ def _get_dmax(s1: str, s2: str, dmax: dict) -> float:
     return dmax.get(key1, dmax.get(key2, 0.0))
 
 
-def _auto_dmax(minsep: dict, target_cn: dict, factor: float = 1.5) -> dict:
+def _auto_dmax(minsep: dict, target_cn: dict, factor: float = 1.5,
+               composition: dict | None = None) -> dict:
     """
     Auto-generate dmax from minsep for bonding pairs.
 
@@ -215,6 +218,12 @@ def _auto_dmax(minsep: dict, target_cn: dict, factor: float = 1.5) -> dict:
     - Metallic bonds (M-M): dmax = minsep * 1.3 (only when M-M is
       the primary bond, i.e. alloys/pure metals with no anions)
     - Pure elements (Si, Ge, Sn, etc.): dmax = minsep * 1.2
+
+    With ``composition`` the pairs are classified in the compound
+    (``classify_bond``), so the P-O of a phosphate is a bond and a pair of
+    cations (Li-P, Na-B, K-Si) is not. A hydrogenated network (a-Si:H,
+    a-C:H) has no anions: its host bonds as it does without H (Si-Si as in
+    a-Si, Si-Ge as in SiGe), each X-H is a bond and H-H never is.
     """
     dmax = {}
     cn_elements = set(target_cn.keys())
@@ -225,8 +234,15 @@ def _auto_dmax(minsep: dict, target_cn: dict, factor: float = 1.5) -> dict:
         s1, s2 = pair.split("-")
         all_elements.add(s1)
         all_elements.add(s2)
-    has_anion = any(s in NONMETALS for s in all_elements)
-    is_pure = all(p.split("-")[0] == p.split("-")[1] for p in minsep)
+    host = _hydrogenated_host(composition) if composition else None
+    if host is not None:
+        has_anion = False
+        is_pure = len(host) == 1
+        bonding = set(host)            # the elements that bond to themselves
+    else:
+        has_anion = any(s in NONMETALS for s in all_elements)
+        is_pure = all(p.split("-")[0] == p.split("-")[1] for p in minsep)
+        bonding = all_elements
 
     for pair, dist in minsep.items():
         s1, s2 = pair.split("-")
@@ -234,7 +250,7 @@ def _auto_dmax(minsep: dict, target_cn: dict, factor: float = 1.5) -> dict:
         if s1 == s2:
             # Pure elements: tight dmax so atoms are placed close enough
             # for MLIP to relax into proper bonds
-            if is_pure and s1 in cn_elements:
+            if is_pure and s1 in cn_elements and s1 in bonding:
                 dmax[pair] = dist * 1.2
             continue
 
@@ -242,7 +258,8 @@ def _auto_dmax(minsep: dict, target_cn: dict, factor: float = 1.5) -> dict:
         if s1 not in cn_elements and s2 not in cn_elements:
             continue
 
-        bond_type = _classify_bond(s1, s2)
+        # "cation-cation" (a nonmetal cation and another cation) is never a bond
+        bond_type = _classify_bond(s1, s2, composition)
         if bond_type == "ionic":
             # Primary ionic bonding (M-O, M-N, M-Cl)
             dmax[pair] = dist * factor
@@ -747,7 +764,8 @@ def generate_random(
     # separate relax / melt-quench stage). Auto-generate dmax from minsep here.
     use_sc = target_cn is not None
     if use_sc and dmax is None:
-        dmax = _auto_dmax(minsep, target_cn, factor=dmax_factor)
+        dmax = _auto_dmax(minsep, target_cn, factor=dmax_factor,
+                          composition=composition)
         logger.info("Auto-generated dmax from minsep * 1.5: %s", dmax)
 
     # CN tracking array (only used in coordination-aware mode)
@@ -790,6 +808,8 @@ def generate_random(
     # Auto: anions -> 2, cations -> 3; each capped at the element's target CN.
     _min_cn_arr = np.zeros(_n_types, dtype=int)
     if use_sc:
+        centres = _cation_nonmetals(composition)    # P, S, C, H... as cations
+        host = _hydrogenated_host(composition) or {}  # the C of a-C:H is no anion
         for s in unique_syms:
             idx = _sym_to_idx[s]
             if isinstance(min_cn, dict):
@@ -797,7 +817,8 @@ def generate_random(
             elif min_cn is not None:
                 floor = int(min_cn)
             else:                                   # auto default
-                floor = 2 if s in NONMETALS else 3
+                anion = s in NONMETALS and s not in centres and s not in host
+                floor = 2 if anion else 3
             # never demand more than the target CN (e.g. CN-2 cations)
             tgt = _target_cn_arr[idx]
             if tgt < 999:
@@ -1337,7 +1358,8 @@ def batch_random(
     use_sc = target_cn is not None and target_cn != {}
     dmax_fac = kwargs.get("dmax_factor", 1.5)
     if use_sc and dmax_user is None:
-        dmax_log = _auto_dmax(minsep_log, target_cn, factor=dmax_fac)
+        dmax_log = _auto_dmax(minsep_log, target_cn, factor=dmax_fac,
+                              composition=composition)
     else:
         dmax_log = dmax_user
 
@@ -1350,7 +1372,9 @@ def batch_random(
         lf.write(msg + "\n")
         lf.flush()
 
-    lf = open(logfile, "a" if resume else "w")
+    # UTF-8, not the locale encoding: the auto-derive line has non-ASCII
+    # (→, ρ, Δχ) that cp1252 (the Windows default) cannot encode
+    lf = open(logfile, "a" if resume else "w", encoding="utf-8")
     try:
         _log(f"\n{bar}", lf)
         _log(f"  AmorphGen - Random Structure Generation", lf)
@@ -1664,3 +1688,25 @@ def batch_random(
         lf.close()
 
     return paths
+
+
+def random_gen_dir_hint(directory: str) -> str:
+    """Point at the structures of a ``--random-gen`` work dir.
+
+    :func:`batch_random` writes structures only to the ``random_initial/``
+    (as placed) and ``random_opt/`` (relaxed) subdirectories of its output
+    dir, so a mode that reads the top level of that dir finds none. Returns
+    the lines to print after its "no structure files" error, or ``""`` when
+    neither subdirectory holds a structure.
+    """
+    exts = tuple({ext for _, ext in _FORMAT_MAP.values()})
+    found = []
+    for sub, what in (("random_initial", "as placed"), ("random_opt", "relaxed")):
+        path = os.path.join(directory, sub)
+        if os.path.isdir(path) and any(f.endswith(exts) for f in os.listdir(path)):
+            found.append(f"    {path}/   ({what})")
+    if not found:
+        return ""
+    head = f"  {directory} is a --random-gen output directory; its structures are in:"
+    tail = "  Pass " + ("that directory" if len(found) == 1 else "one of these") + " instead."
+    return "\n".join([head, *found, tail])

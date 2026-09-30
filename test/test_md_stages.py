@@ -481,3 +481,69 @@ class TestFrameLevelResume:
         out = capsys.readouterr().out
         assert "Frame-level resume: 100 steps" in out
         assert "(resumed, 20 steps left)" in out   # elapsed 100 = 1*60 + 40
+
+
+# ── work_dir= on a stage run by itself ──
+
+class TestStageWorkDir:
+    """A stage called on its own writes its files into ``work_dir=``.
+
+    The keyword used to fall into ``**kwargs``: Tutorial 7 passed it to
+    equilibrate.run, the trajectory landed in the notebook's directory, and
+    the notebook's search of work_dir found nothing to analyse."""
+
+    def test_md_stages(self, cu_supercell, emt_calc, tmp_work_dir):
+        from amorphgen.pipeline import equilibrate, melt_cell, quench
+        write("input.xyz", cu_supercell)
+        # a relative input path is still read from the caller's directory
+        equilibrate.run("input.xyz", EMT_CFG, emt_calc, stage="high",
+                        work_dir="eq")
+        melt_cell.run(cu_supercell, EMT_CFG, emt_calc,
+                      work_dir=tmp_work_dir / "melt")
+        quench.run(cu_supercell, EMT_CFG, emt_calc, work_dir="a/quench")
+        assert sorted(os.listdir(".")) == ["a", "eq", "input.xyz", "melt"]
+        assert sorted(os.listdir("eq")) == [
+            "stage4_eq.log", "stage4_eq.xyz", "stage4_eq_traj.xyz"]
+        assert sorted(os.listdir("melt")) == [
+            "stage3_melt.log", "stage3_melt_traj.xyz", "stage3_melted.xyz"]
+        assert sorted(os.listdir("a/quench")) == [
+            "stage5_quench.log", "stage5_quench_traj.xyz", "stage5_quenched.xyz"]
+
+    def test_opt_stages(self, cu_supercell, emt_calc, tmp_work_dir):
+        from amorphgen.pipeline import opt_cell, final_opt
+        cfg = merge_config(EMT_CFG, {"opt": {"output_format": "vasp"}})
+        opt_cell.run(cu_supercell, cfg, emt_calc, work_dir="opt")
+        final_opt.run(cu_supercell, cfg, emt_calc, work_dir="final")
+        assert sorted(os.listdir(".")) == ["final", "opt"]
+        assert sorted(os.listdir("opt")) == [
+            "stage1_opt.cif", "stage1_opt.log", "stage1_opt.traj",
+            "stage1_opt.vasp", "stage1_opt.xyz"]
+        assert sorted(os.listdir("final")) == [
+            "stage7_opt.cif", "stage7_opt.log", "stage7_opt.traj",
+            "stage7_opt.vasp", "stage7_opt.xyz"]
+
+    def test_resume_reads_the_work_dir_trajectory(self, tmp_work_dir, capsys):
+        from amorphgen.pipeline import equilibrate
+        atoms = bulk("Cu", "fcc", a=3.6, cubic=True).repeat(2)
+
+        def cfg(steps):
+            return {"device": "cpu", "traj_format": "extxyz",
+                    "eq_premelt": {"ensemble": "NVT", "T": 300,
+                                   "steps": steps, "timestep": 1.0,
+                                   "friction": 0.01}}
+
+        equilibrate.run(atoms, cfg(200), EMT(), stage="premelt", work_dir="eq")
+        capsys.readouterr()
+        equilibrate.run(atoms, cfg(300), EMT(), stage="premelt", work_dir="eq",
+                        resume=True)
+        assert "Frame-level resume: 200 steps" in capsys.readouterr().out
+        assert len(read("eq/stage2_eq_traj.xyz", index=":")) == 4
+        assert not os.path.exists("stage2_eq_traj.xyz")
+
+    def test_absolute_names_are_kept(self, tmp_path):
+        from amorphgen.utils.common import stage_file
+        assert stage_file("x.log") == "x.log"
+        assert stage_file("x.log", tmp_path / "d") == os.path.join(tmp_path / "d", "x.log")
+        assert (tmp_path / "d").is_dir()
+        absolute = str(tmp_path / "elsewhere.log")
+        assert stage_file(absolute, tmp_path / "d") == absolute

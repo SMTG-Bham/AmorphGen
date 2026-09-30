@@ -67,7 +67,11 @@ chunk size recorded in `batch_size.json` so the chunking is identical.
 Resubmitting the same job script until the log reports the ensemble complete
 is the intended way to run a large ensemble through a short queue. Put
 `export PYTHONUNBUFFERED=1` in the script, otherwise the progress messages
-only appear in the log when the job ends.
+only appear in the log when the job ends. The engine compiles kernels when it
+starts, so the compute node needs a C/C++ compiler on `PATH`: if `g++ --version`
+fails there, load one in the script (`module load GCC`; the name varies by
+site). See
+[the installation page](../getting-started/installation.md#the-torch-sim-engine).
 
 ### Python API
 

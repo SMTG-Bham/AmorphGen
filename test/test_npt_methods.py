@@ -12,6 +12,7 @@ Tier 2 — uses EMT calculator (GPU-free, runs in CI).
 """
 from __future__ import annotations
 
+import numpy as np
 import pytest
 from ase.build import bulk
 from ase.calculators.emt import EMT
@@ -25,16 +26,21 @@ try:
 except ImportError:  # pragma: no cover
     from ase.md.npt import NPT as _PR_NPT
 
-from amorphgen.utils.common import build_md_dynamics
+from amorphgen.utils.common import build_md_dynamics, thermalize_momenta
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────
 
 
 def _make_atoms():
-    """Cu bulk supercell with EMT — cheap, GPU-free, NPT-stable."""
+    """Cu bulk supercell with EMT — cheap, GPU-free, NPT-stable.
+
+    Momenta at 300 K, as the MD stages start: from rest, the Berendsen
+    thermostat divides by the zero temperature.
+    """
     atoms = bulk("Cu", "fcc", a=3.6, cubic=True) * (2, 2, 2)
     atoms.calc = EMT()
+    thermalize_momenta(atoms, temperature_K=300, rng=np.random.default_rng(0))
     return atoms
 
 

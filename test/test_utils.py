@@ -318,16 +318,80 @@ class TestRampTemperatureAllIntegrators:
         from ase.build import bulk
         from ase.calculators.emt import EMT
         from ase.io import read
-        from amorphgen.utils.common import build_md_dynamics, set_md_temperature, attach_outputs
+        from amorphgen.utils.common import (build_md_dynamics, set_md_temperature, attach_outputs,
+                                            thermalize_momenta)
         atoms = bulk("Cu", "fcc", a=3.6, cubic=True).repeat((2, 2, 2)); atoms.calc = EMT()
+        thermalize_momenta(atoms, temperature_K=300, rng=np.random.default_rng(0))  # Berendsen divides by T
         dyn = build_md_dynamics(atoms, ensemble="NPT", T=300.0, timestep=1.0, npt_method=method)
-        attach_outputs(dyn, atoms, str(tmp_path / "s.log"), str(tmp_path / "s_traj.xyz"), interval=2)
+        logger, traj = attach_outputs(dyn, atoms, str(tmp_path / "s.log"),
+                                      str(tmp_path / "s_traj.xyz"), interval=2)
         dyn.run(4)
         set_md_temperature(dyn, 400.0)          # IsotropicMTKNPT has no set_temperature
         dyn.run(4)                              # NPT (PR) refuses if the atoms were wrapped in between
+        logger.close(); traj.close()
         frames = read(str(tmp_path / "s_traj.xyz"), index=":")
         assert len(frames) >= 4
         assert frames[-1].calc is not None      # energy carried into the wrapped copy
+
+
+class TestNoDeprecatedAseMdCalls:
+    """The MD helpers avoid the ASE APIs deprecated in 3.28 (Langevin fixcm) and
+    3.29 (MaxwellBoltzmannDistribution), and still work on the ASE floor (Tier 2)."""
+
+    def test_nvt_langevin_leaves_the_centre_of_mass_free(self):
+        import warnings
+        from ase.calculators.emt import EMT
+        from amorphgen.utils.common import build_md_dynamics
+        atoms = bulk("Cu", "fcc", a=3.6, cubic=True).repeat((2, 2, 2)); atoms.calc = EMT()
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error", message=".*fixcm")
+            dyn = build_md_dynamics(atoms, ensemble="NVT", T=300.0)
+        assert dyn.fix_com is False
+        assert not atoms.constraints    # no FixCom: IsotropicMTKNPT refuses constrained atoms
+        dyn.run(5)
+        assert np.isfinite(atoms.get_potential_energy())
+
+    def test_thermalize_momenta_is_seeded(self):
+        import warnings
+        from amorphgen.utils.common import thermalize_momenta
+        a, b = (bulk("Cu", "fcc", a=3.6, cubic=True).repeat((3, 3, 3)) for _ in range(2))
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error", message="Use thermalize_momenta")
+            thermalize_momenta(a, temperature_K=500, rng=np.random.default_rng(7))
+        thermalize_momenta(b, temperature_K=500, rng=np.random.default_rng(7))
+        assert np.array_equal(a.get_momenta(), b.get_momenta())
+        assert 300 < a.get_temperature() < 700    # 108 atoms: a loose band around 500 K
+
+
+class TestNoDeprecatedAseCellFilter:
+    """cell_filter="cubic" avoids ExpCellFilter (deprecated in ASE 3.23) and keeps
+    its convergence criterion on the pressure (Tier 2)."""
+
+    def test_cubic_relax_keeps_shape_and_pressure_tolerance(self, tmp_path, monkeypatch):
+        import warnings
+        from ase import units
+        from ase.calculators.emt import EMT
+        from ase.filters import FrechetCellFilter
+        from amorphgen.pipeline import opt_cell
+        from amorphgen.pipeline.random_gen import _build_cell_filter
+        monkeypatch.chdir(tmp_path)                    # opt_cell writes to cwd
+        atoms = bulk("Cu", "fcc", a=3.6, cubic=True).repeat((2, 2, 2))
+        atoms.rattle(0.05, seed=0)
+        atoms.set_cell(atoms.cell * 1.03, scale_atoms=True)
+        cfg = {"opt": {"optimizer": "FIRE", "fmax": 0.01, "max_steps": 400,
+                       "cell_filter": "cubic"}}
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error", message="Use FrechetCellFilter")
+            assert isinstance(_build_cell_filter(atoms.copy(), "cubic"), FrechetCellFilter)
+            out = opt_cell.run(atoms, cfg_override=cfg, calc=EMT())
+        assert "Converged" in (tmp_path / "stage1_opt.log").read_text()
+        a, b, c, al, be, ga = out.cell.cellpar()
+        assert np.allclose([b, c], a) and np.allclose([al, be, ga], 90.0)
+        # The cell rows of the forces are the virial, V * P, as with ExpCellFilter:
+        # converged means |P| V < fmax (0.004 GPa here). Frechet's default scale,
+        # 1 / number of atoms, let FIRE stop at 0.09 GPa.
+        P = -np.trace(out.get_stress(voigt=False)) / 3
+        assert abs(P) * out.get_volume() < 0.01, f"P = {P / units.GPa:.4f} GPa"
 
 
 class TestReviewFixesPhysics:
@@ -375,7 +439,8 @@ class TestReviewFixesPhysics:
         with open(p, "a") as fh:                            # half-written 4th frame
             fh.write('32\nLattice="7.2 0 0 0 7.2 0 0 0 7.2" Properties=species:S:1:pos:R:3\nCu 0 0 0\n')
         from amorphgen.utils.common import read_md_checkpoint
-        ck = read_md_checkpoint(str(p))
+        with pytest.warns(UserWarning, match="incomplete"):
+            ck = read_md_checkpoint(str(p))
         assert ck is not None and ck[1] == 200              # 3 good frames kept
         from ase.io import read
         assert len(read(str(p), index=":")) == 3            # file truncated to good frames
@@ -406,7 +471,7 @@ def test_torn_traj_format_repair_keeps_binary_format(tmp_path):
     with pytest.warns(UserWarning, match="incomplete"):
         res = read_md_checkpoint(str(p), interval=100)
     assert res is not None and res[1] == 100          # 2 complete frames -> 100 steps done
-    assert open(p, "rb").read(8) == b"- of Ulm"       # rewritten as a binary trajectory, not extxyz
+    assert p.read_bytes()[:8] == b"- of Ulm"          # rewritten as a binary trajectory, not extxyz
     assert len(read(str(p), index=":")) == 2
 
 

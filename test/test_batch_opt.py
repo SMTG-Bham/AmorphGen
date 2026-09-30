@@ -123,3 +123,75 @@ class TestCLIAnalyse:
         from amorphgen.cli import _parse_dmax
         dmax = _parse_dmax("Si-O=2.0,O-O=3.2")
         assert dmax == {"Si-O": 2.0, "O-O": 3.2}
+
+
+class TestRandomGenOutputDir:
+    """--random-gen writes to <dir>/random_initial/ (and random_opt/ with
+    --relax), never to <dir>/ itself. The next step is pointed at the
+    subdirectory; given the work dir it must say where to look and exit 1."""
+
+    # Lennard-Jones: torch-free, so these run on the bare install too
+    LJ_YAML = ("model: lj\ndevice: cpu\n"
+               "classical_params:\n  params:\n    Cu-Cu: {sigma: 2.3, epsilon: 0.1}\n"
+               "  cutoff: 6.0\n"
+               "opt:\n  fmax: 0.5\n  max_steps: 5\n  cell_filter: none\n")
+
+    def _cli(self, monkeypatch, *argv):
+        import sys
+        from amorphgen.cli import main
+        monkeypatch.setattr(sys, "argv", ["amorphgen", *argv])
+        main()
+
+    @pytest.fixture
+    def gen_dir(self, tmp_path, monkeypatch):
+        """A real --random-gen work dir: two Cu8 placements, not relaxed."""
+        out = tmp_path / "gen"
+        self._cli(monkeypatch, "--random-gen", "--composition", "Cu=8", "-n", "2",
+                  "--seed", "1", "-o", str(out))
+        return out
+
+    @pytest.fixture
+    def lj_cfg(self, tmp_path):
+        cfg = tmp_path / "lj.yaml"
+        cfg.write_text(self.LJ_YAML)
+        return str(cfg)
+
+    def test_hint_lists_subdirs_holding_structures(self, gen_dir, tmp_path):
+        from amorphgen.pipeline.random_gen import random_gen_dir_hint
+        (gen_dir / "random_opt").mkdir()
+        (gen_dir / "random_opt" / "random_0000_opt.log").write_text("")  # not a structure
+        hint = random_gen_dir_hint(str(gen_dir))
+        assert os.path.join(str(gen_dir), "random_initial") in hint
+        assert "random_opt" not in hint
+        assert random_gen_dir_hint(str(tmp_path / "gen" / "random_initial")) == ""
+
+    def test_batch_optimize_on_work_dir_prints_hint(self, gen_dir, tmp_path, capsys):
+        from amorphgen.pipeline.opt_cell import batch_optimize
+        assert batch_optimize(input_dir=str(gen_dir), output_dir=str(tmp_path / "o"),
+                              calc=EMT()) == []
+        assert os.path.join(str(gen_dir), "random_initial") in capsys.readouterr().out
+
+    def test_cli_batch_opt_on_work_dir_exits_1(self, gen_dir, lj_cfg, tmp_path,
+                                               monkeypatch, capsys):
+        with pytest.raises(SystemExit) as exc:
+            self._cli(monkeypatch, "--batch-opt", "--input-dir", str(gen_dir),
+                      "--config", lj_cfg, "-o", str(tmp_path / "opt"))
+        assert exc.value.code == 1
+        assert os.path.join(str(gen_dir), "random_initial") in capsys.readouterr().out
+
+    def test_cli_batch_opt_on_random_initial_runs(self, gen_dir, lj_cfg, tmp_path,
+                                                  monkeypatch):
+        """The documented two-step workflow: generate, then --batch-opt the
+        random_initial/ subdirectory."""
+        self._cli(monkeypatch, "--batch-opt", "--input-dir", str(gen_dir / "random_initial"),
+                  "--config", lj_cfg, "-o", str(tmp_path / "opt"))
+        assert sorted(p.name for p in (tmp_path / "opt").glob("*_opt.xyz")) == [
+            "random_0000_opt.xyz", "random_0001_opt.xyz"]
+
+    def test_cli_hybrid_ensemble_on_work_dir_exits_1(self, gen_dir, lj_cfg, tmp_path,
+                                                     monkeypatch, capsys):
+        with pytest.raises(SystemExit) as exc:
+            self._cli(monkeypatch, "--hybrid-ensemble", "--input-dir", str(gen_dir),
+                      "--config", lj_cfg, "-o", str(tmp_path / "hyb"))
+        assert exc.value.code == 1
+        assert os.path.join(str(gen_dir), "random_initial") in capsys.readouterr().out

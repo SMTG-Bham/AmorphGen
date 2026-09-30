@@ -4,7 +4,7 @@
 # -- Project information -----------------------------------------------------
 project = "AmorphGen"
 copyright = "2026, Chaiyawat Kaewmeechai"
-author = "Chaiyawat Kaewmeechai"
+author = "Chaiyawat Kaewmeechai, Louie Slocombe, David O. Scanlon"
 version = "1.0.0rc4"
 release = "1.0.0rc4"
 
@@ -67,7 +67,7 @@ napoleon_use_rtype = True
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
-    "ase": ("https://wiki.fysik.dtu.dk/ase/", None),
+    "ase": ("https://docs.ase-lib.org/", None),
 }
 
 # -- HTML output options ------------------------------------------------------

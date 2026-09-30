@@ -91,33 +91,36 @@ green = AmorphGen Hybrid, pink = AmorphGen Full MQ.*
 ### Reproduce
 
 ```bash
-# 1. Generate 20 random a-Ga2O3 structures
+# 1. Generate 20 random a-Ga2O3 structures (Ga160O240, 400 atoms)
 amorphgen --random-gen \
-    --composition "Ga2O3*32" \
+    --composition "Ga2O3*80" \
     --n-structures 20 \
     --work-dir random_ga2o3/
 
 # 2. Run either Hybrid or Full MQ workflow
 
-#   Option A - Hybrid (from random inputs, Stages 4-7)
+#   Option A - Hybrid (from the random placements, Stages 4-7)
 amorphgen --hybrid-ensemble \
-    --input-dir random_ga2o3/ \
-    --config examples/hybrid_stages_4567_cuda.yaml \
+    --input-dir random_ga2o3/random_initial/ \
+    --config hybrid.yaml \
     --work-dir hybrid_ga2o3/
 
 #   Option B - Full melt-quench from a crystal supercell
 amorphgen Ga2O3_supercell.xyz \
     --mq-ensemble --n-structures 20 \
-    --config examples/mq_stages_1234_cuda.yaml \
+    --config mq.yaml \
     --work-dir mq_ga2o3/
 
-# 3. Analyse against the bundled reference YAML
-mkdir final && cp <workflow_dir>/run_*/run_0000/final_amorphous.xyz final/
+# 3. Analyse against the bundled reference YAML (mq_ga2o3/final/ for Option B)
 amorphgen --analyse \
-    --input-dir final/ \
+    --input-dir hybrid_ga2o3/final/ \
     --reference examples/reference_a_Ga2O3.yaml \
     --save-report report.txt --save-plot plots/ --save-pdf
 ```
+
+`hybrid.yaml` and `mq.yaml` are the CHGNet configs given in
+{doc}`/guides/hybrid-workflow` and {doc}`/guides/mq-ensemble`. Both ensemble
+modes collect their final structures in `<work-dir>/final/`.
 
 Reference files for a-SiO₂, a-GeO₂, a-HfO₂ and a-IrO₂ sit next to it in
 `examples/`. The reference file `examples/reference_a_Ga2O3.yaml` is shipped with

@@ -35,9 +35,80 @@ def auto_cutoff_minsep(atoms_list: list) -> dict[str, float]:
     return cutoffs
 
 
+# Scale (A) at which the first minimum of g(r) is read: g(r) is averaged over
+# this width, and the minimum must be the lowest point within it on either side.
+# Finer features do not end the first shell: a flat step or a noise dip on the
+# falling side of the first peak, or the empty bins between the shell and one
+# stretched bond, all common in small cells.
+_MIN_SCALE = 0.25
+
+
+def _smooth(g, width):
+    """Moving average over ``width`` bins; the end bins average what is in range."""
+    kernel = np.ones(width)
+    return (np.convolve(g, kernel, mode='same')
+            / np.convolve(np.ones_like(g), kernel, mode='same'))
+
+
+def _first_minimum(r, g, scale=_MIN_SCALE):
+    """Radius of the first minimum after the first peak of a partial g(r).
+
+    The first peak is the first local maximum of g(r) averaged over 5 bins
+    that is at least half the strongest feature. The minimum is read from
+    g(r) averaged over ``scale``: the first point after the peak that is at
+    most half the peak height and the lowest point within ``scale`` on
+    either side. A run of equal values counts as one point, placed at its
+    centre, so a gap where g(r) = 0 gives its middle; a gap that runs to the
+    end of ``r`` gives its start. Returns ``None`` when there is no such
+    point.
+    """
+    n = len(g)
+    dr = r[1] - r[0]
+    k = max(1, int(round(scale / dr)))
+    if n < max(5, 2 * k + 1):
+        return None
+    g_fine = _smooth(g, 5)
+    g_coarse = _smooth(g, 2 * max(1, int(round(scale / (2 * dr)))) + 1)
+
+    # Taking the first bump above a fixed threshold as the peak (old
+    # behaviour) latched onto placement noise on the rising edge of unrelaxed
+    # random structures and returned a cutoff *below* the bond length (CN ~ 0).
+    g_max = float(np.max(g_fine))
+    peak_threshold = max(1.5, 0.5 * g_max)   # a bonded shell has g >> 1
+    peak = None
+    for i in range(1, n - 1):
+        if (g_fine[i] >= peak_threshold
+                and g_fine[i] >= g_fine[i - 1]
+                and g_fine[i] > g_fine[i + 1]):
+            peak = i
+            break
+    if peak is None:
+        return None
+
+    i = peak + 1
+    while i < n:
+        j = i                                # [i, j]: run of equal values
+        while j + 1 < n and g_coarse[j + 1] == g_coarse[i]:
+            j += 1
+        v = g_coarse[i]
+        if (v <= 0.5 * g_fine[peak]
+                and v <= g_coarse[max(0, i - k):j + k + 1].min()):
+            if j + 1 < n:
+                return float(0.5 * (r[i] + r[j]))
+            if v == 0:
+                return float(r[i])
+        i = j + 1
+    return None
+
+
 def auto_cutoff_rdf(atoms_list: list, rmax: float = 6.0,
                     nbins: int = 300) -> dict[str, float]:
-    """Determine pair-specific cutoffs from the first minimum of g(r)."""
+    """Determine pair-specific cutoffs from the first minimum of g(r).
+
+    See :func:`_first_minimum` for how the peak and the minimum are found.
+    Pairs without one get the radii-table cutoff of
+    :func:`auto_cutoff_minsep`, with a warning.
+    """
     unique = sorted(set(atoms_list[0].get_chemical_symbols()))
     dr = rmax / nbins
     r_centres = np.linspace(dr / 2, rmax - dr / 2, nbins)
@@ -92,40 +163,10 @@ def auto_cutoff_rdf(atoms_list: list, rmax: float = 6.0,
     fallback = auto_cutoff_minsep(atoms_list)
 
     for key, g_r in g_r_accum.items():
-        cutoff_found = False
-        g_smooth = (np.convolve(g_r, np.ones(5) / 5, mode='same')
-                    if len(g_r) > 5 else g_r)
-
-        # First peak = the first local maximum that is at least half the
-        # strongest feature of g(r).  Taking the first bump above a fixed
-        # threshold (old behaviour) latched onto placement noise on the rising
-        # edge of unrelaxed random structures and returned a cutoff *below*
-        # the bond length (CN ~ 0).
-        g_max = np.max(g_smooth) if len(g_smooth) > 0 else 0
-        peak_threshold = max(1.5, 0.5 * g_max)   # a bonded shell has g >> 1
-
-        peak_idx = None
-        for i in range(1, len(g_smooth) - 1):
-            if (g_smooth[i] >= peak_threshold
-                    and g_smooth[i] >= g_smooth[i - 1]
-                    and g_smooth[i] > g_smooth[i + 1]):
-                peak_idx = i
-                break
-
-        # First minimum after the peak: a local minimum that is a genuine
-        # depletion (g <= half the peak height), so a small dip on the
-        # descending flank is skipped.
-        if peak_idx is not None:
-            g_peak = g_smooth[peak_idx]
-            for i in range(peak_idx + 1, len(g_smooth) - 1):
-                if (g_smooth[i] <= 0.5 * g_peak
-                        and g_smooth[i] <= g_smooth[i - 1]
-                        and g_smooth[i] <= g_smooth[i + 1]):
-                    cutoffs[key] = float(r_centres[i])
-                    cutoff_found = True
-                    break
-
-        if not cutoff_found:
+        r_min = _first_minimum(r_centres, g_r)
+        if r_min is not None:
+            cutoffs[key] = r_min
+        else:
             cutoffs[key] = fallback.get(key, 3.5)
             warnings.warn(
                 f"auto-rdf cutoff: no clear first minimum in g(r) for {key}; "

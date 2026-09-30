@@ -120,7 +120,7 @@ eq_low:
 amorphgen --random-gen --config SiO2_chgnet_mq.yaml --work-dir SiO2_random
 
 # Run hybrid MQ (stages 1,4,5,6,7)
-amorphgen SiO2_random/random_0000.xyz \
+amorphgen SiO2_random/random_initial/random_0000.xyz \
     --config SiO2_chgnet_mq.yaml \
     --stages 1 4 5 6 7 \
     --work-dir SiO2_mq
@@ -175,7 +175,7 @@ eq_low:
 
 ```bash
 amorphgen --random-gen --config Li2ZrCl6_mace_mq.yaml --work-dir LZC_random
-amorphgen LZC_random/random_0000.xyz \
+amorphgen LZC_random/random_initial/random_0000.xyz \
     --config Li2ZrCl6_mace_mq.yaml \
     --stages 1 4 5 6 7 \
     --work-dir LZC_mq

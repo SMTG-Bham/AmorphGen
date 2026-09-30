@@ -284,7 +284,8 @@ class TestDimerReport:
 
     def test_analyser_method(self):
         from amorphgen.analysis import StructureAnalyser
-        sa = StructureAnalyser([self._peroxide_structure()])
+        # radii cutoffs: six atoms give no g(r) minimum for auto-rdf to find
+        sa = StructureAnalyser([self._peroxide_structure()], cutoff="auto")
         assert sa.dimer_report()["total"] == 1
 
 
@@ -614,6 +615,47 @@ class TestAutoCutoffRdf:
         key = "Mg-O" if "Mg-O" in cut else "O-Mg"
         assert cut[key] == pytest.approx(auto_cutoff_minsep(st)[key])
         assert any("no clear first minimum" in str(x.message) for x in w)
+
+    @pytest.mark.parametrize("seed", [0, 1, 3, 4, 5])
+    def test_small_cell_keeps_the_whole_first_shell(self, seed):
+        # 64-atom diamond rattled by 0.1 A keeps every atom fourfold, but one
+        # frame's g(r) has flat steps, noise dips and lone stretched bonds on
+        # the falling side of the first peak. The old detector stopped there
+        # (cutoffs 2.53-2.69 A, 3-10 % of atoms threefold, 40 % for seed 3).
+        from amorphgen.analysis import StructureAnalyser
+        a = bulk("Si", "diamond", a=5.43, cubic=True).repeat(2)
+        a.positions += np.random.default_rng(seed).normal(scale=0.10,
+                                                          size=a.positions.shape)
+        sa = StructureAnalyser([a])
+        assert sa.coordination()["Si-Si"]["distribution"] == {4: 100.0}
+
+    def test_shipped_a_si_mean_cn_is_four(self):
+        # the reported case: auto-rdf cut the shipped a-Si at 2.53 A, on a flat
+        # step of g(r), and gave CN 3.75; its first shell ends at 2.67 A and
+        # the second starts at 3.02 A
+        from amorphgen.analysis import StructureAnalyser
+        path = (os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                + "/examples/validation/si/example_final.xyz")
+        if not os.path.isfile(path):
+            pytest.skip("examples/ is not in this source tree")   # an sdist
+        sa = StructureAnalyser(path)
+        assert 2.67 < sa.cutoff["Si-Si"] < 3.0
+        assert sa.coordination()["Si-Si"]["mean"] == pytest.approx(4.0)
+
+    def test_first_minimum_of_a_gap_is_its_middle(self):
+        from amorphgen.analysis.cutoff import _first_minimum
+        r = np.arange(300) * 0.02 + 0.01          # bin centres, dr = 0.02 A
+        g = np.zeros_like(r)
+        g[(r > 2.2) & (r < 2.5)] = 8.0            # first shell
+        g[r > 3.0] = 1.5                          # second shell onwards
+        assert _first_minimum(r, g) == pytest.approx(2.75)
+        # a gap that runs to rmax (a molecule in a box) is cut at its start,
+        # just past the shell
+        g[r > 3.0] = 0.0
+        assert 2.5 < _first_minimum(r, g) < 2.75
+        # a first shell that is still falling at rmax has no minimum
+        g[(r > 2.5)] = np.linspace(4.0, 0.5, int(np.sum(r > 2.5)))
+        assert _first_minimum(r, g) is None
 
 
 def test_analyser_counts_each_stem_once(tmp_path):
