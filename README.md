@@ -389,6 +389,9 @@ Generate random amorphous starting structures:
 amorphgen --random-gen \
     --composition "In2O3*16" \
     --n-structures 20 \
+    --relax --model mace-mpa-0 \
+    --optimizer LBFGS --fmax 0.05 \
+    --device cpu --format cif \
     --work-dir random_structures/
 
 # Same with explicit atom counts and target density
