@@ -602,9 +602,9 @@ Four elements give ten element pairs, three different cation sizes and an
 oxygen that is shared between them. One command covers it:
 
 ```bash
-amorphgen --analyse --input-dir igzo_final/ \
+amorphgen --analyse --input-dir random_opt/ \
     --sq --sq-partials --pair-panels \
-    --total-cn O --total-cn "O:In+Ga" \
+    --total-cn O --total-cn "O:In+Zn+Ga" \
     --save-report report.txt --save-plot plots/
 ```
 
