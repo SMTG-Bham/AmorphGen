@@ -389,22 +389,34 @@ Generate random amorphous starting structures:
 amorphgen --random-gen \
     --composition "In2O3*16" \
     --n-structures 20 \
-    --relax --model mace-mpa-0 \
-    --optimizer LBFGS --fmax 0.05 \
-    --device cpu --format cif \
-    --work-dir random_structures/
+    --work-dir In2O3_structures/
 
-# Same with explicit atom counts and target density
+# Same with explicit atom counts and target density of 5.5 g/cm3
 amorphgen --random-gen \
     --composition In=32,O=48 \
     --target-density 5.5 \
-    --n-structures 20
+    --n-structures 20 \
+    --work-dir In2O3_structures/
 
-# Generate with relaxation
+# Generate 10 random TiO2 and relax with MACE-MPA-0 (LBFGS; FIRE is the robust alternative) to 0.05 eV/Å on CPU; write cif files to random_structures/
 amorphgen --random-gen \
     --composition "TiO2*16" \
     --n-structures 10 \
-    --relax --model mace-mpa-0
+    --relax --model mace-mpa-0 \
+    --optimizer LBFGS --fmax 0.05 \
+    --device cpu --format cif \
+    --work-dir TiO2_structures/
+
+# Generate 10 random TiO2 at 3.5 g/cm³ and relax them with MACE-MPA-0 with --cell-filter none keeps the cubic cell fixed.
+amorphgen --random-gen \
+    --composition "TiO2*16" \
+    --target-density 3.5 \
+    --n-structures 10 \
+    --relax --model mace-mpa-0 \
+    --cell-filter none \
+    --optimizer LBFGS --fmax 0.05 \
+    --device cpu --format cif \
+    --work-dir TiO2_structures/
 
 # Resume after interruption (skips completed structures)
 amorphgen --random-gen \
