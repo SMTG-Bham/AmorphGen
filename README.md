@@ -561,6 +561,14 @@ amorphgen --analyse --input-dir optimised_structures/ \
 # Compare with literature ranges (a-Ga2O3, a-SiO2, a-GeO2, a-HfO2 ship in examples/)
 amorphgen --analyse --input-dir optimised_structures/ \
     --reference examples/reference_a_GeO2.yaml
+
+# Plot X-ray S(q) by Fourier transform of g(r) 
+amorphgen --analyse --input-dir optimised_structures/ \
+    --sq --sq-weighting xray --sq-method ft --save-plot plots/
+
+# Plot X-ray total correlation function T(r) 
+amorphgen --analyse --input-dir optimised_structures/ \
+    --tr --sq-weighting xray --save-plot plots/
 ```
 
 Notes on the options:
@@ -570,8 +578,7 @@ Notes on the options:
   transform of g(r). Weighting is `xray` (q-dependent Waasmaier–Kirfel form
   factors), `neutron` (Sears scattering lengths) or `unweighted`; `--sq-method ft`
   gives the g(r) transform for comparison. `--sq-partials` adds the Faber-Ziman
-  partials S_ab(q) of every element pair to the CSV and a second plot. A box of
-  about 20 Å (roughly 500 atoms) is needed to see the FSDP.
+  partials S_ab(q) of every element pair to the CSV and a second plot. 
 - `--pair-panels` draws each element pair in its own panel, for g(r) and for
   the S(q) partials, which is easier to read than one axis for a four-element
   system like IGZO.
