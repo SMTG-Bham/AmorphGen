@@ -345,6 +345,64 @@ analysis:
   connectivity: true      # corner/edge/face sharing of cation polyhedra
 ```
 
+### Optional material descriptors
+
+Add these keys inside `analysis:` to select descriptors and their settings.
+All four default to disabled. Geometry-only void and oxygen calculations
+do not load a model; `elastic` and `vdos` explicitly enable calculator work.
+
+```yaml
+# descriptors.yaml
+model: mace-mpa-0       # used only for elastic/vdos in analysis mode
+device: cpu
+default_dtype: float64
+
+opt:                   # used by elastic_relax; cells stay fixed
+  fmax: 0.01           # eV/A
+  max_steps: 200
+
+analysis:
+  cutoff: {Si-O: 2.0, Al-O: 2.3}  # illustrative; inspect your RDF first
+  save_plot: descriptors/
+  save_report: descriptors.txt
+  save_pdf: true
+
+  voids: true
+  void_samples: 10000    # independent uniform points per cell
+  void_probe_radius: 0.0 # A
+  void_bins: 50
+  void_seed: 42          # separate from the top-level simulation seed
+  # void_radii: {Si: 1.11, O: 0.66}  # optional A; other elements keep ASE covalent radii
+
+  oxygen_speciation: true
+  network_formers: [Si, Al]  # choose for your chemistry; exclude Na/Ca modifiers
+
+  elastic: false         # set true to evaluate calculator stresses
+  elastic_strain: 0.005
+  elastic_relax: false   # true = fixed-cell atomic relaxation at every strain
+
+  vdos: false            # set true for 6N force evaluations per structure
+  vdos_displacement: 0.01 # A
+  vdos_sigma: 0.1        # Gaussian standard deviation in THz
+  vdos_npoints: 400
+```
+
+```bash
+amorphgen --analyse --input-dir aluminosilicate/ --config descriptors.yaml
+# Enable the costly descriptors and override one setting for this run:
+amorphgen --analyse --input-dir relaxed_aluminosilicate/ \
+    --config descriptors.yaml --elastic --vdos --vdos-npoints 800
+```
+
+With `save_plot`, each enabled descriptor writes JSON with full per-structure
+results, a summary CSV and a PNG; `save_pdf` adds a PDF. Void radii describe
+local point clearance, not connected pore sizes. Oxygen formers default to
+the Al/B/Ge/P/Si present if omitted; mixed element sets must be analysed
+separately. Optimise reference structures before interpreting elastic or
+harmonic results: neither descriptor optimises the starting cell, and VDOS
+does not optimise atoms. See {doc}`analysis` for normalization, uncertainty,
+finite-pressure and Gamma-point limitations.
+
 ## Reproducibility: the `seed` key
 
 A top-level `seed:` (or `--seed INT` on the command line) makes a run

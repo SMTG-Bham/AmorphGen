@@ -33,7 +33,8 @@ from .plotting import plot_analysis
 class StructureAnalyser:
     """
     Analyse amorphous structures: density, coordination, distances,
-    angles, RDF, S(q), rings, Voronoi, energy ranking.
+    angles, RDF, S(q), rings, Voronoi, voids, oxygen speciation,
+    elastic moduli, vibrational DOS and energy ranking.
 
     Parameters
     ----------
@@ -498,6 +499,58 @@ class StructureAnalyser:
              "mean_faces": float, "total_atoms": int}
         """
         return compute_voronoi(self.atoms_list, element)
+
+    def void_distribution(self, n_samples=10000, probe_radius=0.0,
+                          radii=None, nbins=50, seed=0):
+        """Sample periodic free-space clearance and accessible volume.
+
+        Distances/radii are in Angstrom. This is a volume-weighted point
+        clearance distribution; it does not identify connected pores.
+        See :func:`amorphgen.analysis.voids.compute_void_distribution`.
+        """
+        from .voids import compute_void_distribution
+        return compute_void_distribution(
+            self.atoms_list, n_samples=n_samples, probe_radius=probe_radius,
+            radii=radii, nbins=nbins, seed=seed)
+
+    def oxygen_speciation(self, network_formers=None):
+        """Count free/non-bridging/bridging and multiply shared oxygen.
+
+        Uses this analyser's pair cutoffs. Defaults to Al, B, Ge, P and Si
+        present; explicitly select the network formers for other oxides.
+        See :func:`amorphgen.analysis.oxygen.compute_oxygen_speciation`.
+        """
+        from .oxygen import compute_oxygen_speciation
+        return compute_oxygen_speciation(
+            self.atoms_list, network_formers=network_formers, cutoff=self.cutoff)
+
+    def elastic_moduli(self, calculator=None, strain=0.005, relax=False,
+                       fmax=0.01, steps=200):
+        """Finite-strain stress response and Voigt/Reuss/Hill moduli (GPa).
+
+        Requires an active ASE stress calculator, supplied explicitly or
+        attached to each structure. ``relax=True`` relaxes internal atomic
+        positions at fixed cell. See
+        :func:`amorphgen.analysis.elasticity.compute_elastic_moduli`.
+        """
+        from .elasticity import compute_elastic_moduli
+        return compute_elastic_moduli(
+            self.atoms_list, calculator=calculator, strain=strain,
+            relax=relax, fmax=fmax, steps=steps)
+
+    def vibrational_dos(self, calculator=None, displacement=0.01,
+                        npoints=400, sigma=0.1):
+        """Harmonic DOS from finite-difference forces, in THz.
+
+        Uses Gamma-point normal modes of each supplied cell, with negative
+        frequencies representing imaginary modes. Requires 6N force calls
+        per structure. See
+        :func:`amorphgen.analysis.vibrations.compute_vibrational_dos`.
+        """
+        from .vibrations import compute_vibrational_dos
+        return compute_vibrational_dos(
+            self.atoms_list, calculator=calculator, displacement=displacement,
+            npoints=npoints, sigma=sigma)
 
     def energy_ranking(self):
         """Rank structures by potential energy per atom.

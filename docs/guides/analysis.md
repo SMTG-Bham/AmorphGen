@@ -543,6 +543,137 @@ weights and a q range appropriate to the reference data.
 - An `xrd_pattern()` convenience method with explicit intensity conventions
   and instrument settings.
 
+## Void, oxygen, elastic and vibrational descriptors
+
+These four descriptors are opt-in. Void sampling and oxygen speciation use
+geometry alone and do not load an ML model. Elastic and vibrational analysis
+load the selected calculator (`--model`, `--model-path`, `--device`) and
+evaluate new configurations; saved single-point stresses or forces are
+insufficient.
+
+### Void distribution
+
+```bash
+amorphgen --analyse --input-dir silica/ --voids \
+    --void-samples 20000 --void-probe-radius 0.5 --void-seed 42 \
+    --save-plot descriptors/
+```
+
+Uniform random points sample **point clearance**: the distance to the nearest
+atomic-sphere surface, in Å. A point is accessible when its clearance is at
+least the probe radius. This measures local free space; it does not find
+connected pores, pore throats or maximal cavities. The reported radius is
+clearance, not diameter, and sampled maxima underestimate the true maximum.
+
+Atomic spheres use ASE covalent radii by default. Choose a consistent radius
+convention for comparisons; override individual elements with YAML
+`analysis.void_radii` or the Python `radii` argument. The histogram density
+integrates to one over accessible points, while `bin_volume_fraction` sums
+to the accessible fraction. Ensemble fractions are weighted by cell volume;
+`accessible_volume` is the mean accessible volume per structure. Standard
+errors describe Monte Carlo sampling only. Per-structure 95% Wilson intervals
+also cover cases where no accessible points were found; neither measure
+captures variation between structures. All cells must be fully periodic in 3D.
+
+### Bridging and non-bridging oxygen
+
+```bash
+amorphgen --analyse --input-dir aluminosilicate/ --oxygen-speciation \
+    --network-formers Si,Al --cutoff "Si-O=2.0,Al-O=2.3" \
+    --save-plot descriptors/
+```
+
+Each oxygen is classified by its number of neighbouring selected network
+formers: zero = `free`, one = `non_bridging`, two = `bridging`, three =
+`tricluster`, and four or more = `higher_coordinated`. Fractions pool oxygen
+counts across structures. The selection defaults to the Al, B, Ge, P and Si
+present. Select the appropriate formers explicitly for other oxides and
+exclude modifiers such as Na or Ca. All ensemble structures must have the
+same element set; analyse different chemistries separately.
+
+This uses the analyser's pair cutoffs and periodic neighbours. Check those
+cutoffs before interpreting the counts. `free` means no selected former
+neighbour; the descriptor does not infer charge, bond order or hydroxyl
+speciation. The former/modifier distinction follows the connectivity
+convention described by [Stebbins and Xu](https://www.nature.com/articles/36312).
+
+### Elastic moduli from calculator stresses
+
+```bash
+amorphgen --analyse --input-dir relaxed_silica/ --elastic \
+    --model mace-mpa-0 --device cpu --elastic-strain 0.005 \
+    --save-plot descriptors/ --save-report descriptors.txt
+```
+
+Central differences require 13 stress evaluations per structure. The default
+keeps fractional atomic coordinates fixed under strain (clamped ions).
+`--elastic-relax` instead optimises internal positions at each fixed cell,
+including the reference; `--fmax` and `--opt-steps` control convergence.
+Optimise the starting cell separately for equilibrium moduli. Input
+structures remain unchanged and failed internal relaxation raises an error.
+
+The symmetrized stiffness tensor uses engineering strain in ASE Voigt order
+`xx, yy, zz, yz, xz, xy`; stiffness and moduli are in GPa. The report includes
+Voigt, Reuss and Hill bulk, shear and Young's moduli, dimensionless Poisson
+ratios, residual stress and stability diagnostics. Reuss/Hill estimates are
+unavailable for unstable or ill-conditioned tensors. Residual stress above
+0.1 GPa is flagged: these are static tangent stress-strain coefficients with
+no finite-pressure correction. Check convergence with strain amplitude and
+calculator precision. The averaging equations follow the
+[NIST atomman reference](https://www.ctcms.nist.gov/potentials/atomman/tutorial/3.1._ElasticConstants_class.html).
+
+### Harmonic vibrational density of states
+
+```bash
+amorphgen --analyse --input-dir relaxed_silica/ --vdos \
+    --model mace-mpa-0 --device cpu --vdos-displacement 0.01 \
+    --vdos-sigma 0.1 --vdos-npoints 800 --save-plot descriptors/
+```
+
+The mass-weighted force-constant matrix is built using central finite
+differences, as in [ASE's harmonic vibration formulation](https://docs.ase-lib.org/_modules/ase/vibrations/data.html).
+This requires **6N force evaluations** and dense diagonalisation of a
+`3N × 3N` matrix per structure. Begin with small cells to assess cost.
+The spectrum contains all 3N modes of each supplied cell; for periodic
+structures these are Gamma-point modes, without Brillouin-zone sampling.
+
+Optimise the reference positions beforehand. No automatic optimisation or
+acoustic sum rule is applied, and atomic constraints are rejected. Negative
+plotted frequencies denote imaginary modes. The Gaussian width is in THz;
+the displacement is in Å. The total DOS integrates to one on its returned
+grid, with equal weight per mode across structures. Element projections use
+squared mass-weighted eigenvector components and sum to the total DOS;
+they are not scattering-weighted experimental intensities. Check displacement,
+broadening and grid convergence before interpreting fine features.
+
+With `--save-plot`, each requested descriptor writes full JSON (including
+per-structure results), a CSV and a PNG; add `--save-pdf` for PDF figures.
+`--save-report` appends the compact text summaries. Python methods return
+results without automatically writing files:
+
+```python
+from amorphgen.analysis import StructureAnalyser
+from amorphgen.analysis.descriptors import save_descriptor
+
+sa = StructureAnalyser("silica/", cutoff={"Si-O": 2.0})
+voids = sa.void_distribution(n_samples=20000, probe_radius=0.5, seed=42)
+oxygen = sa.oxygen_speciation(network_formers=["Si"])
+save_descriptor("voids", voids, "descriptors/", save_pdf=True)
+
+# Optional model-backed descriptors; install the matching backend extra.
+from amorphgen.utils import get_calculator
+
+calc = get_calculator(model="mace-mpa-0", device="cpu")
+elastic = sa.elastic_moduli(calculator=calc, strain=0.005, relax=False)
+vdos = sa.vibrational_dos(calculator=calc, displacement=0.01,
+                         sigma=0.1, npoints=800)
+print(elastic["ensemble"]["moduli"]["hill"])
+print(vdos["imaginary_modes"])
+```
+
+Both calculator-backed methods also accept live calculators attached to
+the input ASE objects when `calculator` is omitted.
+
 ## Full CLI flag reference
 
 The brackets below denote optional arguments; omit the brackets when running
@@ -594,6 +725,14 @@ amorphgen --analyse \
 | `--rings [PAIR]` | Ring statistics (shortest ring per network edge). Nodes default to the least electronegative element; `--rings Ge-O` sets nodes–bridge explicitly. Added to the report; `analysis_rings.{csv,png}` under ``--save-plot``. |
 | `--voronoi [ELEMENT]` | Voronoi indices <n3 n4 n5 n6> for all atoms or one element. Added to the report; `analysis_voronoi.csv` under ``--save-plot``. |
 | `--connectivity` | Corner/edge/face sharing between cation-centred polyhedra (two cations sharing one anion = corner, two = edge, three or more = face) and the percentage of cations in at least one edge- or face-sharing pair, which is near zero in a corner-sharing network glass and tens of percent in a random packing. Added to the report; `analysis_connectivity.csv` under ``--save-plot``. |
+| `--voids` | Periodic point-clearance distribution and accessible volume. |
+| `--void-samples INT`, `--void-bins INT` | Monte Carlo points per cell (default 10000) and histogram bins (50). |
+| `--void-probe-radius FLOAT`, `--void-seed INT` | Probe radius in Å (default 0) and sampling seed (0). |
+| `--oxygen-speciation`, `--network-formers Si,Al` | Oxygen connectivity classes; formers default to the Al/B/Ge/P/Si present. |
+| `--elastic`, `--elastic-strain FLOAT` | Stress-derived tensor and isotropic moduli; strain amplitude defaults to 0.005. |
+| `--elastic-relax` | Relax internal positions at each fixed cell, using `--fmax` and `--opt-steps`. |
+| `--vdos`, `--vdos-displacement FLOAT` | Harmonic cell modes; displacement defaults to 0.01 Å. |
+| `--vdos-sigma FLOAT`, `--vdos-npoints INT` | Gaussian width in THz (default 0.1) and frequency-grid points (400). |
 | `--dpi N` | PNG DPI (default 300). |
 | `--show-title` | Add titles to each plot (default off, captions usually clearer in figures). |
 
@@ -621,6 +760,10 @@ listed flags.
 | `analysis_rings.png` / `.csv` | With ``--rings``: ring-size distribution (size, count, percent of edges). |
 | `analysis_voronoi.csv` | With ``--voronoi``: the ten most common Voronoi indices with counts and percentages. |
 | `analysis_connectivity.csv` | With ``--connectivity``: corner/edge/face link percentages and the edge-sharing cation fraction, overall and per structure. |
+| `analysis_voids.{json,csv,png,pdf}` | With `--voids`: clearance density and volume fractions; JSON includes sampling uncertainties and per-structure statistics. PDF requires `--save-pdf`. |
+| `analysis_oxygen_speciation.{json,csv,png,pdf}` | Oxygen counts/fractions by class; JSON also contains each oxygen's former coordination. |
+| `analysis_elastic.{json,csv,png,pdf}`, `analysis_elastic_tensor.csv` | Modulus means/std/counts and mean stiffness heatmap; JSON includes raw/symmetrized tensors and diagnostics per structure. |
+| `analysis_vdos.{json,csv,png,pdf}` | Total and element-projected DOS; JSON includes individual mode frequencies and per-structure diagnostics. |
 
 ## Python API
 

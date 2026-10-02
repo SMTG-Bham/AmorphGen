@@ -542,7 +542,9 @@ Coordination-aware placement biases the initial structure toward the requested c
 density, bond lengths, coordination numbers, bond angles and partial RDFs. The
 same run can add the structure factor, ring statistics, polyhedral connectivity,
 Voronoi indices, a close-contact check and a validation against literature
-ranges. Every quantity that is plotted is also written as a CSV.
+ranges. Optional descriptors add void distributions, oxygen speciation,
+stress-derived elastic moduli and harmonic vibrational DOS. Every quantity
+that is plotted is also written as a CSV.
 
 ```bash
 # Summary to the terminal
@@ -569,6 +571,14 @@ amorphgen --analyse --input-dir optimised_structures/ \
 # Plot X-ray total correlation function T(r) 
 amorphgen --analyse --input-dir optimised_structures/ \
     --tr --sq-weighting xray --save-plot plots/
+
+# Free-space sampling and oxygen connectivity, without a calculator
+amorphgen --analyse --input-dir silica/ --voids --oxygen-speciation \
+    --network-formers Si --save-plot descriptors/
+
+# Elastic response and harmonic cell modes, using the selected MLIP
+amorphgen --analyse --input-dir relaxed_silica/ --elastic --vdos \
+    --model mace-mpa-0 --save-plot descriptors/ --save-report descriptors.txt
 ```
 
 Notes on the options:
@@ -588,6 +598,12 @@ Notes on the options:
   polyhedra and the fraction of cations in edge-sharing pairs, which separates a
   corner-sharing network glass from a random packing with the same coordination.
 - `--check-dimers` flags unphysical close contacts (O–O peroxide, N–N) per structure.
+- `--voids` samples periodic point clearance using configurable atomic radii;
+  `--oxygen-speciation` counts each oxygen's selected network-former neighbours.
+- `--elastic` computes the stiffness tensor and Voigt/Reuss/Hill moduli from
+  stresses; `--elastic-relax` adds fixed-cell atomic relaxation. `--vdos` uses
+  6N force evaluations per cell for harmonic Gamma-point modes in THz.
+  These four descriptors also save full per-structure JSON under `--save-plot`.
 - `--smearing SIGMA` sets the Gaussian smearing of g(r) (default 0.05 Å; 0 for the
   raw histogram). `--cutoff` is `auto-rdf` (first minimum of each partial g(r),
   so every pair gets its own value), `auto` (radii table), a number in Å, or

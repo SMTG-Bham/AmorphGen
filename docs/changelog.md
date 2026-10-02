@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- Opt-in void distributions, bridging/non-bridging oxygen speciation,
+  stress-derived elastic tensors and Voigt/Reuss/Hill moduli, and harmonic
+  vibrational DOS through Python, CLI and YAML. Each supports per-structure
+  JSON, CSV and figure exports. Elasticity and VDOS use the selected live
+  ASE/MLIP calculator; geometric descriptors remain calculator-free.
+
 ### Fixed
 
 - Stage 3 preserves the input cell and bond lengths before heating. Cubic

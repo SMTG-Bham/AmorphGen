@@ -458,6 +458,35 @@ def _add_arguments(p):
                            "of cations in edge-sharing pairs. Printed, appended "
                            "to --save-report, analysis_connectivity.csv under "
                            "--save-plot.")
+    g_an.add_argument("--voids", action="store_true",
+                      help="Sample periodic free-space clearance and accessible volume.")
+    g_an.add_argument("--void-samples", type=int, default=None,
+                      help="Random points per cell for --voids (default 10000).")
+    g_an.add_argument("--void-probe-radius", type=float, default=None,
+                      help="Probe radius in A for --voids (default 0).")
+    g_an.add_argument("--void-bins", type=int, default=None,
+                      help="Clearance histogram bins (default 50).")
+    g_an.add_argument("--void-seed", type=int, default=None,
+                      help="Reproducible void sampling seed (default 0).")
+    g_an.add_argument("--oxygen-speciation", action="store_true",
+                      help="Oxygen speciation by network-former coordination.")
+    g_an.add_argument("--network-formers", default=None, metavar="Si,Al",
+                      help="Comma-separated network formers for oxygen speciation; "
+                           "defaults to the Al/B/Ge/P/Si present.")
+    g_an.add_argument("--elastic", action="store_true",
+                      help="Elastic tensor and Voigt/Reuss/Hill moduli from calculator stresses.")
+    g_an.add_argument("--elastic-strain", type=float, default=None,
+                      help="Central finite strain amplitude (default 0.005).")
+    g_an.add_argument("--elastic-relax", action="store_true",
+                      help="Relax internal positions at each fixed cell for --elastic.")
+    g_an.add_argument("--vdos", action="store_true",
+                      help="Harmonic vibrational DOS from calculator forces (6N evaluations/cell).")
+    g_an.add_argument("--vdos-displacement", type=float, default=None,
+                      help="Finite displacement in A (default 0.01).")
+    g_an.add_argument("--vdos-sigma", type=float, default=None,
+                      help="Gaussian DOS width in THz (default 0.1).")
+    g_an.add_argument("--vdos-npoints", type=int, default=None,
+                      help="Frequency grid points (default 400).")
     g_an.add_argument("--total-cn", action="append", default=None, metavar="SPEC",
                       help="Total first-shell coordination of one element over "
                            "several partner types, repeatable. 'O' counts every "
@@ -1148,17 +1177,21 @@ def _collect_ensemble_final(quench_dir: str, final_dir: str, output_format: str,
     print(f"  Collected {n_collected} final structures -> {final_dir}/")
 
 
-def _requires_calculator(args) -> bool:
+def _requires_calculator(args, analysis_config=None) -> bool:
     """Will this invocation construct a calculator?
 
     Gates the fail-fast backend check. Modes that only read, transform, or
-    analyse structures never need a backend and must keep working on a
-    torch-free install.
+    analyse geometry never need a backend and must keep working on a
+    torch-free install. Elastic and harmonic vibrational descriptors do.
     """
     # Calculator-free modes (checked first — they may combine with input_file)
     if (args.list_models or args.rank_from_log or args.convert
-            or args.extract_snapshots or args.analyse):
+            or args.extract_snapshots):
         return False
+    if args.analyse:
+        cfg = analysis_config or {}
+        return bool(getattr(args, "elastic", False) or getattr(args, "vdos", False)
+                    or cfg.get("elastic", False) or cfg.get("vdos", False))
     # Random generation only builds a calculator when relaxing
     if args.random_gen:
         return bool(args.relax)
@@ -1253,7 +1286,7 @@ def main():
     # The same gate refuses a precision the model can't run (CHGNet + float64),
     # which --mq-ensemble would otherwise only hit in phase 3, after stages
     # 1-4 of MD.
-    if _requires_calculator(args):
+    if _requires_calculator(args, override.get("analysis", {})):
         from .utils.calculators import (require_backend, require_dtype,
                                         BackendNotInstalledError)
         model = override.get("model", args.model) or "mace-mpa-0"
@@ -1621,6 +1654,16 @@ def main():
                     for idx, count, pct in vor["top_10"]:
                         fh.write(f"\"{idx}\",{count},{pct:.4f}\n")
                 print(f"  Saved: {os.path.join(plot_dir, 'analysis_voronoi.csv')}")
+
+        # Optional structural, mechanical and vibrational descriptors.
+        from .analysis.descriptors import run_descriptor_analysis
+        try:
+            run_descriptor_analysis(sa, args, an_cfg, override,
+                                    plot_dir=plot_dir, report_path=report_path,
+                                    plot_kwargs=plot_kwargs)
+        except (ValueError, RuntimeError, NotImplementedError) as exc:
+            print(f"Error: descriptor analysis: {exc}")
+            sys.exit(1)
 
         # Validation against literature reference YAML
         ref_path = args.reference or an_cfg.get("reference")
