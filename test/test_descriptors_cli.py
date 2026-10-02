@@ -76,7 +76,7 @@ def test_elastic_and_vdos_end_to_end_with_live_ase_calculator(tmp_path, monkeypa
     cfg.write_text(yaml.safe_dump({
         "model": "lj", "device": "cpu",
         "classical_params": {"params": {"Ar-Ar": {"epsilon": 0.0104, "sigma": 3.4}},
-                             "rc": 8.0},
+                             "cutoff": 8.0},
         "analysis": {"elastic": True, "vdos": True, "vdos_npoints": 100,
                      "vdos_sigma": 0.2, "save_plot": str(out), "save_report": str(report)},
     }))
@@ -92,6 +92,7 @@ def test_elastic_and_vdos_end_to_end_with_live_ase_calculator(tmp_path, monkeypa
     assert requests[0]["model"] == "lj"
     assert requests[0]["device"] == "cpu"
     assert requests[0]["classical_params"]["params"]["Ar-Ar"]["sigma"] == 3.4
+    assert requests[0]["classical_params"]["cutoff"] == 8.0
     assert len(vdos["frequencies_thz"]) == 150
     assert trapezoid(vdos["dos"], vdos["frequencies_thz"]) == pytest.approx(1)
     for descriptor in ("elastic", "vdos"):

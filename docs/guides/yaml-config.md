@@ -244,7 +244,14 @@ pipe = MeltQuenchPipeline("POSCAR", cfg_override=cfg)
 pipe.run()
 ```
 
-`load_yaml_config()` checks known keys and types, prints warnings for unknown keys, and raises `ValueError` for detected validation errors. Unknown keys are retained, so a warning does not establish that a key is used by the selected mode.
+`load_yaml_config()` rejects unknown keys and invalid types with `ValueError`
+before running a workflow. Validation covers every block, including
+`final_opt`, `random_gen`, `analysis`, `classical_params`, and `convert`, and
+reports the full path to an invalid setting (for example,
+`classical_params.params.Si-O.rhoo`). Element and pair maps accept chemical
+symbols such as `Si` and pairs such as `Si-O`; their values are checked too.
+Only options read from YAML are accepted, so CLI-only or Python-only arguments
+cannot be added to a config file.
 
 ## Stage-1 vs stage-7 optimisation: the `final_opt` fallback
 
@@ -268,8 +275,8 @@ final_opt:
 
 Stage 7 inherits `opt:` and applies the individual keys in `final_opt:` on top.
 Partial overrides, including a CLI flag such as `--format`, preserve all other
-optimisation settings from `opt:`. In 1.0.0rc4, the YAML validator warns that
-`final_opt` is an unknown top-level key; the pipeline still applies this block.
+optimisation settings from `opt:`. Both blocks accept the same optimisation
+settings and are validated identically.
 
 ## Selecting an NPT integrator
 

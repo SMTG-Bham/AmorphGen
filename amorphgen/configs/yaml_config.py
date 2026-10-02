@@ -23,6 +23,8 @@ from __future__ import annotations
 import re
 import yaml
 
+from ase.data import atomic_numbers
+
 
 # Valid top-level keys and their expected types.
 # keys AmorphGen sets internally; a user file must not smuggle one in, because
@@ -40,6 +42,7 @@ _VALID_TOP_KEYS = {
     "default_dtype": str,
     "traj_format": str,
     "opt": dict,
+    "final_opt": dict,
     "eq_premelt": dict,
     "melt": dict,
     "eq_high": dict,
@@ -48,6 +51,7 @@ _VALID_TOP_KEYS = {
     "random_gen": dict,
     "analysis": dict,
     "classical_params": dict,
+    "convert": dict,
 }
 
 # Stage sub-keys and expected types.
@@ -56,7 +60,14 @@ _STAGE_SCHEMA = {
         "fmax": (int, float),
         "max_steps": int,
         "optimizer": str,
-        "cell_filter": str,
+        "cell_filter": (str, type(None)),
+        "logfile": str,
+        "traj_file": str,
+        "output_cif": str,
+        "output_xyz": str,
+        "output_format": str,
+        "pressure_tol_gpa": (int, float),
+        "batch_size": (int, str, type(None)),
     },
     "eq_premelt": {
         "ensemble": str, "npt_method": str,
@@ -102,87 +113,239 @@ _STAGE_SCHEMA = {
     },
 }
 
+_STAGE_SCHEMA["final_opt"] = _STAGE_SCHEMA["opt"]
+for _stage in ("eq_premelt", "melt", "eq_high", "quench", "eq_low"):
+    _STAGE_SCHEMA[_stage].update({
+        "log_file": str, "traj_file": str, "output_xyz": str,
+    })
+for _stage in ("eq_premelt", "eq_high", "eq_low"):
+    _STAGE_SCHEMA[_stage]["make_cubic"] = bool
+
+_NUMBER = (int, float)
+_OPTIONAL_NUMBER = (int, float, type(None))
+_OPTIONAL_DICT = (dict, type(None))
+_OPTIONAL_STRING = (str, type(None))
+_PAIR_PARAMS_SCHEMA = dict.fromkeys(("epsilon", "sigma", "A", "rho", "C"), _NUMBER)
+
+# Only settings actually read from YAML belong here; CLI/API-only arguments
+# must not silently pass validation and then be ignored.
+_BLOCK_SCHEMA = {
+    **_STAGE_SCHEMA,
+    "random_gen": {
+        "composition": dict,
+        "n_structures": int,
+        "target_density": _OPTIONAL_NUMBER,
+        "density_scale": _NUMBER,
+        "output_format": str,
+        "minsep": _OPTIONAL_DICT,
+        "target_cn": _OPTIONAL_DICT,
+        "dmax": _OPTIONAL_DICT,
+        "cn_tolerance": (int, type(None)),
+        "dmax_factor": _NUMBER,
+        "cell_filter": _OPTIONAL_STRING,
+        "relax": bool,
+        "seed": (int, type(None)),
+    },
+    "analysis": {
+        "cutoff": (str, int, float, dict),
+        "per_structure": bool,
+        "check_dimers": bool,
+        "total_cn": (str, list),
+        "save_report": _OPTIONAL_STRING,
+        "save_plot": _OPTIONAL_STRING,
+        "rdf_pairs": (list, type(None)),
+        "angle_triplets": (list, type(None)),
+        "angle_style": str,
+        "rmax": _OPTIONAL_NUMBER,
+        "smearing": _NUMBER,
+        "total_rdf": bool,
+        "save_pdf": bool,
+        "dpi": int,
+        "show_title": bool,
+        "pair_panels": bool,
+        "sq": bool,
+        "sq_weighting": str,
+        "sq_method": str,
+        "sq_smooth": _NUMBER,
+        "sq_partials": bool,
+        "tr": bool,
+        "tr_qrange": list,
+        "tr_window": str,
+        "tr_scan": bool,
+        "rings": (bool, str, list, type(None)),
+        "ring_bond_pair": (bool, str, list, type(None)),
+        "connectivity": bool,
+        "voronoi": (bool, str, type(None)),
+        "voronoi_element": (bool, str, type(None)),
+        "reference": _OPTIONAL_STRING,
+        "energy_ranking": bool,
+        "voids": bool,
+        "void_samples": int,
+        "void_probe_radius": _NUMBER,
+        "void_bins": int,
+        "void_seed": (int, type(None)),
+        "void_radii": _OPTIONAL_DICT,
+        "oxygen_speciation": bool,
+        "network_formers": (str, list, type(None)),
+        "elastic": bool,
+        "elastic_strain": _NUMBER,
+        "elastic_relax": bool,
+        "vdos": bool,
+        "vdos_displacement": _NUMBER,
+        "vdos_sigma": _NUMBER,
+        "vdos_npoints": int,
+    },
+    "classical_params": {
+        "params": dict,
+        "charges": _OPTIONAL_DICT,
+        "cutoff": _NUMBER,
+        "alpha": _OPTIONAL_NUMBER,
+        "coulomb": bool,
+        "coulomb_method": _OPTIONAL_STRING,
+    },
+    "convert": {
+        "input": str,
+        "format": str,
+        "output_dir": _OPTIONAL_STRING,
+    },
+}
+
 _VALID_ENSEMBLES = {"NVT", "NPT", "nvt", "npt"}
 _VALID_NPT_METHODS = {"berendsen", "mtk", "parrinello-rahman"}
 _VALID_DEVICES = {"cuda", "cpu", "mps", "auto"}
 
 
-def _validate_config(cfg: dict, path: str) -> tuple[list[str], list[str]]:
-    """Validate config dict. Returns (warnings, errors)."""
-    warnings = []
-    errors = []
+def _check_type(value, expected, key: str, errors: list[str]) -> bool:
+    """Check YAML types without treating booleans as integers."""
+    types = expected if isinstance(expected, tuple) else (expected,)
+    if isinstance(value, types) and (not isinstance(value, bool) or bool in types):
+        return True
+    names = " or ".join(t.__name__ for t in types)
+    errors.append(f"{key} has type {type(value).__name__}, expected {names}")
+    return False
 
-    for key, val in cfg.items():
-        if key in _INTERNAL_KEYS:
+
+def _validate_keys(values: dict, schema: dict, prefix: str,
+                   errors: list[str], path: str) -> None:
+    for key, value in values.items():
+        full_key = f"{prefix}.{key}" if prefix else str(key)
+        if not prefix and key in _INTERNAL_KEYS:
             errors.append(
                 f"'{key}' in {path} is set internally by AmorphGen and cannot be "
                 f"given in a config file; use 'run_index' to label a run by hand")
-            continue
-        if key not in _VALID_TOP_KEYS:
-            warnings.append(f"Unknown top-level key '{key}' in {path}")
-            continue
+        elif key not in schema:
+            errors.append(f"Unknown key '{full_key}' in {path}")
+        else:
+            _check_type(value, schema[key], full_key, errors)
 
-        expected = _VALID_TOP_KEYS[key]
-        if not isinstance(val, expected if isinstance(expected, tuple) else (expected,)):
+
+def _validate_data_map(value, kind: str, expected, prefix: str,
+                       errors: list[str], path: str, *, cutoff=False) -> None:
+    """Validate maps whose keys name elements/pairs rather than config fields."""
+    if not isinstance(value, dict):
+        return  # The containing schema checks dict/null types.
+    for key, entry in value.items():
+        full_key = f"{prefix}.{key}"
+        if cutoff and key == "default":
+            _check_type(entry, (str, int, float), full_key, errors)
+            continue
+        parts = key.split("-") if isinstance(key, str) else []
+        size = 1 if kind == "element" else 2
+        if len(parts) != size or any(part not in atomic_numbers for part in parts):
             errors.append(
-                f"Key '{key}' has type {type(val).__name__}, "
-                f"expected {expected}"
-            )
+                f"Unknown key '{full_key}' in {path}; expected an element symbol"
+                if kind == "element" else
+                f"Unknown key '{full_key}' in {path}; expected an Element-Element pair")
+        if isinstance(expected, dict):
+            if _check_type(entry, dict, full_key, errors):
+                _validate_keys(entry, expected, full_key, errors, path)
+        else:
+            _check_type(entry, expected, full_key, errors)
 
-    # Validate device
-    if "device" in cfg and cfg["device"] not in _VALID_DEVICES:
+
+def _validate_nested_values(cfg: dict, errors: list[str], path: str) -> None:
+    # Element and pair names are open-ended data keys, but their values and
+    # any settings inside them still obey a closed schema.
+    maps = {
+        "random_gen": {
+            "composition": ("element", int),
+            "target_cn": ("element", int),
+            "minsep": ("pair", _NUMBER),
+            "dmax": ("pair", _NUMBER),
+        },
+        "analysis": {
+            "cutoff": ("pair", _NUMBER),
+            "void_radii": ("element", _NUMBER),
+        },
+        "classical_params": {
+            "charges": ("element", _NUMBER),
+            "params": ("pair", _PAIR_PARAMS_SCHEMA),
+        },
+    }
+    for block_name, fields in maps.items():
+        block = cfg.get(block_name)
+        if not isinstance(block, dict):
+            continue
+        for field, (kind, expected) in fields.items():
+            _validate_data_map(
+                block.get(field), kind, expected, f"{block_name}.{field}",
+                errors, path, cutoff=(block_name == "analysis" and field == "cutoff"))
+
+    analysis = cfg.get("analysis")
+    if not isinstance(analysis, dict):
+        return
+    for key in ("total_cn", "rdf_pairs", "angle_triplets", "tr_qrange",
+                "rings", "ring_bond_pair", "network_formers"):
+        value = analysis.get(key)
+        if not isinstance(value, list):
+            continue
+        if key in ("tr_qrange", "rings", "ring_bond_pair") and len(value) != 2:
+            errors.append(f"analysis.{key} must contain exactly two values")
+        for index, entry in enumerate(value):
+            _check_type(entry, _NUMBER if key == "tr_qrange" else str,
+                        f"analysis.{key}[{index}]", errors)
+
+
+def _validate_config(cfg: dict, path: str) -> tuple[list[str], list[str]]:
+    """Validate all YAML fields. Returns (warnings, errors) for compatibility."""
+    errors = []
+    _validate_keys(cfg, _VALID_TOP_KEYS, "", errors, path)
+    for block_name, schema in _BLOCK_SCHEMA.items():
+        block = cfg.get(block_name)
+        if isinstance(block, dict):
+            _validate_keys(block, schema, block_name, errors, path)
+    _validate_nested_values(cfg, errors, path)
+
+    # Only check enum membership for strings, so malformed containers produce
+    # validation errors rather than an unhashable-type exception.
+    device = cfg.get("device")
+    if isinstance(device, str) and device not in _VALID_DEVICES:
         errors.append(
-            f"Invalid device '{cfg['device']}'. "
-            f"Choose from: {', '.join(sorted(_VALID_DEVICES))}"
-        )
+            f"Invalid device '{device}'. "
+            f"Choose from: {', '.join(sorted(_VALID_DEVICES))}")
 
-    # Validate stage sub-keys
-    for stage_name, schema in _STAGE_SCHEMA.items():
-        if stage_name not in cfg:
-            continue
-        stage = cfg[stage_name]
+    for stage_name in _STAGE_SCHEMA:
+        stage = cfg.get(stage_name)
         if not isinstance(stage, dict):
-            errors.append(f"'{stage_name}' must be a dict, got {type(stage).__name__}")
             continue
-        for skey, sval in stage.items():
-            if skey not in schema:
-                warnings.append(f"Unknown key '{skey}' in {stage_name}")
-                continue
-            expected_type = schema[skey]
-            if not isinstance(sval, expected_type if isinstance(expected_type, tuple)
-                              else (expected_type,)):
-                errors.append(
-                    f"{stage_name}.{skey} has type {type(sval).__name__}, "
-                    f"expected {expected_type}"
-                )
-
-        # Validate ensemble values
-        if "ensemble" in stage and stage["ensemble"] not in _VALID_ENSEMBLES:
+        ensemble = stage.get("ensemble")
+        if isinstance(ensemble, str) and ensemble not in _VALID_ENSEMBLES:
             errors.append(
-                f"{stage_name}.ensemble = '{stage['ensemble']}' is invalid. "
-                f"Use 'NVT' or 'NPT'."
-            )
-
-        # Validate npt_method values (only meaningful for NPT, but
-        # tolerated as a no-op in NVT stages so users can leave it set
-        # while flipping ensembles).
-        if "npt_method" in stage and stage["npt_method"] not in _VALID_NPT_METHODS:
+                f"{stage_name}.ensemble = '{ensemble}' is invalid. Use 'NVT' or 'NPT'.")
+        method = stage.get("npt_method")
+        if isinstance(method, str) and method not in _VALID_NPT_METHODS:
             errors.append(
-                f"{stage_name}.npt_method = '{stage['npt_method']}' is invalid. "
-                f"Choose from: {', '.join(sorted(_VALID_NPT_METHODS))}."
-            )
+                f"{stage_name}.npt_method = '{method}' is invalid. "
+                f"Choose from: {', '.join(sorted(_VALID_NPT_METHODS))}.")
 
-        # Validate positive numeric values
-        for nkey in ("T", "T_start", "T_end", "steps", "steps_per_T",
-                     "timestep", "fmax", "max_steps",
-                     "taup_factor", "compressibility_GPa"):
-            if nkey in stage and isinstance(stage[nkey], (int, float)):
-                if stage[nkey] <= 0:
-                    errors.append(
-                        f"{stage_name}.{nkey} must be positive, got {stage[nkey]}"
-                    )
+        for key in ("T", "T_start", "T_end", "steps", "steps_per_T",
+                    "timestep", "fmax", "max_steps",
+                    "taup_factor", "compressibility_GPa"):
+            value = stage.get(key)
+            if type(value) in _NUMBER and value <= 0:
+                errors.append(f"{stage_name}.{key} must be positive, got {value}")
 
-    return warnings, errors
+    return [], errors
 
 
 _SCI = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)[eE][+-]?\d+$")
@@ -203,9 +366,8 @@ def load_yaml_config(path: str) -> dict:
     """
     Load a YAML configuration file and return it as a dict.
 
-    Validates the config against expected keys and types. Prints
-    warnings for unknown keys or type mismatches but does not raise
-    (to allow forward-compatible configs with new keys).
+    Validates keys and types in every block, including element/pair maps.
+    Unknown keys and invalid values raise ValueError before the config is used.
 
     Parameters
     ----------
@@ -222,7 +384,7 @@ def load_yaml_config(path: str) -> dict:
     FileNotFoundError
         If the YAML file does not exist.
     ValueError
-        If the YAML file is empty or does not contain a mapping.
+        If the YAML file is empty, is not a mapping, or fails validation.
     """
     with open(path, "r") as f:
         cfg = yaml.safe_load(f)
@@ -244,7 +406,7 @@ def load_yaml_config(path: str) -> dict:
             print(f"  [Config ERROR] {e}")
         raise ValueError(
             f"Invalid YAML config ({len(errors)} error(s) in {path}). "
-            f"Fix the errors above and retry."
+            + "; ".join(errors)
         )
 
     return cfg
