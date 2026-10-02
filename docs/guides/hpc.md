@@ -61,8 +61,12 @@ amorphgen POSCAR --model mace-mpa-0 --device cuda \
 
 `--resume` reuses completed stage outputs and saved MD frames in the work
 directory. Resubmit with the same input, model, configuration and work directory;
-use a new directory when changing the simulation protocol. Do not run two jobs
-against the same output directory at once.
+use a new directory when changing the simulation protocol. Pipeline and random
+generation runs verify saved settings before reusing outputs and reject
+concurrent writers with an exclusive `.amorphgen.lock` in the output directory.
+The lock is released automatically when a job exits or is killed. Leave the
+lock file in place; its existence does not indicate an active job. Runs from
+older versions without complete settings provenance need a fresh directory.
 
 ### Pipeline mode
 

@@ -1783,7 +1783,8 @@ def main():
 
     # ── Random generation mode ────────────────────────────────────────────────
     if args.random_gen:
-        from .pipeline.random_gen import batch_random
+        from .pipeline.random_gen import _batch_random_unlocked
+        from .utils.run_lock import run_lock
         from .utils import get_calculator
 
         # Read random_gen block from YAML config (if present)
@@ -1893,54 +1894,74 @@ def main():
         optimizer = opt_cfg.get("optimizer", args.optimizer)
 
         use_torchsim = do_relax and override.get("engine", "ase") == "torchsim"
-        calc = None
-        if do_relax and not use_torchsim:
-            calc = get_calculator(
-                **_classical_kwargs(override),
-                model=override.get("model", args.model),
-                device=override.get("device", args.device),
-                model_path=override.get("model_path", args.model_path),
-                default_dtype=override.get("default_dtype", args.default_dtype),
+        relax_settings = None
+        if do_relax:
+            relax_settings = {
+                "model": override.get("model", args.model),
+                "model_path": override.get("model_path", args.model_path),
+                "device": override.get("device", args.device),
+                "default_dtype": override.get("default_dtype", args.default_dtype),
+                "classical_params": override.get("classical_params"),
+                "engine": "torchsim" if use_torchsim else "ase",
+            }
+            if use_torchsim:
+                relax_settings["torchsim"] = {
+                    "pressure_tol_gpa": opt_cfg.get("pressure_tol_gpa", 0.02),
+                    "output_format": opt_cfg.get("output_format", "xyz"),
+                    "batch_size": args.batch_size or opt_cfg.get("batch_size") or "auto",
+                }
 
+        # Placement and the optional separate torch-sim phase share ownership
+        # of the whole output tree, including resume metadata validation.
+        with run_lock(args.work_dir):
+            calc = None
+            if do_relax and not use_torchsim:
+                calc = get_calculator(
+                    **_classical_kwargs(override),
+                    model=override.get("model", args.model),
+                    device=override.get("device", args.device),
+                    model_path=override.get("model_path", args.model_path),
+                    default_dtype=override.get("default_dtype", args.default_dtype),
+                )
+
+            files = _batch_random_unlocked(
+                composition=composition,
+                n_structures=n_structures,
+                output_dir=args.work_dir,
+                output_format=output_format,
+                relax=do_relax and not use_torchsim,
+                calc=calc,
+                resume_settings=relax_settings,
+                safety=override.get("safety"),
+                repulsive_core=override.get("repulsive_core"),
+                fmax=fmax,
+                max_relax_steps=max_relax_steps,
+                optimizer=optimizer,
+                cell_filter=cell_filter,
+                target_density=target_density,
+                density_scale=density_scale,
+                minsep=minsep,
+                max_attempts_per_atom=args.max_attempts,
+                target_cn=target_cn,
+                dmax=dmax_dict,
+                cn_tolerance=cn_tolerance,
+                dmax_factor=args.dmax_factor,
+                repair_iters=args.repair_iters,
+                retry_mode=args.retry_mode,
+                indices=args.indices,
+                seed=(args.seed if args.seed is not None
+                      else rg_cfg.get("seed", override.get("seed"))),
+                resume=args.resume,
             )
-
-        files = batch_random(
-            composition=composition,
-            n_structures=n_structures,
-            output_dir=args.work_dir,
-            output_format=output_format,
-            relax=do_relax and not use_torchsim,
-            calc=calc,
-            safety=override.get("safety"),
-            repulsive_core=override.get("repulsive_core"),
-            fmax=fmax,
-            max_relax_steps=max_relax_steps,
-            optimizer=optimizer,
-            cell_filter=cell_filter,
-            target_density=target_density,
-            density_scale=density_scale,
-            minsep=minsep,
-            max_attempts_per_atom=args.max_attempts,
-            target_cn=target_cn,
-            dmax=dmax_dict,
-            cn_tolerance=cn_tolerance,
-            dmax_factor=args.dmax_factor,
-            repair_iters=args.repair_iters,
-            retry_mode=args.retry_mode,
-            indices=args.indices,
-            seed=(args.seed if args.seed is not None
-                  else rg_cfg.get("seed", override.get("seed"))),
-            resume=args.resume,
-        )
-        if use_torchsim:
-            from .pipeline.opt_cell import batch_optimize
-            batch_optimize(input_dir=os.path.join(args.work_dir, "random_initial"),
-                           output_dir=os.path.join(args.work_dir, "random_opt"),
-                           cfg_override=override, calc=None, engine="torchsim",
-                           fmax=fmax,
-                           max_steps=max_relax_steps, cell_filter=cell_filter,
-                           optimizer=optimizer, resume=args.resume,
-                           batch_size=(int(args.batch_size) if args.batch_size and str(args.batch_size).isdigit() else args.batch_size), indices=args.indices)
+            if use_torchsim:
+                from .pipeline.opt_cell import batch_optimize
+                batch_optimize(input_dir=os.path.join(args.work_dir, "random_initial"),
+                               output_dir=os.path.join(args.work_dir, "random_opt"),
+                               cfg_override=override, calc=None, engine="torchsim",
+                               fmax=fmax,
+                               max_steps=max_relax_steps, cell_filter=cell_filter,
+                               optimizer=optimizer, resume=args.resume,
+                               batch_size=(int(args.batch_size) if args.batch_size and str(args.batch_size).isdigit() else args.batch_size), indices=args.indices)
         return
 
     # ── Batch optimisation mode ──────────────────────────────────────────────

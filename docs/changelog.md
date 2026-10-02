@@ -33,9 +33,13 @@
   symlink and hardlink aliases, before writing any converted files.
 - Torch-sim rejects an invalid explicit `--model-path` instead of falling back
   to a foundation model.
-- Random generation resume refuses changes to recorded composition, output
-  format or relaxation mode, validates saved atom counts and elements, and
-  reports invalid metadata instead of silently accepting incompatible results.
+- Pipeline and random generation resume refuse changed settings before
+  modifying saved outputs, including seeds, density/placement parameters,
+  stage protocols, and model identities. Pipeline resume also checks input
+  contents, stage completion records and readable checkpoints. Old outputs
+  without complete settings provenance require a fresh directory. Exclusive
+  `.amorphgen.lock` files prevent concurrent writers and release ownership
+  automatically on exit or process termination.
 
 ## v1.0.0rc4 (2026-09-24)
 

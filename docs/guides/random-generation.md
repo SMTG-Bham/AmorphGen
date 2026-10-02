@@ -260,12 +260,22 @@ See {doc}`/api/random-gen` for the full API reference.
 
 ## Selecting structure indices
 
-When using `--resume`, keep the composition, output format and relaxation mode
-the same. AmorphGen refuses changes to those recorded settings before modifying
-existing files. It also checks the elements and atom counts in saved structures,
-including runs without metadata. Unreadable `run_metadata.json` files cause an
-error; restore the metadata or use a separate output directory. Use `--batch-opt`
-to relax structures from an earlier generation run.
+When using `--resume`, keep the composition, seed, density and placement
+settings, output format, and relaxation settings the same. Schema 2 of
+`run_metadata.json` records those settings, including model identity and local
+model file hashes. AmorphGen refuses changed settings before modifying existing
+outputs or logs, and checks the elements and atom counts in saved structures.
+Reusing a random-generation directory with incompatible settings is also refused
+without `--resume`, so a partial rerun cannot relabel older structures.
+Missing, unreadable or older metadata without complete settings causes an
+error; restore compatible metadata or use a separate output directory.
+You can increase the requested structure count or change the selected indices
+while retaining the same settings. Use `--batch-opt` to relax structures from
+an earlier generation run.
+
+An exclusive `.amorphgen.lock` covers generation and optional CLI relaxation.
+A concurrent writer fails immediately. The OS releases the lock after normal
+exit, failure or process termination; leave the persistent lock file in place.
 
 `--indices SPEC` restricts a run to given structure indices; inclusive ranges
 and lists both work (`80-90`, `0,5,7-9`). Every index has a seed derived from

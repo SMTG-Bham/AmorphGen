@@ -170,6 +170,16 @@ class TestResume:
                       "stage7_opt.xyz"]:
             write(str(work / fname), cu_bulk)
 
+        from amorphgen.pipeline.manifest import RunManifest
+        stages = [1, 4, 5, 6, 7]
+        manifest = RunManifest(work, input_file, pipe.cfg, stages,
+                               pipe.STAGE_NAMES, False,
+                               pipe._resume_settings(stages, input_file))
+        for stage in stages:
+            manifest.start_stage(stage)
+            manifest.finish_stage()
+        manifest.finish("completed")
+
         result = pipe.run(stages=[1, 4, 5, 6, 7], resume=True)
         assert result is not None
         assert len(result) == len(cu_bulk)

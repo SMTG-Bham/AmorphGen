@@ -109,7 +109,7 @@ class TestRandomGenMode:
         generate = Mock(return_value=[])
         optimize = Mock(return_value=[])
         calculator = Mock(return_value=object())
-        monkeypatch.setattr("amorphgen.pipeline.random_gen.batch_random", generate)
+        monkeypatch.setattr("amorphgen.pipeline.random_gen._batch_random_unlocked", generate)
         monkeypatch.setattr("amorphgen.pipeline.opt_cell.batch_optimize", optimize)
         monkeypatch.setattr("amorphgen.utils.get_calculator", calculator)
         config_args = []

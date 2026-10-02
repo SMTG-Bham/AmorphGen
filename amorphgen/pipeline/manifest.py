@@ -46,7 +46,8 @@ class RunManifest:
     only one writer at a time.
     """
 
-    def __init__(self, work_dir, input_file, cfg, stages, stage_names, resume):
+    def __init__(self, work_dir, input_file, cfg, stages, stage_names, resume,
+                 resume_settings=None):
         from .. import __version__
 
         self.path = Path(work_dir).resolve() / "run_manifest.json"
@@ -67,6 +68,45 @@ class RunManifest:
         else:
             self.data = {"schema_version": 1, "attempts": []}
 
+        self.previous_stages = {}
+        if resume:
+            if self.data["attempts"]:
+                previous = self.data["attempts"][-1].get("resume_settings")
+                if previous is None or resume_settings is None:
+                    raise ValueError(
+                        "Cannot resume: run manifest has no verifiable resume settings. "
+                        "Use a new work directory."
+                    )
+                current = _json_value(resume_settings)
+                # Appending later stages is safe with the same full protocol;
+                # removing/reordering the existing sequence changes its inputs.
+                if isinstance(previous, dict) and isinstance(previous.get("stages"), list):
+                    old_stages = previous["stages"]
+                    if current.get("stages", [])[:len(old_stages)] == old_stages:
+                        previous = {**previous, "stages": current["stages"]}
+                changes = _changed_settings(previous, current)
+                if changes:
+                    raise ValueError(
+                        "Cannot resume: settings changed: " + ", ".join(changes) +
+                        ". Use a new work directory for a different run."
+                    )
+                # Only checkpoints from the latest fresh run belong to this
+                # resume chain. A pending stage may have stale files from a
+                # different protocol previously run in the same directory.
+                for attempt in reversed(self.data["attempts"]):
+                    for record in attempt.get("stages", []):
+                        stage = record.get("stage")
+                        if stage not in self.previous_stages and record.get("status") != "pending":
+                            self.previous_stages[stage] = record.get("status")
+                    if not attempt.get("resume"):
+                        break
+            elif any(p.name != ".amorphgen.lock" and p.resolve() != Path(input_file).resolve()
+                     for p in self.path.parent.iterdir()):
+                raise ValueError(
+                    "Cannot resume: existing outputs have no verifiable run manifest. "
+                    "Use a new work directory."
+                )
+
         self.attempt = {
             "attempt": len(self.data["attempts"]) + 1,
             "package_version": __version__,
@@ -82,6 +122,7 @@ class RunManifest:
             "work_dir": str(self.path.parent),
             "requested_stages": list(stages),
             "config": _json_value(cfg),
+            "resume_settings": _json_value(resume_settings),
             "seed": _json_value(cfg.get("seed")),
             "seed_index": None,
             # This orchestrator always calls ASE stages, even if the config
@@ -157,3 +198,17 @@ class RunManifest:
         self.attempt.update(status=status, finished_at=_timestamp(),
                             elapsed_seconds=time.perf_counter() - self._started)
         self.finish_stage(status, error)
+
+
+def _changed_settings(previous, current, prefix=""):
+    """Return the specific configuration paths that differ, without values."""
+    if isinstance(previous, dict) and isinstance(current, dict):
+        changes = []
+        for key in sorted(previous.keys() | current.keys()):
+            path = f"{prefix}.{key}" if prefix else key
+            if key not in previous or key not in current:
+                changes.append(path)
+            else:
+                changes.extend(_changed_settings(previous[key], current[key], path))
+        return changes
+    return [] if previous == current else [prefix]

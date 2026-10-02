@@ -95,13 +95,27 @@ See the {doc}`/api/config` page for all available configuration keys.
 `MeltQuenchPipeline.run()` writes `run_manifest.json` in its output directory,
 including when invoked through the CLI's melt-and-quench pipeline. This is the
 machine-readable record alongside the existing `pipeline_summary.log`.
-It is created before reading the input or loading the calculator, and updated
+It is created before parsing the input or loading the calculator, and updated
 atomically before and after each stage.
 
 The JSON has `schema_version: 1` and an `attempts` list. Each invocation appends
-an attempt, including a resume that skips every stage. Earlier attempts keep
-their configuration, timings, and errors. A resume from an older run with no
-manifest starts a new history; it cannot reconstruct that run's provenance.
+an attempt, including a compatible resume that skips every stage. Earlier
+attempts keep their configuration, timings, and errors. Before appending an
+attempt, resume checks the merged configuration, stage selection, seed index,
+input path and contents, and calculator identity against saved `resume_settings`.
+Local model files are checked by their SHA-256 digest. Changed settings are
+reported by name, and the manifest and outputs are left unchanged. Use a new
+work directory for a different protocol. Older outputs without these saved
+settings cannot be resumed automatically. Later stages can be appended to the
+original stage sequence with the same configuration; existing stages cannot
+be removed or reordered during resume.
+
+Only readable checkpoints from stages recorded as completed in the current
+run are skipped; configured `output_xyz` filenames are honoured. The work
+directory is locked for the entire invocation using `.amorphgen.lock`.
+Another writer fails immediately. The OS releases ownership when the process
+exits, including after a crash; the empty lock file remains and should not be
+deleted. Its presence alone does not mean a run is active.
 
 Each attempt records:
 

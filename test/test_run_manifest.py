@@ -116,8 +116,6 @@ def test_failure_resume_and_noop_preserve_attempt_history(
     monkeypatch.setattr(run_pipeline.opt_cell, "run", _unexpected_calculator)
     monkeypatch.setattr(run_pipeline.quench, "run", resume_quench)
     monkeypatch.setattr(run_pipeline.final_opt, "run", final_optimise)
-    pipeline.cfg["seed"] = 19
-    pipeline.cfg["opt"]["fmax"] = 0.321
     result = pipeline.run(stages=[1, 5, 7], resume=True)
 
     assert len(result) == len(cu_bulk)
@@ -127,9 +125,8 @@ def test_failure_resume_and_noop_preserve_attempt_history(
     second = previous_attempts[1]
     assert previous_attempts[0] == first
     assert first["seed"] == first["config"]["seed"] == 17
-    assert second["seed"] == second["config"]["seed"] == 19
-    assert second["config"]["opt"]["fmax"] == 0.321
-    assert first["config"]["opt"]["fmax"] != 0.321
+    assert second["seed"] == second["config"]["seed"] == 17
+    assert second["config"] == first["config"]
     assert second["status"] == "completed"
     assert second["requested_stages"] == [1, 5, 7]
     assert [stage["status"] for stage in second["stages"]] == [
