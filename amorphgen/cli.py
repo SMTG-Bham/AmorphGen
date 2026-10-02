@@ -237,7 +237,7 @@ def _add_arguments(p):
                         choices=["NVT", "NPT"], help="Stage 2 ensemble.")
     g_pipe.add_argument("--eq-premelt-T", type=int, default=300,
                         help="Stage 2 T (K).")
-    g_pipe.add_argument("--eq-premelt-steps", type=int, default=50000,
+    g_pipe.add_argument("--eq-premelt-steps", type=int, default=_DC("eq_premelt", "steps"),
                         help="Stage 2 MD steps.")
     # Stage 3
     g_pipe.add_argument("--melt-ensemble", default=_DC("melt", "ensemble"),
