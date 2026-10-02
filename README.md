@@ -91,7 +91,16 @@ Crystalline input  (POSCAR / .xyz / .cif / .extxyz)
    stage7_opt.cif  +  stage7_opt.xyz
 ```
 
-> `--mq-ensemble` extends MQ: stages 1–4 run once, then N independent quenches (stages 5–6–7) are launched from snapshots of the stage-4 trajectory.
+> `--mq-ensemble` extends MQ: stages 1–4 run once, then up to N separate quenches (stages 5–6–7) are launched from snapshots of the stage-4 trajectory.
+
+The default `--select decorrelated` chooses burn-in and spacing from scalar
+autocorrelation and per-species diffusion, and writes
+`snapshot_sampling.{txt,json}` with an estimated effective independent
+snapshot count. A short or slowly diffusing trajectory can yield fewer than
+N snapshots; the default 10 ps hold is not extended automatically. The count
+is a sampling diagnostic, not proof of equilibrium or final-glass independence.
+See the [sampling guide](https://smtg-bham.github.io/AmorphGen/guides/mq-ensemble.html#burn-in-spacing-and-effective-snapshot-count)
+for details and the explicit legacy `--select uniform` / `--select last` modes.
 
 It also writes `melt_memory.{txt,csv,json}` before the quenches, reporting
 how much of the initially ordered atom population is still ordered after
@@ -728,6 +737,9 @@ amorphgen POSCAR \
 command below extracts 20 evenly spaced frames from the saved trajectory. Use
 `--burn-in-frames` to exclude an initial unequilibrated portion; choose snapshot
 spacing long enough for the structural correlations relevant to your system.
+For adaptive burn-in and spacing, replace `--select uniform` with
+`--select decorrelated`; this may select fewer than 20 frames and reports the
+estimated effective independent snapshot count.
 
 ```bash
 amorphgen --batch-quench \

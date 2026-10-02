@@ -47,9 +47,11 @@ amorphgen POSCAR --config examples/full_pipeline.yaml
 
 ### MQ-ensemble (full pipeline + N quenches in one command)
 
-Runs stages 1–4 once, extracts N uniformly spaced snapshots from the stage-4
-trajectory, and runs stages 5–7 on each snapshot. Snapshot spacing and liquid
-equilibration determine whether the resulting samples are independent.
+Runs stages 1–4 once, extracts up to N snapshots from the stage-4 trajectory,
+and runs stages 5–7 on each snapshot. The default `--select decorrelated`
+chooses burn-in and spacing from scalar autocorrelation and per-species
+diffusion. A short or slowly diffusing trajectory can yield fewer than N
+snapshots. The default 10 ps stage-4 hold is not extended automatically.
 
 ```bash
 amorphgen Ga2O3_supercell.xyz --mq-ensemble --n-structures 20 \
@@ -61,11 +63,25 @@ Output layout:
 
 ```text
 ga2o3_mq/
+├── snapshot_sampling.{json,txt} # selection diagnostics and effective snapshot count
 ├── shared/        # stages 1-4 outputs (incl. stage4_eq_traj.xyz)
-├── snapshots/     # 20 uniform snapshots
+├── snapshots/     # up to 20 selected snapshots
 ├── quench_runs/   # per-snapshot stages 5-6-7 outputs
-└── final/         # collected mq_0000.<fmt> ... mq_0019.<fmt>
+└── final/         # collected mq_NNNN.<fmt> files
 ```
+
+The sampling report includes selected frame indices, burn-in, spacing,
+autocorrelation and diffusion diagnostics, and an estimated effective
+independent snapshot count. That estimate does not establish equilibrium
+or independence of the final glasses. See {doc}`/guides/mq-ensemble` for the
+method, limitations and resume compatibility checks.
+
+| Sampling option | Behaviour |
+|-----------------|-----------|
+| `--select decorrelated` | Default for `--mq-ensemble`; choose spacing from trajectory diagnostics. |
+| `--select uniform` / `--select last` | Explicit legacy selection; uniform remains the default for extraction and batch quenching. |
+| `--burn-in-frames N` | Discard exactly N leading saved frames, including an explicit zero. If omitted, decorrelated selection chooses adaptive burn-in; legacy modes use zero. |
+| `--decorrelation-distance D` | Distance in Å for the per-species displacement correlation proxy; default is the final frame's median nearest-neighbour distance. |
 
 ### Hybrid ensemble (random + quench)
 
@@ -81,7 +97,8 @@ Useful for producing an amorphous ensemble from already-disordered starting stru
 
 ### Extract snapshots from a trajectory
 
-Standalone utility to extract N uniformly-spaced frames from any trajectory file:
+Standalone utility to extract up to N frames from a trajectory file, using
+uniform spacing by default:
 
 ```bash
 amorphgen --extract-snapshots stage4_eq_traj.xyz \
@@ -97,11 +114,23 @@ amorphgen --extract-snapshots stage4_eq_traj.xyz \
     -n 20 --burn-in-frames 50 --format vasp -o snapshots/
 ```
 
+To use the same adaptive sampling as `--mq-ensemble`, opt in explicitly:
+
+```bash
+amorphgen --extract-snapshots stage4_eq_traj.xyz \
+    --config mq.yaml -n 20 --select decorrelated -o snapshots/
+```
+
+Use the configuration that generated the trajectory: reported times use
+`eq_high.timestep` and assume one saved frame every 100 MD steps. The Python
+sampling API supports other saved-frame intervals through `timestep_fs` and
+`frame_stride`.
+
 `--batch-quench` also accepts a trajectory file directly via `--snapshot-dir <file.xyz>` and extracts internally:
 
 ```bash
 amorphgen --batch-quench --snapshot-dir stage4_eq_traj.xyz \
-    --n-runs 20 --batch-stages 5 6 7 \
+    --n-runs 20 --select decorrelated --batch-stages 5 6 7 \
     --config mq.yaml -o quench_runs/
 ```
 

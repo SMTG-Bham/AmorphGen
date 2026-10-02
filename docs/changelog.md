@@ -4,6 +4,13 @@
 
 ### Added
 
+- `--mq-ensemble` now defaults to adaptive burn-in and snapshot spacing based
+  on energy/volume autocorrelation and the slowest species' diffusion.
+  `snapshot_sampling.{json,txt}` reports the selected frames and estimated
+  effective independent count; short holds can produce fewer snapshots than
+  requested. Resume checks preserve the snapshot-to-quench mapping. Explicit
+  `--select uniform` / `last` retain legacy selection; standalone extraction
+  and batch trajectories can opt in with `--select decorrelated`.
 - Opt-in void distributions, bridging/non-bridging oxygen speciation,
   stress-derived elastic tensors and Voigt/Reuss/Hill moduli, and harmonic
   vibrational DOS through Python, CLI and YAML. Each supports per-structure

@@ -867,8 +867,13 @@ _SNAPSHOT_FORMAT_MAP = {
 def extract_snapshots(traj_file: str, n_snapshots: int = 20,
                       select: str = "uniform",
                       output_dir: str = "snapshots",
-                      burn_in_frames: int = 0,
-                      output_format: str = "extxyz") -> list[str]:
+                      burn_in_frames: int | None = None,
+                      output_format: str = "extxyz", *,
+                      timestep_fs: float = 0.5,
+                      frame_stride: int = TRAJ_LOG_INTERVAL,
+                      decorrelation_distance: float | None = None,
+                      report_path: str | None = None,
+                      resume: bool = False) -> list[str]:
     """
     Extract snapshot frames from a trajectory file.
 
@@ -879,20 +884,35 @@ def extract_snapshots(traj_file: str, n_snapshots: int = 20,
     n_snapshots : int
         Number of snapshots to extract.
     select : str
-        Selection strategy: ``"uniform"`` (evenly spaced) or
-        ``"last"`` (final *n* frames).
+        Selection strategy: ``"uniform"`` (evenly spaced), ``"last"``
+        (final *n* frames), or ``"decorrelated"`` (autocorrelation and
+        species diffusion determine the minimum spacing).
     output_dir : str
         Directory for output files.
-    burn_in_frames : int, default 0
+    burn_in_frames : int or None
         Number of leading frames to skip before sampling.  Useful for
         discarding the equilibration period at the start of an MD
         trajectory.  Sampling indices run over the closed interval
         ``[burn_in_frames, n_frames - 1]``.  Raises ``ValueError`` if
         ``burn_in_frames >= n_frames``.
+        ``None`` uses automatic burn-in for decorrelated selection and zero
+        for uniform/last selection.
     output_format : str, default ``"extxyz"``
         Output file format.  Accepted values: ``"extxyz"``, ``"xyz"``
         (both write extended XYZ with a ``.xyz`` extension), ``"vasp"``
         (POSCAR-style), ``"cif"``, ``"traj"``.
+    timestep_fs, frame_stride : float, int
+        Integration timestep and saved-frame stride for time diagnostics.
+    decorrelation_distance : float or None
+        Length scale in Angstrom for the species displacement correlation
+        proxy; inferred from nearest neighbours when omitted.
+    report_path : str or None
+        JSON report filename, with a sibling ``.txt`` summary. Decorrelated
+        extraction defaults to ``output_dir/snapshot_sampling.json``.
+    resume : bool
+        Protect correspondence with existing downstream runs by comparing
+        saved selection settings, indices and source-frame fingerprints
+        before writing. Enable this when resuming existing quenches.
 
     Returns
     -------
@@ -902,38 +922,62 @@ def extract_snapshots(traj_file: str, n_snapshots: int = 20,
     frames = read(traj_file, index=":")
     n_frames = len(frames)
 
-    if burn_in_frames < 0:
-        raise ValueError(
-            f"burn_in_frames must be >= 0, got {burn_in_frames}."
-        )
-    if burn_in_frames >= n_frames:
-        raise ValueError(
-            f"burn_in_frames ({burn_in_frames}) must be smaller than the "
-            f"trajectory length ({n_frames})."
-        )
-
-    available = n_frames - burn_in_frames
-    if n_snapshots > available:
-        print(f"Warning: requested {n_snapshots} snapshots but only "
-              f"{available} frames are available after burn-in. "
-              f"Using all available frames.")
-        n_snapshots = available
-
-    if select == "uniform":
-        indices = np.linspace(burn_in_frames, n_frames - 1, n_snapshots,
-                              dtype=int)
-    elif select == "last":
-        indices = list(range(max(burn_in_frames, n_frames - n_snapshots),
-                             n_frames))
-    else:
-        raise ValueError(f"Unknown selection strategy '{select}'.")
-
     if output_format not in _SNAPSHOT_FORMAT_MAP:
         raise ValueError(
             f"Unknown output_format '{output_format}'. "
             f"Choose from: {', '.join(sorted(_SNAPSHOT_FORMAT_MAP))}."
         )
     ext, ase_fmt = _SNAPSHOT_FORMAT_MAP[output_format]
+
+    report = None
+    if select == "decorrelated" or report_path is not None:
+        from .snapshot_sampling import analyze_snapshot_sampling
+        report = analyze_snapshot_sampling(
+            frames, n_snapshots=n_snapshots, select=select,
+            burn_in_frames=burn_in_frames, timestep_fs=timestep_fs,
+            frame_stride=frame_stride,
+            decorrelation_distance=decorrelation_distance,
+        )
+        indices = report["selected_frame_indices"]
+        report["selection_settings"] = {
+            "select": select, "n_snapshots": n_snapshots,
+            "burn_in_frames": burn_in_frames,
+            "timestep_fs": timestep_fs, "frame_stride": frame_stride,
+            "decorrelation_distance": decorrelation_distance,
+            "output_format": output_format,
+        }
+        report["selected_frame_fingerprints"] = [
+            _snapshot_frame_fingerprint(frames[idx]) for idx in indices
+        ]
+        report_path = os.fspath(report_path or os.path.join(
+            output_dir, "snapshot_sampling.json"))
+        if not report_path.endswith(".json"):
+            report_path += ".json"
+        if resume:
+            _check_snapshot_resume(report_path, report)
+    else:
+        burn_in_frames = 0 if burn_in_frames is None else burn_in_frames
+        if burn_in_frames < 0:
+            raise ValueError(f"burn_in_frames must be >= 0, got {burn_in_frames}.")
+        if burn_in_frames >= n_frames:
+            raise ValueError(
+                f"burn_in_frames ({burn_in_frames}) must be smaller than the "
+                f"trajectory length ({n_frames})."
+            )
+        available = n_frames - burn_in_frames
+        if n_snapshots > available:
+            print(f"Warning: requested {n_snapshots} snapshots but only "
+                  f"{available} frames are available after burn-in. "
+                  f"Using all available frames.")
+            n_snapshots = available
+        if select == "uniform":
+            indices = np.linspace(burn_in_frames, n_frames - 1, n_snapshots,
+                                  dtype=int)
+        elif select == "last":
+            indices = list(range(max(burn_in_frames, n_frames - n_snapshots),
+                                 n_frames))
+        else:
+            raise ValueError(f"Unknown selection strategy '{select}'.")
 
     os.makedirs(output_dir, exist_ok=True)
     paths = []
@@ -943,5 +987,100 @@ def extract_snapshots(traj_file: str, n_snapshots: int = 20,
         write(fname, frames[idx], format=ase_fmt)
         paths.append(fname)
 
+    if report is not None:
+        report["snapshot_files"] = paths
+        _write_snapshot_report(report_path, report)
     print(f"Extracted {len(paths)} snapshots → {output_dir}/")
     return paths
+
+
+def _snapshot_frame_fingerprint(atoms) -> str:
+    """Fingerprint saved frame content without calculating any properties."""
+    import hashlib
+    import json
+
+    digest = hashlib.sha256()
+    arrays = dict(atoms.arrays, cell=np.asarray(atoms.cell), pbc=atoms.pbc)
+    for name, value in sorted(arrays.items()):
+        value = np.ascontiguousarray(value)
+        digest.update(name.encode())
+        digest.update(str((value.dtype.str, value.shape)).encode())
+        digest.update(value.tobytes())
+    metadata = {"info": atoms.info,
+                "results": getattr(atoms.calc, "results", {})}
+    digest.update(json.dumps(
+        metadata, sort_keys=True,
+        default=lambda value: value.tolist() if hasattr(value, "tolist") else str(value),
+    ).encode())
+    return digest.hexdigest()
+
+
+def _check_snapshot_resume(report_path, report):
+    """Do not pair a changed high-temperature source with an old quench."""
+    import json
+
+    if not os.path.isfile(report_path):
+        if report["method"] == "decorrelated":
+            raise ValueError(
+                "Cannot resume existing quenches with adaptive snapshot selection: "
+                f"{report_path} is missing. Use a new output directory, or explicitly "
+                "restore the original --select uniform/last and burn-in settings."
+            )
+        return
+    try:
+        with open(report_path) as handle:
+            previous = json.load(handle)
+    except (OSError, ValueError) as error:
+        raise ValueError(f"Cannot validate snapshot selection for resume: {report_path}") from error
+    keys = ("selection_settings", "trajectory_frames", "selected_frame_indices",
+            "selected_frame_fingerprints")
+    if any(previous.get(key) != report[key] for key in keys):
+        raise ValueError(
+            "Snapshot selection or source frames changed since the existing quenches. "
+            "Use the original trajectory and selection settings, or a new output directory."
+        )
+
+
+def _write_snapshot_report(report_path, report):
+    """Persist machine-readable diagnostics and a concise human summary."""
+    import json
+    from pathlib import Path
+
+    path = Path(report_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
+    spacing = report["spacing_ps"]
+    spacing_text = "unresolved" if spacing is None else f"{spacing:.6g} ps"
+    summary = (
+        f"Snapshot sampling: {report['method']} ({report['status']})\n"
+        f"Saved-frame interval: {report['frame_interval_ps']:.6g} ps\n"
+        f"Burn-in: {report['burn_in_frames']} frames "
+        f"({report['burn_in_frames'] * report['frame_interval_ps']:.6g} ps)\n"
+        f"Recommended spacing: {spacing_text}\n"
+        f"Selected snapshots: {len(report['selected_frame_indices'])} / "
+        f"{report['requested_snapshots']} requested\n"
+        "Effective independent snapshots (estimate): "
+        f"{report['effective_independent_snapshots']:.3g}\n"
+        f"Source frame indices: {report['selected_frame_indices']}\n"
+    )
+    distance = report["decorrelation_distance_angstrom"]
+    summary += ("Diffusion distance: "
+                + ("unavailable" if distance is None else f"{distance:.6g} Angstrom")
+                + f" ({report['distance_method']})\n")
+    for name, values in report["autocorrelation"].items():
+        summary += f"Autocorrelation {name}: {values['status']}"
+        if "statistical_inefficiency" in values:
+            summary += (f", g={values['statistical_inefficiency']:.6g}, "
+                        f"integrated time={values['integrated_autocorrelation_time_ps']:.6g} ps, "
+                        f"decay lag={values['decay_lag_frames']} frames")
+        summary += "\n"
+    for name, values in report["diffusion"].items():
+        coefficient = values["diffusion_coefficient_cm2_s"]
+        coefficient_text = "unavailable" if coefficient is None else f"{coefficient:.6g} cm^2/s"
+        summary += (f"Diffusion {name}: {values['status']}, "
+                    f"decay lag={values['decorrelation_lag_frames']} frames, "
+                    f"D={coefficient_text}\n")
+    summary += "".join(f"Warning: {warning}\n" for warning in report["warnings"])
+    summary += "".join(f"Limitation: {limitation}\n" for limitation in report["limitations"])
+    path.with_suffix(".txt").write_text(summary)
+    print(summary, end="")

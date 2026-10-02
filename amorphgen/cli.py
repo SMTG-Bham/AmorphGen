@@ -138,8 +138,8 @@ def _add_arguments(p):
     g_mode.add_argument("--rank-from-log", default=None, metavar="LOG",
                         help="Parse a random-gen log and rank by total energy.")
     g_mode.add_argument("--extract-snapshots", default=None, metavar="TRAJ",
-                        help="Extract N uniform snapshots from a trajectory "
-                             "file (use with --n-runs N --select {uniform,last}).")
+                        help="Extract N snapshots from a trajectory file "
+                             "(use with --n-runs N and --select).")
     g_mode.add_argument("--mq-ensemble", action="store_true",
                         help="Full MQ-ensemble workflow: stages 1-4 from a "
                              "crystalline input, extract N snapshots from "
@@ -341,13 +341,19 @@ def _add_arguments(p):
                            "into N uniform snapshots.")
     g_bq.add_argument("--n-runs", type=int, default=20,
                       help="Number of quench runs.")
-    g_bq.add_argument("--select", default="uniform",
-                      choices=["uniform", "last"], help="Snapshot selection.")
-    g_bq.add_argument("--burn-in-frames", type=int, default=0, metavar="N",
+    g_bq.add_argument("--select", default=None,
+                      choices=["uniform", "last", "decorrelated"],
+                      help="Snapshot selection: decorrelated for --mq-ensemble, "
+                           "uniform otherwise. Decorrelated uses autocorrelation "
+                           "and species diffusion to choose minimum spacing.")
+    g_bq.add_argument("--burn-in-frames", type=int, default=None, metavar="N",
                       help="Discard the first N frames of the trajectory "
-                           "before sampling snapshots (useful for skipping "
-                           "the non-equilibrated portion of stage-4 MD; "
-                           "default: 0).")
+                           "before sampling snapshots (automatic for "
+                           "decorrelated selection, zero otherwise).")
+    g_bq.add_argument("--decorrelation-distance", type=float, default=None,
+                      metavar="ANGSTROM",
+                      help="Length scale for the species displacement correlation "
+                           "proxy; default: median nearest-neighbour distance.")
     g_bq.add_argument("--batch-stages", nargs="+", type=int,
                       default=[5, 6, 7], metavar="N",
                       help="Stages to run per snapshot.")
@@ -948,15 +954,59 @@ def _run_convert(args, yaml_cfg: dict | None = None) -> None:
 # Ensemble workflow helpers (--mq-ensemble, --hybrid-ensemble)
 # ═════════════════════════════════════════════════════════════════════════════
 
+def _has_quench_outputs(work_dir, cfg, stages):
+    """Recognise completed or interrupted downstream runs before reselection."""
+    from pathlib import Path
+
+    root = Path(work_dir)
+    directories = [root] + [path for path in root.glob("run_*") if path.is_dir()]
+    patterns = [f"stage{stage}*" for stage in stages] + ["final_amorphous.*"]
+    if any(path.is_file() for directory in directories
+           for pattern in patterns
+           for path in directory.glob(pattern)):
+        return True
+    sections = {4: "eq_high", 5: "quench", 6: "eq_low", 7: "final_opt"}
+    names = [section[key] for stage in stages if stage in sections
+             for section in [cfg.get(sections[stage], {})]
+             for key in ("traj_file", "log_file", "output_xyz") if section.get(key)]
+    return any((directory / name).is_file() for directory in directories for name in names)
+
+
+def _snapshot_sampling_kwargs(args, override, *, mq=False, report_path=None,
+                              quench_dir=None):
+    """Use the actual stage-4 timestep for automatic and manual extraction."""
+    from .configs import DEFAULT_CONFIG
+    from .utils import merge_config
+    from .utils.common import TRAJ_LOG_INTERVAL
+
+    cfg = merge_config(DEFAULT_CONFIG, override)
+    select = args.select or ("decorrelated" if mq else "uniform")
+    burn_in = args.burn_in_frames
+    if burn_in is None and select != "decorrelated":
+        burn_in = 0
+    return {
+        "select": select, "burn_in_frames": burn_in,
+        "timestep_fs": cfg["eq_high"]["timestep"],
+        "frame_stride": TRAJ_LOG_INTERVAL,
+        "decorrelation_distance": args.decorrelation_distance,
+        "report_path": (report_path if mq or select == "decorrelated"
+                        or (report_path is not None and os.path.isfile(report_path)) else None),
+        "resume": bool(args.resume and quench_dir is not None
+                       and _has_quench_outputs(
+                           quench_dir, cfg, (5, 6, 7) if mq else args.batch_stages)),
+    }
+
+
 def _run_mq_ensemble(args, override: dict, analysis_config=None) -> None:
     """Full melt-quench ensemble: stages 1-4 once + N independent quenches.
 
     Output layout under args.work_dir:
         shared/      stages 1-4 outputs (incl. stage4_eq_traj.xyz trajectory)
-        snapshots/   N uniform snapshots extracted from stage 4 trajectory
+        snapshots/   up to N decorrelated snapshots from stage 4 trajectory
         quench_runs/ per-snapshot stages 5-6-7 outputs (run_0000, run_0001, ...)
         final/       collected final amorphous structures (mq_NNNN.<fmt>)
         melt_memory.{json,csv,txt}  original-crystal order retention at melt endpoints
+        snapshot_sampling.{json,txt}  spacing and effective independent sample count
     """
     from .pipeline.run_pipeline import MeltQuenchPipeline
     from .pipeline import batch_quench
@@ -1008,8 +1058,11 @@ def _run_mq_ensemble(args, override: dict, analysis_config=None) -> None:
     print(f"\n[Phase 2/3] Extracting {args.n_structures} snapshots from {traj}")
     try:
         snap_files = extract_snapshots(traj, n_snapshots=args.n_structures,
-                                       select=args.select, output_dir=snap_dir,
-                                       burn_in_frames=args.burn_in_frames)
+                                       output_dir=snap_dir,
+                                       **_snapshot_sampling_kwargs(
+                                           args, override, mq=True,
+                                           report_path=os.path.join(work_dir, "snapshot_sampling.json"),
+                                           quench_dir=quench_dir))
     except Exception:
         # Preserve diagnostics from completed MD even if a trajectory cannot
         # be read or the requested sampling range is invalid.
@@ -1366,10 +1419,11 @@ def main():
         extract_snapshots(
             args.extract_snapshots,
             n_snapshots=n_snap,
-            select=args.select,
             output_dir=out_dir,
-            burn_in_frames=args.burn_in_frames,
             output_format=args.format,
+            **_snapshot_sampling_kwargs(
+                args, override,
+                report_path=os.path.join(out_dir, "snapshot_sampling.json")),
         )
         return
 
@@ -1941,30 +1995,37 @@ def main():
 
         # Polymorphic input: if --snapshot-dir is a single trajectory file
         # (e.g. shared/stage4_eq.xyz from a Stage 4 run), extract --n-runs
-        # uniformly-spaced frames into a 'snapshots_extracted/' subdir of
+        # selected frames into a 'snapshots_extracted/' subdir of
         # the work directory and use that as the snapshot source.
         # Putting the extracted dir inside work_dir avoids race conditions
         # when several array tasks point at files in the same source dir.
+        extracted_files = None
         if os.path.isfile(snap_source):
             from .utils import extract_snapshots
             os.makedirs(args.work_dir, exist_ok=True)
             extracted_dir = os.path.join(args.work_dir, "snapshots_extracted")
             print(f"[batch-quench] '{snap_source}' is a file — extracting "
-                  f"{args.n_runs} uniform snapshots to {extracted_dir}/")
-            extract_snapshots(snap_source, n_snapshots=args.n_runs,
-                              select=args.select, output_dir=extracted_dir,
-                              burn_in_frames=args.burn_in_frames)
+                  f"up to {args.n_runs} snapshots to {extracted_dir}/")
+            extracted_files = extract_snapshots(
+                snap_source, n_snapshots=args.n_runs, output_dir=extracted_dir,
+                **_snapshot_sampling_kwargs(
+                    args, override,
+                    report_path=os.path.join(args.work_dir, "snapshot_sampling.json"),
+                    quench_dir=args.work_dir))
             snap_source = extracted_dir
+        elif args.select == "decorrelated":
+            raise ValueError("--select decorrelated requires a trajectory file as --snapshot-dir.")
 
         # Accept any ASE-readable structure format. extxyz/xyz are the
         # original use case (snapshots from MD trajectory); vasp/cif/POSCAR
         # let users feed in pre-relaxed structures from --random-gen or DFT.
-        snap_files: list = []
-        for pattern in ("*.xyz", "*.extxyz", "*.vasp", "*.cif", "POSCAR*"):
-            snap_files = sorted(glob.glob(
-                os.path.join(snap_source, pattern)))
-            if snap_files:
-                break
+        snap_files: list = extracted_files or []
+        if extracted_files is None:
+            for pattern in ("*.xyz", "*.extxyz", "*.vasp", "*.cif", "POSCAR*"):
+                snap_files = sorted(glob.glob(
+                    os.path.join(snap_source, pattern)))
+                if snap_files:
+                    break
         if not snap_files:
             from .pipeline.random_gen import random_gen_dir_hint
             print(f"Error: no snapshot files found in {snap_source}/ "
@@ -1986,7 +2047,7 @@ def main():
         batch_quench.run(
             snapshot_files=snap_files,
             n_runs=args.n_runs,
-            select=args.select,
+            select="uniform" if extracted_files is not None else (args.select or "uniform"),
             cfg_override=override,
             work_dir=args.work_dir,
             stages=args.batch_stages,
