@@ -90,7 +90,7 @@ def assert_finite(atoms, context: str = "", step=None) -> None:
 
 
 def resolve_device(device: str) -> str:
-    """Resolve ``device="auto"`` to ``"cuda"`` or ``"cpu"``.
+    """Resolve ``device="auto"`` in priority order: CUDA, MPS, then CPU.
 
     Torch is an *optional* dependency (pulled in by the MLIP extras), so a
     torch-free install — random generation, analysis, or classical-potential
@@ -101,9 +101,13 @@ def resolve_device(device: str) -> str:
         return device
     try:
         import torch
-        return "cuda" if torch.cuda.is_available() else "cpu"
     except ImportError:
         return "cpu"
+    if torch.cuda.is_available():
+        return "cuda"
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
 
 
 # ═════════════════════════════════════════════════════════════════════════════

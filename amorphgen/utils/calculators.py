@@ -26,6 +26,8 @@ import os
 import warnings
 from typing import Any
 
+from .common import resolve_device
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # MACE model registry
@@ -556,7 +558,9 @@ def get_calculator(
         Ignored if *model_path* is provided (defaults to MACE backend).
 
     device : str
-        ``"cuda"`` or ``"cpu"``.
+        ``"auto"`` (default), ``"cuda"``, ``"mps"``, or ``"cpu"``.
+        Auto selects CUDA, then MPS, then CPU, as in the pipeline stages.
+        Without PyTorch installed, auto selects CPU.
 
     model_path : str, optional
         Path to a local ``.model`` file (e.g. a fine-tuned MACE model).
@@ -589,20 +593,7 @@ def get_calculator(
     >>> calc = get_calculator(model_path="/data/my_finetuned.model")
     >>> calc = get_calculator("buckingham", classical_params={...})
     """
-    # ── Resolve "auto" device once, here, so backends always see a real
-    #    device string.  Order: explicit > CUDA > MPS > CPU.
-    if device == "auto":
-        try:
-            import torch
-            if torch.cuda.is_available():
-                device = "cuda"
-            elif (hasattr(torch.backends, "mps")
-                    and torch.backends.mps.is_available()):
-                device = "mps"
-            else:
-                device = "cpu"
-        except ImportError:
-            device = "cpu"
+    device = resolve_device(device)
 
     # ── Resolve "auto" default_dtype per backend ──────────────────────────
     # CHGNet only supports float32; passing float64 raises NotImplementedError

@@ -4,6 +4,9 @@ tests/test_utils.py
 Tier 1 unit tests for amorphgen.utils (no calculator needed).
 """
 
+import sys
+from types import SimpleNamespace
+
 import pytest
 import numpy as np
 from ase import Atoms
@@ -23,14 +26,27 @@ from amorphgen.configs import DEFAULT_CONFIG
 class TestResolveDevice:
     """resolve_device: 'auto' resolution and the torch-free fallback."""
 
-    def test_explicit_device_passes_through(self):
-        assert resolve_device("cpu") == "cpu"
-        assert resolve_device("cuda") == "cuda"
-        assert resolve_device("mps") == "mps"
+    @pytest.mark.parametrize("device", ["cpu", "cuda", "cuda:1", "mps"])
+    def test_explicit_device_passes_through(self, monkeypatch, device):
+        monkeypatch.setitem(sys.modules, "torch", None)
+        assert resolve_device(device) == device
 
-    def test_auto_resolves_to_cuda_or_cpu(self):
-        # With or without torch installed, auto must land on a concrete device.
-        assert resolve_device("auto") in ("cuda", "cpu")
+    @pytest.mark.parametrize("cuda, mps, expected", [
+        (True, True, "cuda"),
+        (True, False, "cuda"),
+        (False, True, "mps"),
+        (False, False, "cpu"),
+        (False, None, "cpu"),  # Older torch builds may have no MPS backend.
+    ])
+    def test_auto_resolves_in_priority_order(self, monkeypatch, cuda, mps, expected):
+        backends = SimpleNamespace()
+        if mps is not None:
+            backends.mps = SimpleNamespace(is_available=lambda: mps)
+        torch = SimpleNamespace(
+            cuda=SimpleNamespace(is_available=lambda: cuda), backends=backends,
+        )
+        monkeypatch.setitem(sys.modules, "torch", torch)
+        assert resolve_device("auto") == expected
 
     def test_auto_without_torch_falls_back_to_cpu(self, monkeypatch):
         """The torch-free install contract: auto -> cpu, no ImportError."""
