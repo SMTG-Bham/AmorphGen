@@ -835,7 +835,7 @@ def convergence_report(source, timestep_fs: float = DEFAULT_TIMESTEP_FS,
         Log files are faster but only provide energy/temperature
         (no MSD, RDF, or CN analysis).
     timestep_fs : float
-        MD timestep in femtoseconds (default 1.0).
+        MD timestep in femtoseconds (default 0.5).
     T_target : float, optional
         Target temperature (K) for temperature check.
     n_atoms : int, optional
