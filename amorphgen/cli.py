@@ -1750,6 +1750,14 @@ def main():
         if not do_relax and "relax" in rg_cfg:
             do_relax = rg_cfg["relax"]
 
+        # The merged opt block already gives explicit CLI flags precedence
+        # over YAML. Resolve once so both relaxation engines use the same
+        # settings, retaining the random-gen defaults for omitted values.
+        opt_cfg = override.get("opt", {}) or {}
+        fmax = opt_cfg.get("fmax", 0.05)
+        max_relax_steps = opt_cfg.get("max_steps", args.opt_steps)
+        optimizer = opt_cfg.get("optimizer", args.optimizer)
+
         use_torchsim = do_relax and override.get("engine", "ase") == "torchsim"
         calc = None
         if do_relax and not use_torchsim:
@@ -1769,10 +1777,9 @@ def main():
             output_format=output_format,
             relax=do_relax and not use_torchsim,
             calc=calc,
-            fmax=(args.fmax if _typed("-f", "--fmax")
-                  else (override.get("opt", {}) or {}).get("fmax", 0.05)),
-            max_relax_steps=args.opt_steps,
-            optimizer=args.optimizer,
+            fmax=fmax,
+            max_relax_steps=max_relax_steps,
+            optimizer=optimizer,
             cell_filter=cell_filter,
             target_density=target_density,
             density_scale=density_scale,
@@ -1794,10 +1801,9 @@ def main():
             batch_optimize(input_dir=os.path.join(args.work_dir, "random_initial"),
                            output_dir=os.path.join(args.work_dir, "random_opt"),
                            cfg_override=override, calc=None, engine="torchsim",
-                           fmax=(args.fmax if _typed("-f", "--fmax")
-                                 else (override.get("opt", {}) or {}).get("fmax", 0.05)),
-                           max_steps=args.opt_steps, cell_filter=cell_filter,
-                           optimizer=args.optimizer, resume=args.resume,
+                           fmax=fmax,
+                           max_steps=max_relax_steps, cell_filter=cell_filter,
+                           optimizer=optimizer, resume=args.resume,
                            batch_size=(int(args.batch_size) if args.batch_size and str(args.batch_size).isdigit() else args.batch_size), indices=args.indices)
         return
 
