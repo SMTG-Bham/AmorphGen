@@ -183,6 +183,13 @@ For ensemble-size convergence, compare
 half-width to fall below the tolerance. Density fixed by NVT is an input,
 not a convergence result. Sampling precision does not remove calculator bias.
 
+Use `--convergence --tolerance density=0.02` (g/cm³), or declare other
+descriptor tolerances in YAML, to report precision and estimate the additional
+independent structures needed. The {ref}`ensemble-convergence` report uses
+variance from the complete ensemble, so its planning curves do not depend on
+generation order. Recheck the report as new structures arrive: forecasts hold
+the current variance and descriptor availability fixed.
+
 ### Worked starting configuration
 
 This explicit **NVT pilot** uses a 50 ps high-temperature hold and a 100 K/ps

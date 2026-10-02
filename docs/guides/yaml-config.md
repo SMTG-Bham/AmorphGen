@@ -417,6 +417,28 @@ analysis:
   connectivity: true      # corner/edge/face sharing of cation polyhedra
 ```
 
+### Ensemble precision targets
+
+Declare absolute confidence half-width tolerances in each descriptor's units.
+The report includes order-independent planning curves and estimated additional
+structure counts; see {ref}`ensemble-convergence` for the statistical assumptions.
+
+```yaml
+analysis:
+  convergence: true
+  convergence_confidence: 0.95
+  convergence_max_structures: 1000000
+  tolerances:
+    density: 0.02              # g/cm³
+    coordination.Si-O: 0.05    # neighbours per Si
+    bond_angle.O-Si-O: 1.0     # degrees
+  save_report: convergence.txt
+  save_plot: convergence/
+```
+
+Each CLI `--tolerance NAME=VALUE` overrides only that descriptor's YAML
+tolerance. Nonempty tolerances enable convergence reporting automatically.
+
 ### Optional material descriptors
 
 Add these keys inside `analysis:` to select descriptors and their settings.

@@ -20,6 +20,7 @@ Example YAML::
 
 from __future__ import annotations
 
+import math
 import re
 import yaml
 
@@ -149,6 +150,10 @@ _BLOCK_SCHEMA = {
         "seed": (int, type(None)),
     },
     "analysis": {
+        "convergence": bool,
+        "tolerances": dict,
+        "convergence_confidence": _NUMBER,
+        "convergence_max_structures": int,
         "cutoff": (str, int, float, dict),
         "per_structure": bool,
         "check_dimers": bool,
@@ -302,6 +307,22 @@ def _validate_nested_values(cfg: dict, errors: list[str], path: str) -> None:
     analysis = cfg.get("analysis")
     if not isinstance(analysis, dict):
         return
+    tolerances = analysis.get("tolerances")
+    if isinstance(tolerances, dict):
+        for name, value in tolerances.items():
+            key = f"analysis.tolerances.{name}"
+            if not isinstance(name, str) or not name.strip():
+                errors.append("analysis.tolerances keys must be nonempty descriptor names")
+            if _check_type(value, _NUMBER, key, errors):
+                if not math.isfinite(value) or value <= 0:
+                    errors.append(f"{key} must be finite and positive")
+    confidence = analysis.get("convergence_confidence")
+    if type(confidence) in _NUMBER:
+        if not math.isfinite(confidence) or not 0 < confidence < 1:
+            errors.append("analysis.convergence_confidence must be finite and between 0 and 1")
+    max_structures = analysis.get("convergence_max_structures")
+    if type(max_structures) is int and max_structures < 2:
+        errors.append("analysis.convergence_max_structures must be at least 2")
     for key in ("total_cn", "rdf_pairs", "angle_triplets", "tr_qrange",
                 "rings", "ring_bond_pair", "network_formers"):
         value = analysis.get(key)

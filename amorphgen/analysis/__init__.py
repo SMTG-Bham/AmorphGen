@@ -42,6 +42,8 @@ Usage
 """
 
 from .analyser import StructureAnalyser
+from .convergence import convergence_report
+from .convergence_output import format_convergence_report, save_convergence_report
 from .energy import rank_from_log, format_log_ranking
 from .oxygen import compute_oxygen_speciation
 from .bond_order import compute_bond_order
@@ -61,6 +63,9 @@ from .comparison_plots import (
 
 __all__ = [
     "StructureAnalyser",
+    "convergence_report",
+    "format_convergence_report",
+    "save_convergence_report",
     "compute_oxygen_speciation",
     "compute_bond_order",
     "compute_melt_memory",

@@ -107,6 +107,52 @@ retention, so neither establishes uninterrupted crystal survival.
 .. autofunction:: amorphgen.analysis.format_melt_memory
 ```
 
+## Ensemble convergence
+
+`StructureAnalyser.convergence_report(tolerances=None, *, descriptors=None,
+confidence=0.95, sizes=None, max_structures=1000000)` gathers density,
+coordination, total coordination, bond-distance and bond-angle summaries.
+`descriptors` adds named aligned per-structure arrays or uncertainty summaries
+containing `per_structure`. Tolerances are positive absolute Student-t mean
+interval half-widths, with curve descriptors assessed at every point.
+
+The standalone `convergence_report` accepts a mapping of descriptor names to
+scalar or structure-by-component observations, with missing entries as `None`
+or nonfinite numbers. The report includes `descriptors`, observed counts and
+half-widths, `curve` data, declared tolerance statuses and estimated total and
+additional structure counts. Arrays and missing values are JSON-compatible.
+Canonical reductions make the curves and forecasts independent of input order.
+
+```python
+from amorphgen.analysis import (
+    convergence_report, format_convergence_report, save_convergence_report,
+)
+
+report = convergence_report(
+    {"density": [2.20, 2.25, 2.18, 2.23]}, {"density": 0.02},
+    confidence=0.95, max_structures=10000,
+)
+print(format_convergence_report(report))
+paths = save_convergence_report(report, "analysis/", save_pdf=True)
+```
+
+Complete-data planning curves are exact componentwise all-subset RMS
+Student-t half-widths for sizes 2 through the observed ensemble size; larger
+sizes extrapolate the variance model. Vector summaries take the maximum of
+those componentwise values.
+Missing data use an observed-availability approximation. These are conditional
+precision forecasts under independent sampling, not empirical histories or
+simultaneous confidence bands. See {ref}`ensemble-convergence` for the formulas,
+CLI/YAML examples, status meanings and exported files.
+
+```{eval-rst}
+.. autofunction:: amorphgen.analysis.convergence_report
+
+.. autofunction:: amorphgen.analysis.format_convergence_report
+
+.. autofunction:: amorphgen.analysis.save_convergence_report
+```
+
 ## Reference-validation helpers
 
 For comparing computed metrics against literature ranges (used by
@@ -159,6 +205,8 @@ import these directly:
 | ``analysis.elasticity`` | Stress-derived stiffness and Voigt/Reuss/Hill moduli |
 | ``analysis.vibrations`` | Harmonic cell-mode DOS and element projections |
 | ``analysis.descriptors`` | Optional descriptor summaries and JSON/CSV/figure export |
+| ``analysis.convergence`` | Order-independent uncertainty curves, tolerances and sample-size planning |
+| ``analysis.convergence_output`` | Convergence text, JSON, CSV and per-descriptor figures |
 | ``analysis.energy`` | Total-energy parsing and ranking |
 | ``analysis.cutoff`` | Bond-cutoff selection from g(r) first minimum |
 | ``analysis.plotting`` | Publication-quality matplotlib helpers |

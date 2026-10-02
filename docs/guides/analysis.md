@@ -108,6 +108,121 @@ A confidence interval admitting both in-range and out-of-range values is
 mean with no estimable interval is also `inconclusive`; an absent descriptor
 remains `n/a`. Reports include intervals and count inconclusive verdicts.
 
+(ensemble-convergence)=
+## Declared tolerances and ensemble convergence
+
+Declare an absolute tolerance for the uncertainty of each descriptor's
+**ensemble mean**, in its native units. A tolerance of `0.02` for density
+means a 95% Student-t interval half-width no greater than 0.02 g/cm³; it is
+neither a relative percentage nor a bound on the spread of individual structures.
+
+```bash
+amorphgen --analyse --input-dir ensemble/ \
+    --tolerance density=0.02 \
+    --tolerance coordination.Si-O=0.05 \
+    --tolerance bond_angle.O-Si-O=1.0 \
+    --convergence-confidence 0.95 --save-plot analysis/ \
+    --save-report analysis.txt
+```
+
+Each `--tolerance NAME=VALUE` enables convergence reporting. Use `--convergence`
+alone to inspect available descriptor names and their uncertainty before
+declaring tolerances. Default names include `density`, `coordination.PAIR`,
+`total_coordination.ELEMENT`, `bond_distance.PAIR` and `bond_angle.TRIPLET`.
+Pair ordering is significant: silica bond distance is `bond_distance.O-Si`,
+whereas coordination has separate `coordination.Si-O` and `coordination.O-Si`.
+Unknown names and nonpositive or nonfinite tolerances are rejected.
+
+Selected optional analyses add named descriptors, such as
+`bond_order.ordered_fraction`, `voids.accessible_fraction`, `sq.total`,
+`sq.Si-O` with `--sq-partials`, and `tr.T_r`. A tolerance on `rdf.total` or
+`rdf.PAIR` also computes that RDF for convergence. For curve descriptors the
+tolerance must hold at **every point**: the plotted quantity is the largest
+pointwise half-width, not a simultaneous confidence band for the entire curve.
+Optional descriptors require their corresponding analysis flags.
+
+The equivalent YAML entries live under `analysis`:
+
+```yaml
+analysis:
+  convergence: true
+  tolerances:
+    density: 0.02
+    coordination.Si-O: 0.05
+  convergence_confidence: 0.95
+  convergence_max_structures: 1000000
+```
+
+CLI tolerance declarations replace YAML tolerances of the same name and
+preserve the others. `--convergence-max-structures` sets the upper search bound
+for forecasts; it never truncates the input ensemble.
+
+```python
+from amorphgen.analysis import (
+    StructureAnalyser, format_convergence_report, save_convergence_report,
+)
+
+sa = StructureAnalyser("ensemble/")
+report = sa.convergence_report({"density": 0.02, "coordination.Si-O": 0.05})
+print(format_convergence_report(report))
+save_convergence_report(report, "analysis/", save_pdf=True)
+
+# Include any aligned per-structure descriptor, including a whole curve.
+rdf = sa.rdf(n_bootstrap=0)
+curve_report = sa.convergence_report(
+    {"rdf.total": 0.05}, descriptors={"rdf.total": rdf["uncertainty"]},
+    sizes=[2, 5, 10, 20, 50, 100],
+)
+```
+
+The curves are independent of generation order. For complete scalar data,
+AmorphGen plots
+
+$$h(n) = t_{(1+c)/2,\,n-1}\,s_N / \sqrt{n},$$
+
+where $c$ is the chosen confidence and $s_N$ is the sample standard deviation
+of all $N$ structures. For $2 \leq n \leq N$, this is the exact
+root-mean-square Student-t half-width over **all** subsets of size $n$,
+because their mean sample variance equals
+$s_N^2$. No randomized shuffling, seed, or generation-order prefixes enter
+the calculation. A vector descriptor takes the maximum of these componentwise
+RMS values, not the RMS of the subset-wise maxima. At $n=N$ the curve equals
+the observed full-ensemble half-width; beyond $N$ it is an extrapolation.
+The interval formula follows the
+[NIST Student-t confidence interval](https://www.itl.nist.gov/div898/handbook/eda/section3/eda352.htm).
+
+Missing observations are excluded rather than treated as zero. If a component
+appears in $k$ of $N$ structures, planning at size $n$ uses
+$\lfloor nk/N\rfloor$ contributing observations with the observed sample
+variance. This is an availability-adjusted approximation, not an exact
+all-subset result. Any component with fewer than two observations makes that
+descriptor's uncertainty and forecast unavailable; empty bins are retained.
+
+The report returns `met`, `not_met`, `insufficient_data`, or `undeclared`
+per descriptor and overall. Undeclared descriptors do not decide the overall
+status. It estimates the smallest total ensemble size satisfying all declared
+tolerances under unchanged variance and availability, and subtracts the
+current size to give the additional structures needed. A met tolerance needs
+zero additional structures; an estimate beyond the search bound is reported
+as `exceeds_max_structures`, with no invented finite forecast.
+
+Forecasts assume independent structures and representative, stable variance
+and missingness. They do not account for correlated trajectory frames,
+force-field bias, finite-size error or undiscovered rare configurations.
+Zero observed variance yields a zero estimated half-width once two values
+exist, but does not establish zero population variance. Reassess the report
+as new independent structures arrive.
+
+With `--save-plot`, exports include `analysis_convergence.json` (full report,
+strict JSON with missing values as `null`), `analysis_convergence.txt`,
+`analysis_convergence_summary.csv`, and `analysis_convergence_curves.csv`
+(one row per descriptor, planned size and point). Each descriptor has its
+own figure, for example `analysis_convergence_density.png`, with an optional
+PDF. Figures distinguish the observed endpoint, declared tolerance, solid
+planning curve and dashed projection through the estimated target. CSV
+columns retain counts, confidence, units in the summary, forecast status,
+and pointwise uncertainty so the decisions can be reproduced.
+
 ## Recipes
 
 Common cases:
@@ -906,6 +1021,10 @@ amorphgen --analyse \
 | `--save-report FILE` | Write the full text report (densities, bond distances, coordination, angles) to a file. |
 | `--save-plot DIR` | Save available standard figures (RDF, CN, angles, density) plus CSV data into ``DIR``. |
 | `--save-pdf` | Also save vector PDF copies alongside the PNGs. |
+| `--convergence` | Report available descriptor names, uncertainty versus ensemble size, and declared tolerance status. |
+| `--tolerance NAME=VALUE` | Declare an absolute Student-t mean interval half-width in descriptor units; repeat for each descriptor. Enables convergence reporting. |
+| `--convergence-confidence FLOAT` | Confidence for convergence intervals and forecasts (default 0.95). |
+| `--convergence-max-structures INT` | Largest total ensemble size searched for the forecast (default 1000000). |
 | `--reference YAML` | Validate against the literature ranges in YAML, print a match/concern/fail table. |
 | `--smearing SIGMA` | Gaussian smearing of the RDF in Å (default 0.05, roughly thermal broadening; 0 for the raw histogram). |
 | `--total-rdf` | Overlay the total g(r) on the partial-RDF plot. |
@@ -968,6 +1087,9 @@ listed flags.
 | `analysis_oxygen_speciation.{json,csv,png,pdf}` | Oxygen counts/fractions by class; JSON also contains each oxygen's former coordination. |
 | `analysis_elastic.{json,csv,png,pdf}`, `analysis_elastic_tensor.csv` | Modulus means/std/counts and mean stiffness heatmap; JSON includes raw/symmetrized tensors and diagnostics per structure. |
 | `analysis_vdos.{json,csv,png,pdf}` | Total and element-projected DOS; JSON includes individual mode frequencies and per-structure diagnostics. |
+| `analysis_convergence.{json,txt}` | With `--convergence` or `--tolerance`: declared bounds, observed uncertainty, planning curves and required-size forecasts with assumptions. |
+| `analysis_convergence_summary.csv`, `analysis_convergence_curves.csv` | One row per descriptor for decisions/counts/units; one row per descriptor, planned size and point for uncertainty curves. |
+| `analysis_convergence_DESCRIPTOR.png` / `.pdf` | One independent figure per descriptor with tolerance, observed endpoint and estimated required size. PDF requires `--save-pdf`. |
 
 ## Python API
 

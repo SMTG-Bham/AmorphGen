@@ -581,6 +581,11 @@ amorphgen --analyse --input-dir optimised_structures/
 amorphgen --analyse --input-dir optimised_structures/ \
     --save-report report.txt --save-plot plots/
 
+# Declare precision targets and estimate how many more structures are needed
+amorphgen --analyse --input-dir optimised_structures/ --convergence \
+    --tolerance density=0.02 --tolerance coordination.Si-O=0.05 \
+    --save-report convergence.txt --save-plot convergence/
+
 # Neutron S(q) by the direct (Debye) method, with ring statistics,
 # corner/edge-sharing analysis and Voronoi indices for Ge
 amorphgen --analyse --input-dir optimised_structures/ \
@@ -616,6 +621,12 @@ amorphgen --analyse --input-dir relaxed_silica/ --elastic --vdos \
 
 Notes on the options:
 
+- `--convergence` adds uncertainty-versus-ensemble-size planning curves and
+  JSON/CSV exports. Repeat `--tolerance NAME=VALUE` to declare absolute
+  confidence half-widths in descriptor units (density in g/cm³, coordination
+  in neighbours). Curves use full-ensemble variance and are independent of
+  input order. Estimated additional counts assume independent structures
+  with unchanged variance; see the [convergence guide](docs/guides/analysis.md#declared-tolerances-and-ensemble-convergence).
 - `--sq` computes S(q) at the reciprocal-lattice q-vectors of each cell, so the
   first sharp diffraction peak is resolved without the truncation of a Fourier
   transform of g(r). Weighting is `xray` (q-dependent Waasmaier–Kirfel form

@@ -91,6 +91,9 @@ def compute_void_distribution(atoms_list, n_samples=10000, probe_radius=0.0,
 
     ``n_samples`` independent points are drawn per frame with a local NumPy
     random generator. ``seed=None`` requests nondeterministic sampling.
+    Frames receive random draws in a canonical geometry order, so a fixed
+    seed gives the same ensemble observations when the input order changes.
+    Per-structure results are still returned in the caller's input order.
     Existing ``*_stderr`` fields quantify Monte Carlo sampling only.
     ``uncertainty`` separately estimates standard errors and intervals of
     equal-weight structure means; their observed spread includes Monte Carlo
@@ -153,17 +156,22 @@ def compute_void_distribution(atoms_list, n_samples=10000, probe_radius=0.0,
         prepared.append((positions, cell, volume, atom_radii))
 
     rng = np.random.default_rng(seed)
-    samples = []
-    per_structure = []
-    for index, (positions, cell, volume, atom_radii) in enumerate(prepared):
+    samples = [None] * len(prepared)
+    per_structure = [None] * len(prepared)
+    # Assign Monte Carlo draws independently of generation/file order. The
+    # curve statistics alone cannot remove order dependence in their inputs.
+    order = sorted(range(len(prepared)), key=lambda i: (
+        prepared[i][1].tobytes(), prepared[i][0].tobytes(), prepared[i][3].tobytes()))
+    for index in order:
+        positions, cell, volume, atom_radii = prepared[index]
         points = rng.random((n_samples, 3)) @ cell
         clearance = _point_clearances(points, positions, cell, atom_radii)
         accessible = clearance[clearance >= probe_radius]
-        samples.append(accessible)
+        samples[index] = accessible
         count = len(accessible)
         fraction = count / n_samples
         stderr = float(np.sqrt(fraction * (1 - fraction) / n_samples))
-        per_structure.append({
+        per_structure[index] = {
             "index": index,
             "cell_volume": volume,
             "n_samples": n_samples,
@@ -175,7 +183,7 @@ def compute_void_distribution(atoms_list, n_samples=10000, probe_radius=0.0,
             "accessible_volume_stderr": volume * stderr,
             "mean_clearance": float(accessible.mean()) if count else None,
             "max_clearance": float(accessible.max()) if count else None,
-        })
+        }
 
     volumes = np.array([entry[2] for entry in prepared])
     weights = volumes / volumes.sum()

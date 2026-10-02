@@ -4,6 +4,14 @@
 
 ### Added
 
+- Declared per-descriptor precision tolerances and ensemble convergence
+  reports via `--convergence`, repeatable `--tolerance NAME=VALUE`, YAML and
+  Python. Order-independent Student-t half-width planning curves, per-descriptor
+  and overall additional-structure estimates, and text/JSON/CSV/PNG/PDF exports
+  retain missing-data counts and forecast assumptions. Seeded void sampling
+  now assigns draws in a canonical geometry order so shuffled input structures
+  also preserve its convergence observations. Automatic neighbour cutoffs
+  likewise use a canonical order while per-structure output retains input order.
 - `--mq-ensemble` now defaults to adaptive burn-in and snapshot spacing based
   on energy/volume autocorrelation and the slowest species' diffusion.
   `snapshot_sampling.{json,txt}` reports the selected frames and estimated

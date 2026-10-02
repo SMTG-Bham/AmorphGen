@@ -213,7 +213,7 @@ def bond_order_options(args, config):
 
 def run_descriptor_analysis(sa, args, config, override, *, plot_dir=None,
                             report_path=None, plot_kwargs=None):
-    """Run explicitly selected descriptors; CLI options override YAML values."""
+    """Run and return selected descriptors; CLI options override YAML values."""
     def enabled(key):
         return bool(getattr(args, key, False) or config.get(key, False))
 
@@ -224,7 +224,8 @@ def run_descriptor_analysis(sa, args, config, override, *, plot_dir=None,
     selected = [name for name in ("bond_order", "voids", "oxygen_speciation", "elastic", "vdos")
                 if enabled(name)]
     if not selected:
-        return
+        return {}
+    results = {}
     calculator = None
     if "elastic" in selected or "vdos" in selected:
         from ..utils import get_calculator
@@ -263,6 +264,7 @@ def run_descriptor_analysis(sa, args, config, override, *, plot_dir=None,
                 sigma=option("vdos_sigma", 0.1), npoints=option("vdos_npoints", 400))
         if sa._file_list:
             result["structure_files"] = [str(f) for f in sa._file_list]
+        results[name] = result
         report = format_descriptor(name, result)
         print(report)
         if report_path:
@@ -272,3 +274,4 @@ def run_descriptor_analysis(sa, args, config, override, *, plot_dir=None,
             settings = {k: v for k, v in (plot_kwargs or {}).items()
                         if k in ("dpi", "save_pdf", "show_title")}
             save_descriptor(name, result, plot_dir, **settings)
+    return results

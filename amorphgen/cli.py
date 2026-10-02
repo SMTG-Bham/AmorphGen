@@ -92,6 +92,58 @@ def _DC(section, key):
     return DEFAULT_CONFIG[section][key]
 
 
+def _parse_tolerance(value):
+    """Parse one absolute descriptor tolerance for argparse."""
+    import math
+
+    name, separator, raw_value = value.partition("=")
+    name = name.strip()
+    if not separator or not name:
+        raise argparse.ArgumentTypeError(
+            "tolerance must be NAME=VALUE, e.g. density=0.02")
+    try:
+        tolerance = float(raw_value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"tolerance for '{name}' must be a finite positive number") from exc
+    if not math.isfinite(tolerance) or tolerance <= 0:
+        raise argparse.ArgumentTypeError(
+            f"tolerance for '{name}' must be a finite positive number")
+    return name, tolerance
+
+
+def _convergence_options(args, config):
+    """Resolve convergence settings; each CLI tolerance overrides its YAML key."""
+    import math
+
+    tolerances = dict(config.get("tolerances", {}))
+    tolerances.update(args.tolerance or [])
+    confidence = args.convergence_confidence
+    if confidence is None:
+        confidence = config.get("convergence_confidence", 0.95)
+    if not math.isfinite(confidence) or not 0 < confidence < 1:
+        raise ValueError("convergence confidence must be finite and between 0 and 1")
+    max_structures = args.convergence_max_structures
+    if max_structures is None:
+        max_structures = config.get("convergence_max_structures", 1000000)
+    if max_structures < 2:
+        raise ValueError("convergence max structures must be at least 2")
+    enabled = bool(args.convergence or config.get("convergence", False) or tolerances)
+    return enabled, tolerances, confidence, max_structures
+
+
+def _collect_convergence_summaries(target, prefix, summaries):
+    """Flatten selected descriptor uncertainty trees to their public names."""
+    if not isinstance(summaries, dict):
+        return
+    if "per_structure" in summaries and "sem" in summaries:
+        target[prefix] = summaries
+        return
+    for key, value in summaries.items():
+        label = "-".join(map(str, key)) if isinstance(key, tuple) else str(key)
+        _collect_convergence_summaries(target, f"{prefix}.{label}", value)
+
+
 def _get_parser():
     """Build and return the argument parser (without parsing)."""
     p = argparse.ArgumentParser(
@@ -376,6 +428,23 @@ def _add_arguments(p):
 
     # ── Analysis ──────────────────────────────────────────────────────────────
     g_an = p.add_argument_group("analyse", "Used with --analyse.")
+    g_an.add_argument("--convergence", action="store_true",
+                      help="Report order-independent uncertainty versus ensemble "
+                           "size and estimates against declared tolerances.")
+    g_an.add_argument("--tolerance", action="append", type=_parse_tolerance,
+                      default=None, metavar="NAME=VALUE",
+                      help="Absolute uncertainty tolerance for a descriptor, e.g. "
+                           "density=0.02 or coordination.Si-O=0.1. Repeat for "
+                           "multiple descriptors; enables --convergence. "
+                           "CLI declarations override YAML per descriptor.")
+    g_an.add_argument("--convergence-confidence", type=float, default=None,
+                      metavar="LEVEL",
+                      help="Confidence level for convergence uncertainty "
+                           "(default 0.95).")
+    g_an.add_argument("--convergence-max-structures", type=int, default=None,
+                      metavar="N",
+                      help="Maximum ensemble size to consider when estimating "
+                           "additional structures (default 1000000).")
     g_an.add_argument("--cutoff", default="auto-rdf",
                       help="Bond cutoff. 'auto-rdf' (default): first minimum "
                            "of each partial g(r), so every pair gets its own "
@@ -1480,6 +1549,13 @@ def _main():
 
         # Read analysis block from YAML config (if present)
         an_cfg = override.get("analysis", {})
+        try:
+            convergence_enabled, tolerances, convergence_confidence, convergence_max = (
+                _convergence_options(args, an_cfg))
+        except ValueError as exc:
+            print(f"Error: convergence analysis: {exc}")
+            sys.exit(1)
+        convergence_descriptors = {}
 
         # Parse cutoff: CLI > YAML > default "auto"
         cutoff = args.cutoff
@@ -1507,7 +1583,22 @@ def _main():
         # dimer section too; the concatenated text feeds --save-report.
         if args.check_dimers or an_cfg.get("check_dimers", False):
             from .analysis.structure import format_dimer_report
-            dimer_text = format_dimer_report(sa.dimer_report())
+            dimers = sa.dimer_report()
+            dimer_text = format_dimer_report(dimers)
+            if convergence_enabled:
+                for name, summary in (
+                        ("count", dimers.get("uncertainty")),
+                        ("fraction_of_sites", dimers.get("site_fraction_uncertainty")),
+                        ("fraction_of_structures", dimers.get("structure_fraction_uncertainty"))):
+                    _collect_convergence_summaries(
+                        convergence_descriptors, f"dimers.{name}", summary)
+                for pair, data in dimers.get("pairs", {}).items():
+                    _collect_convergence_summaries(
+                        convergence_descriptors, f"dimers.count.{pair}",
+                        data.get("uncertainty"))
+                    _collect_convergence_summaries(
+                        convergence_descriptors, f"dimers.min_distance.{pair}",
+                        data.get("min_distance_uncertainty"))
             print(dimer_text)
             text += "\n" + dimer_text
 
@@ -1621,6 +1712,11 @@ def _main():
                             k = _np.argmax(_np.where(m, s_ab, -_np.inf))
                             print(f"    {pair:<8s} q = {_q[k]:.2f} A^-1, "
                                   f"S = {s_ab[k]:.2f}")
+            if convergence_enabled:
+                _collect_convergence_summaries(
+                    convergence_descriptors, "sq.total", sq_result.get("uncertainty"))
+                _collect_convergence_summaries(
+                    convergence_descriptors, "sq", sq_result.get("partials_uncertainty"))
             if plot_dir:
                 from .analysis.plotting import plot_sq
                 plot_sq(sq_result, output_dir=plot_dir,
@@ -1648,6 +1744,9 @@ def _main():
             except ValueError as exc:
                 print(f"  T(r) skipped: {exc}")
             else:
+                if convergence_enabled:
+                    _collect_convergence_summaries(
+                        convergence_descriptors, "tr", tr.get("curve_uncertainty"))
                 from .analysis.rdf import coordination_from_Tr, first_Tr_peak
                 pk, r_lo, r_hi = first_Tr_peak(tr)
                 if pk is None:
@@ -1698,6 +1797,9 @@ def _main():
         if rings_opt:
             pair = None if rings_opt == "auto" else tuple(rings_opt.split("-"))
             rings = sa.ring_statistics(bond_pair=pair)
+            if convergence_enabled:
+                _collect_convergence_summaries(
+                    convergence_descriptors, "rings", rings.get("uncertainty"))
             label = f"{pair[0]}-{pair[1]}" if pair else "auto"
             lines = [f"\n  Ring statistics (nodes-bridge: {label}, shortest ring per edge):"]
             for sz, c, f in zip(rings["ring_sizes"], rings["counts"], rings["fractions"]):
@@ -1723,6 +1825,21 @@ def _main():
         if args.connectivity or an_cfg.get("connectivity", False):
             from .analysis.structure import format_connectivity_report
             conn = sa.polyhedral_connectivity()
+            if convergence_enabled:
+                _collect_convergence_summaries(
+                    convergence_descriptors, "connectivity.edge_or_face_percent",
+                    conn.get("uncertainty"))
+                for name, key in (("link_percent", "link_percent_uncertainty"),
+                                  ("n_links", "n_links_uncertainty"),
+                                  ("fraction_of_sites", "site_fraction_uncertainty"),
+                                  ("fraction_of_structures", "structure_fraction_uncertainty"),
+                                  ("face_percent", "face_percent_uncertainty")):
+                    _collect_convergence_summaries(
+                        convergence_descriptors, f"connectivity.{name}", conn.get(key))
+                for element, data in conn.get("per_species", {}).items():
+                    _collect_convergence_summaries(
+                        convergence_descriptors, f"connectivity.{element}",
+                        data.get("uncertainty"))
             conn_text = format_connectivity_report(conn)
             print(conn_text)
             if report_path:
@@ -1749,6 +1866,9 @@ def _main():
         if vor_opt:
             elem = None if vor_opt == "all" else vor_opt
             vor = sa.voronoi(element=elem)
+            if convergence_enabled:
+                _collect_convergence_summaries(
+                    convergence_descriptors, "voronoi", vor.get("uncertainty"))
             lines = [f"\n  Voronoi indices <n3 n4 n5 n6> ({elem or 'all atoms'}): "
                      f"{vor['total_atoms']} atoms, mean faces = {vor['mean_faces']:.2f}"]
             for idx, count, pct in vor["top_10"]:
@@ -1769,12 +1889,86 @@ def _main():
         # Optional structural, mechanical and vibrational descriptors.
         from .analysis.descriptors import run_descriptor_analysis
         try:
-            run_descriptor_analysis(sa, args, an_cfg, override,
-                                    plot_dir=plot_dir, report_path=report_path,
-                                    plot_kwargs=plot_kwargs)
+            descriptor_results = run_descriptor_analysis(
+                sa, args, an_cfg, override, plot_dir=plot_dir,
+                report_path=report_path, plot_kwargs=plot_kwargs)
         except (ValueError, RuntimeError, NotImplementedError) as exc:
             print(f"Error: descriptor analysis: {exc}")
             sys.exit(1)
+
+        if an_cfg.get("energy_ranking", False):
+            er = sa.energy_ranking()
+            if convergence_enabled:
+                summaries = er.get("uncertainty", {})
+                _collect_convergence_summaries(
+                    convergence_descriptors, "energy.total", summaries.get("energy"))
+                _collect_convergence_summaries(
+                    convergence_descriptors, "energy.per_atom", summaries.get("energy_per_atom"))
+            if er.get("best_energy") is not None:
+                print(f"\n  Energy ranking:")
+                print(f"    Best: {er['best_energy']:.4f} eV/atom")
+                print(f"    Worst: {er['worst_energy']:.4f} eV/atom")
+                print(f"    Spread: {er['spread']:.4f} eV/atom")
+            elif er.get("warning") or er.get("error"):
+                print(f"\n  Energy ranking: {er.get('warning') or er.get('error')}")
+
+        if convergence_enabled:
+            from ase.data import atomic_numbers
+            from .analysis.convergence_output import (
+                format_convergence_report, save_convergence_report)
+
+            for name, result in (descriptor_results or {}).items():
+                _collect_convergence_summaries(
+                    convergence_descriptors, name, result.get("uncertainty"))
+            rdf_names = {name for name in tolerances if name.startswith("rdf.")}
+            rdf_names.update(f"rdf.{pair}" for pair in (an_cfg.get("rdf_pairs") or []))
+            if args.total_rdf or an_cfg.get("total_rdf", False):
+                rdf_names.add("rdf.total")
+            angle_names = {name for name in tolerances
+                           if name.startswith("angle_distribution.")}
+            angle_names.update(f"angle_distribution.{triplet}"
+                               for triplet in (an_cfg.get("angle_triplets") or []))
+            try:
+                for name in sorted(rdf_names):
+                    pair = name.removeprefix("rdf.")
+                    symbols = pair.split("-")
+                    if pair != "total" and (len(symbols) != 2 or any(
+                            symbol not in atomic_numbers for symbol in symbols)):
+                        raise ValueError(
+                            f"Unknown RDF descriptor '{name}'; expected rdf.total "
+                            "or rdf.Element-Element")
+                    result = sa.rdf(
+                        pair=None if pair == "total" else pair,
+                        rmax=an_cfg.get("rmax"), sigma=float(smearing),
+                        confidence=convergence_confidence, n_bootstrap=0)
+                    convergence_descriptors[name] = result["uncertainty"]
+                for name in sorted(angle_names):
+                    triplet = name.removeprefix("angle_distribution.")
+                    symbols = triplet.split("-")
+                    if len(symbols) != 3 or any(
+                            symbol not in atomic_numbers for symbol in symbols):
+                        raise ValueError(
+                            f"Unknown angle descriptor '{name}'; expected "
+                            "angle_distribution.Element-Element-Element")
+                    distributions = sa.angle_distribution(
+                        triplet, confidence=convergence_confidence, n_bootstrap=0)
+                    if triplet in distributions:
+                        convergence_descriptors[name] = distributions[triplet]["uncertainty"]
+                convergence = sa.convergence_report(
+                    tolerances, descriptors=convergence_descriptors,
+                    confidence=convergence_confidence, max_structures=convergence_max)
+            except (ValueError, TypeError) as exc:
+                print(f"Error: convergence analysis: {exc}")
+                sys.exit(1)
+            convergence_text = format_convergence_report(convergence)
+            print(convergence_text)
+            if report_path:
+                with open(report_path, "a") as handle:
+                    handle.write("\n" + convergence_text + "\n")
+            if plot_dir:
+                save_convergence_report(
+                    convergence, plot_dir, dpi=plot_kwargs.get("dpi", 300),
+                    save_pdf=plot_kwargs.get("save_pdf", False))
 
         # Validation against literature reference YAML
         ref_path = args.reference or an_cfg.get("reference")
@@ -1790,14 +1984,6 @@ def _main():
             if report_path:
                 with open(report_path, "a") as rf:
                     rf.write("\n" + v_text + "\n")
-
-        if an_cfg.get("energy_ranking", False):
-            er = sa.energy_ranking()
-            if "error" not in er:
-                print(f"\n  Energy ranking:")
-                print(f"    Best: {er['best_energy']:.4f} eV/atom")
-                print(f"    Worst: {er['worst_energy']:.4f} eV/atom")
-                print(f"    Spread: {er['spread']:.4f} eV/atom")
 
         return
 

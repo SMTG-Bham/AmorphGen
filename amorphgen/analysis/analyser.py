@@ -114,7 +114,14 @@ class StructureAnalyser:
         # "auto,In-O=2.6", or a dict (optionally with a "default" entry).
         # A dict that lists only some pairs is completed from auto-rdf.
         from .cutoff import resolve_cutoffs
-        self.cutoff, self._cutoff_mode = resolve_cutoffs(self.atoms_list, cutoff)
+        # Auto cutoffs pool frame RDFs and use the first frame for species
+        # discovery. Canonicalize that calculation so generation order cannot
+        # alter extracted descriptors or their convergence curves. Keep the
+        # caller's ordering for all per-structure results and file alignment.
+        cutoff_atoms = sorted(self.atoms_list, key=lambda atoms: (
+            atoms.numbers.tobytes(), np.asarray(atoms.cell).tobytes(),
+            atoms.positions.tobytes(), atoms.pbc.tobytes()))
+        self.cutoff, self._cutoff_mode = resolve_cutoffs(cutoff_atoms, cutoff)
 
         self._max_cutoff = (
             max(self.cutoff.values()) if isinstance(self.cutoff, dict)
@@ -659,6 +666,65 @@ class StructureAnalyser:
         return result
 
     # ── Summary and reporting ───────────────────────────────────────────
+
+    def convergence_report(self, tolerances=None, *, descriptors=None,
+                           confidence=0.95, sizes=None, max_structures=1000000):
+        """Report ensemble precision against declared absolute tolerances.
+
+        Core descriptor names are ``density`` (g/cm3),
+        ``coordination.Si-O`` and ``total_coordination.Si`` (neighbours),
+        ``bond_distance.O-Si`` (angstrom), and ``bond_angle.O-Si-O`` (degrees),
+        with the species present in this ensemble replacing these examples.
+        Each observation is one structure's mean, regardless of its atom count.
+
+        ``tolerances`` maps descriptor names to positive absolute confidence
+        half-widths. Undeclared descriptors are reported without a pass/fail
+        decision. ``descriptors`` can add named per-structure values or existing
+        uncertainty summaries, for example
+        ``{"rdf.total": self.rdf()["uncertainty"]}``. Additional observations
+        must align with this ensemble and may not replace core descriptors.
+
+        The curve uses full-ensemble variance and Student-t multipliers;
+        reordering the same observations cannot change it. Projections assume
+        independent structures with unchanged variance and descriptor
+        availability. Curve-valued descriptors require every point's half-width
+        to meet the tolerance; intervals remain pointwise, not simultaneous.
+        See :func:`amorphgen.analysis.convergence_report` for report fields,
+        missing-data handling and the distinction from generation-prefix tests.
+        """
+        from collections.abc import Mapping
+        from .convergence import convergence_report
+
+        values = {"density": self.density()["uncertainty"]}
+        for prefix, results in (
+                ("coordination", self.coordination()),
+                ("total_coordination", self.total_coordination()),
+                ("bond_distance", self.bond_distances()),
+                ("bond_angle", self.bond_angles())):
+            values.update({f"{prefix}.{key}": result["uncertainty"]
+                           for key, result in results.items()})
+        core_names = set(values)
+        if descriptors is not None:
+            if not isinstance(descriptors, Mapping):
+                raise ValueError("descriptors must be a mapping of names to observations")
+            overlap = values.keys() & descriptors.keys()
+            if overlap:
+                raise ValueError("Additional descriptors cannot replace core descriptors: "
+                                 + ", ".join(sorted(overlap)))
+            values.update(descriptors)
+        report = convergence_report(values, tolerances, confidence=confidence,
+                                    sizes=sizes, max_structures=max_structures)
+        units = {"density": "g/cm^3", "coordination": "neighbours",
+                 "total_coordination": "neighbours", "bond_distance": "angstrom",
+                 "bond_angle": "degrees"}
+        for name, result in report["descriptors"].items():
+            prefix = name.split(".", 1)[0]
+            if name in core_names and prefix in units:
+                result["units"] = units[prefix]
+        report["analysis_settings"] = {
+            "cutoff": self.cutoff, "cutoff_mode": self._cutoff_mode,
+        }
+        return report
 
     def summary(self, show_angles=True):
         lines = []
