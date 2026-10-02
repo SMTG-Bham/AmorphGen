@@ -1820,6 +1820,8 @@ def main():
             output_format=output_format,
             relax=do_relax and not use_torchsim,
             calc=calc,
+            safety=override.get("safety"),
+            repulsive_core=override.get("repulsive_core"),
             fmax=fmax,
             max_relax_steps=max_relax_steps,
             optimizer=optimizer,

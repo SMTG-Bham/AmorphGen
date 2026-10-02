@@ -143,6 +143,16 @@ For ensembles on a GPU there is a second execution engine, [torch-sim](https://g
 
 > **ASE pass-through.** AmorphGen wraps each backend's upstream ASE calculator without modifying unit conventions, stress signs, or PBC handling; energies (eV), forces (eV/Å), stress (eV/Å³), and `atoms.pbc` are inherited directly from the upstream MLIP package. See [docs/guides/backends](https://smtg-bham.github.io/AmorphGen/guides/backends.html) for details.
 
+### MLIP failure checks
+
+MD and relaxation (ASE, torch-sim, and random-gen relaxation) stop on NaN/Inf,
+close contacts, abrupt energy changes, or temperature/volume runaway before
+saving invalid results. Configure the limits with the top-level `safety` YAML
+block. Optional `repulsive_core` and `safety.reference` settings add short-range
+repulsion and periodic checks against an independent model. See the
+[YAML configuration guide](docs/guides/yaml-config.md#mlip-failure-checks-and-optional-stabilisation)
+for defaults, units, and examples.
+
 </details>
 
 ---

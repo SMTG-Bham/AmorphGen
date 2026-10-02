@@ -40,7 +40,7 @@ def compute_density_gcm3(atoms) -> float:
 # ═════════════════════════════════════════════════════════════════════════════
 
 class DivergenceError(RuntimeError):
-    """Non-finite energy/forces during MD or relaxation — the run diverged.
+    """Invalid state or an MLIP safety limit exceeded during MD or relaxation.
 
     Almost always a foundation-model MLIP going out-of-distribution in the
     high-temperature liquid regime, or too large a timestep. Raised eagerly
@@ -635,7 +635,7 @@ TRAJ_LOG_INTERVAL = 100
 
 def attach_outputs(dyn, atoms, logfile: str, trajfile: str,
                    fmt: str = "extxyz", interval: int = TRAJ_LOG_INTERVAL,
-                   append: bool = False, step_offset: int = 0):
+                   append: bool = False, step_offset: int = 0, safety=None):
     """
     Attach an MDLogger and TrajectoryWriter to *dyn*.
 
@@ -650,19 +650,18 @@ def attach_outputs(dyn, atoms, logfile: str, trajfile: str,
 
     Returns (logger, traj_writer) so they can be closed later.
     """
+    from .safety import SafetyMonitor
+    stage_label = os.path.splitext(os.path.basename(trajfile))[0]
+    monitor = SafetyMonitor(safety, context=f"MD stage '{stage_label}'")
+    monitor.check_geometry(atoms, step=step_offset)
     logger = MDLogger(logfile, mode="a" if append else "w", step_offset=step_offset)
     traj = TrajectoryWriter(trajfile, fmt=fmt, append=append)
 
     state = {"skip": append}   # skip the duplicate step-0 write on resume
 
-    # Eager divergence guard. Attached FIRST and every step so it raises before
-    # the trajectory writer below can persist a NaN/Inf frame. Uses the forces
-    # the integrator already computed this step, so it costs no calculator call.
-    stage_label = os.path.splitext(os.path.basename(trajfile))[0]
-
+    # Guard first, on every step, independently of the output interval.
     def _finite_guard():
-        assert_finite(atoms, context=f"MD stage '{stage_label}'",
-                      step=getattr(dyn, "nsteps", None))
+        monitor.check(atoms, step=getattr(dyn, "nsteps", 0) + step_offset)
 
     dyn.attach(_finite_guard, interval=1)
 
@@ -768,9 +767,15 @@ def needs_velocity_init(atoms, elapsed: int) -> bool:
     zeros mean the trajectory format dropped them) and re-initialisation is
     the only option.
     """
+    momenta = atoms.get_momenta()
+    if not np.isfinite(momenta).all():
+        raise DivergenceError(
+            "Non-finite momenta in the MD input/checkpoint — the calculation "
+            "has diverged. Restart from a valid structure and reduce the timestep."
+        )
     if not elapsed:
         return True
-    return not np.abs(atoms.get_momenta()).sum() > 0
+    return not np.abs(momenta).sum() > 0
 
 
 def ramp_resume_position(elapsed: int, steps_per_T: int, n_temps: int):

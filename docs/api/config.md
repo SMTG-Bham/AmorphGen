@@ -55,6 +55,9 @@ settings for stage 7. The CLI defaults to `cell_filter: cubic` for
 `--random-gen --relax`, `--batch-opt`, and `--hybrid-ensemble` unless a filter
 is selected explicitly. Classical calculators ignore `default_dtype`.
 
+See {doc}`/guides/yaml-config` for the `safety` and `repulsive_core` blocks,
+including per-step failure limits and optional reference-model spot checks.
+
 ## Configuration precedence
 
 ```

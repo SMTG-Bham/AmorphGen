@@ -23,7 +23,9 @@ from ase.filters import UnitCellFilter
 from ase.geometry import cell_to_cellpar
 
 from ..utils import get_calculator, merge_config
-from ..utils.common import assert_finite, stage_file
+from ..utils.common import stage_file
+from ..utils.safety import SafetyMonitor
+from ..utils.repulsion import with_repulsive_core
 from ..configs import DEFAULT_CONFIG
 
 OPTIMIZERS = {
@@ -102,9 +104,12 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt",
             model_path=global_cfg.get("model_path"),
             default_dtype=global_cfg.get("default_dtype", "auto"),
         )
+    calc = with_repulsive_core(calc, global_cfg.get("repulsive_core"))
     atoms.calc = calc
 
     formula = atoms.get_chemical_formula(mode="hill")
+    monitor = SafetyMonitor(global_cfg.get("safety"), context=f"optimisation of {formula}")
+    monitor.check(atoms, step=0)
     n_atoms = len(atoms)
     opt_name = cfg.get("optimizer", "LBFGS")
     fmax = cfg.get("fmax", 0.01)
@@ -170,39 +175,39 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt",
             from ase.filters import FrechetCellFilter
             target = FrechetCellFilter(atoms)
 
-        optimizer = OptimizerClass(target, logfile=None, trajectory=trajfile)
+        with OptimizerClass(target, logfile=None, trajectory=trajfile) as optimizer:
 
-        header = (f"\n  {'Step':>5}  {'Energy(eV)':>14}  {'Fmax(eV/A)':>11}  "
-                  f"{'a(A)':>10}  {'b(A)':>10}  {'c(A)':>10}  {'Vol(A3)':>10}")
-        sep = "  " + "-" * 85
-        _log(header, lf)
-        _log(sep, lf)
-
-        for step in range(max_steps):
-            optimizer.step()
-            # The manual step() loop bypasses ASE's irun(), so fire the
-            # observers ourselves or the .traj file is never written.
-            optimizer.nsteps += 1
-            optimizer.call_observers()
-            energy = atoms.get_potential_energy()
-            forces = target.get_forces()
-            # Eager divergence guard: stop before a NaN/Inf is written to disk.
-            assert_finite(atoms, context=f"optimisation of {formula}",
-                          step=step + 1)
-            max_f = float((forces ** 2).sum(axis=1).max() ** 0.5)
-            cp = cell_to_cellpar(atoms.cell)
-            a, b, c = cp[:3]
-            vol = atoms.get_volume()
-            line = (f"  {step+1:5d}  {energy:14.6f}  {max_f:11.6f}  "
-                    f"{a:10.6f}  {b:10.6f}  {c:10.6f}  {vol:10.4f}")
-            _log(line, lf)
-            if max_f < fmax:
-                _log(sep, lf)
-                _log(f"\n  Converged after {step+1} steps!  Fmax = {max_f:.6f} eV/A", lf)
-                break
-        else:
+            header = (f"\n  {'Step':>5}  {'Energy(eV)':>14}  {'Fmax(eV/A)':>11}  "
+                      f"{'a(A)':>10}  {'b(A)':>10}  {'c(A)':>10}  {'Vol(A3)':>10}")
+            sep = "  " + "-" * 85
+            _log(header, lf)
             _log(sep, lf)
-            _log(f"\n  WARNING: did not converge in {max_steps} steps.", lf)
+
+            for step in range(max_steps):
+                optimizer.step()
+                # The manual step() loop bypasses ASE's irun(), so fire the
+                # observers ourselves or the .traj file is never written.
+                optimizer.nsteps += 1
+                monitor.check(atoms, step=step + 1)
+                energy = atoms.get_potential_energy()
+                forces = target.get_forces()
+                # Cell filters may evaluate stress after the first check.
+                monitor.check(atoms, step=step + 1)
+                optimizer.call_observers()
+                max_f = float((forces ** 2).sum(axis=1).max() ** 0.5)
+                cp = cell_to_cellpar(atoms.cell)
+                a, b, c = cp[:3]
+                vol = atoms.get_volume()
+                line = (f"  {step+1:5d}  {energy:14.6f}  {max_f:11.6f}  "
+                        f"{a:10.6f}  {b:10.6f}  {c:10.6f}  {vol:10.4f}")
+                _log(line, lf)
+                if max_f < fmax:
+                    _log(sep, lf)
+                    _log(f"\n  Converged after {step+1} steps!  Fmax = {max_f:.6f} eV/A", lf)
+                    break
+            else:
+                _log(sep, lf)
+                _log(f"\n  WARNING: did not converge in {max_steps} steps.", lf)
 
     # ── Write output files ────────────────────────────────────────────────────
     # Derive base name from input file (if provided) for unique outputs
@@ -399,7 +404,8 @@ def _batch_optimize_torchsim(files, output_dir, cfg, **kwargs):
     paths = list(done_paths)
     if str(batch_size).lower() == "auto":
         from ..utils.torchsim_engine import estimate_batch_size
-        batch_size = estimate_batch_size(model, [read(f) for f in todo[:8]], fraction=0.4, fallback=16)
+        batch_size = estimate_batch_size(model, [read(f) for f in todo[:8]], fraction=0.4, fallback=16,
+                                         safety=full.get("safety"), repulsive_core=full.get("repulsive_core"))
     batch_size = int(batch_size)
     n_chunks = (len(todo) + batch_size - 1) // batch_size
     print(f"  [torch-sim] batch size {batch_size} -> {n_chunks} chunk(s) for {len(todo)} structures")
@@ -436,7 +442,8 @@ def _batch_optimize_torchsim(files, output_dir, cfg, **kwargs):
         try:
             return batch_relax([read(f) for f in chunk], model, fmax=fmax, max_steps=max_steps,
                                cell_filter=cell_filter, optimizer=optimizer,
-                               pressure_tol_gpa=pressure_tol, autobatch=False)
+                               pressure_tol_gpa=pressure_tol, autobatch=False,
+                               safety=full.get("safety"), repulsive_core=full.get("repulsive_core"))
         except RuntimeError as exc:
             if not _is_oom(exc) or len(chunk) == 1:
                 raise

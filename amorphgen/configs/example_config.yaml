@@ -15,6 +15,19 @@ model: mace-mpa-0           # Foundation model: mace-mpa-0, chgnet, 7net-mf-ompa
 device: cuda                 # cuda, cpu, mps, or auto
 default_dtype: float64       # float64 for optimisation, float32 for faster MD
 
+# ── MLIP failure checks (ASE and torch-sim) ───────────────────────────────────
+safety:
+  min_distance: 0.5                  # Angstrom, periodic contacts
+  max_energy_jump_per_atom: 10.0     # eV/atom between steps; null disables
+  max_temperature: 100000.0         # K
+  min_volume_ratio: 0.2              # relative to each stage's initial cell
+  max_volume_ratio: 5.0
+  reference: null                    # opt-in model/interval/max_force_rmse
+repulsive_core:
+  enabled: false
+  cutoff: 1.0                       # Angstrom
+  strength: 1.0                     # eV
+
 # ── Trajectory output format ────────────────────────────────────────────────
 traj_format: extxyz          # extxyz, xyz, traj, lammps-dump
 

@@ -52,6 +52,8 @@ _VALID_TOP_KEYS = {
     "analysis": dict,
     "classical_params": dict,
     "convert": dict,
+    "safety": dict,
+    "repulsive_core": dict,
 }
 
 # Stage sub-keys and expected types.
@@ -315,6 +317,17 @@ def _validate_config(cfg: dict, path: str) -> tuple[list[str], list[str]]:
         if isinstance(block, dict):
             _validate_keys(block, schema, block_name, errors, path)
     _validate_nested_values(cfg, errors, path)
+
+    # The same validation applies to YAML and direct Python API settings.
+    from ..utils.safety import validate_safety_config
+    from ..utils.repulsion import validate_repulsive_core_config
+    for name, validator in (("safety", validate_safety_config),
+                            ("repulsive_core", validate_repulsive_core_config)):
+        if isinstance(cfg.get(name), dict):
+            try:
+                validator(cfg[name])
+            except (TypeError, ValueError) as exc:
+                errors.append(str(exc))
 
     # Only check enum membership for strings, so malformed containers produce
     # validation errors rather than an unhashable-type exception.

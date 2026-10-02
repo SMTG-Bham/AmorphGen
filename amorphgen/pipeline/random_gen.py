@@ -1196,6 +1196,8 @@ def batch_random(
     cell_filter: str = "FrechetCellFilter",
     max_retries: int = 10,
     resume: bool = False,
+    safety: dict | None = None,
+    repulsive_core: dict | None = None,
     **kwargs,
 ) -> list[str]:
     """
@@ -1221,6 +1223,10 @@ def batch_random(
         and relaxation mode match. Incompatible or unreadable run metadata
         raises ValueError before any existing output is changed. Legacy runs
         without metadata are checked against the structures' atom counts.
+    safety : dict, optional
+        MLIP safety limits used during relaxation (see the YAML safety block).
+    repulsive_core : dict, optional
+        Optional short-range repulsion added to the relaxation calculator.
     **kwargs
         Forwarded to generate_random().
 
@@ -1247,6 +1253,11 @@ def batch_random(
         )
     ase_format, ext = _FORMAT_MAP[output_format]
 
+    from ..utils.safety import validate_safety_config
+    from ..utils.repulsion import validate_repulsive_core_config
+    validate_safety_config(safety)
+    validate_repulsive_core_config(repulsive_core)
+
     os.makedirs(output_dir, exist_ok=True)
     # v1.0.0rc2: initial and optimised structures now live in their own
     # subdirectories so that `amorphgen --analyse --input-dir
@@ -1257,6 +1268,7 @@ def batch_random(
     if relax:
         os.makedirs(opt_dir, exist_ok=True)
     paths = []
+    reference_calc = None  # load one reference model for the whole batch
 
     # ── Index selection: `indices="80-90"` (or a list) generates only those
     # structure indices; seeds are index-derived, so the files are identical
@@ -1581,8 +1593,15 @@ def batch_random(
 
             if relax and calc is not None:
                 from ..utils.common import compute_density_gcm3, require_stress
+                from ..utils.safety import SafetyMonitor
+                from ..utils.repulsion import with_repulsive_core
                 from ase.geometry import cell_to_cellpar
+                calc = with_repulsive_core(calc, repulsive_core)
                 atoms.calc = calc
+                monitor = SafetyMonitor(safety, context=f"random structure {generated:04d} relaxation",
+                                        reference_calc=reference_calc)
+                monitor.check(atoms, step=0)
+                reference_calc = monitor.reference_calc
                 # A cell filter relaxes the cell and needs stress; classical
                 # potentials (LJ/Buckingham) don't provide it. Fail clearly
                 # instead of crashing inside ASE (the default cell_filter for
@@ -1619,8 +1638,10 @@ def batch_random(
                 steps_done = 0
                 for step in range(max_relax_steps):
                     opt.step()
+                    monitor.check(atoms, step=step + 1)
                     energy = atoms.get_potential_energy()
                     forces = target.get_forces()
+                    monitor.check(atoms, step=step + 1)
                     max_f = float((forces ** 2).sum(axis=1).max() ** 0.5)
                     cp = cell_to_cellpar(atoms.cell)
                     vol = atoms.get_volume()
