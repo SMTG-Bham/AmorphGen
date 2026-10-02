@@ -389,19 +389,34 @@ Generate random amorphous starting structures:
 amorphgen --random-gen \
     --composition "In2O3*16" \
     --n-structures 20 \
-    --work-dir random_structures/
+    --work-dir In2O3_structures/
 
-# Same with explicit atom counts and target density
+# Same with explicit atom counts and target density of 5.5 g/cm3
 amorphgen --random-gen \
     --composition In=32,O=48 \
     --target-density 5.5 \
-    --n-structures 20
+    --n-structures 20 \
+    --work-dir In2O3_structures/
 
-# Generate with relaxation
+# Generate 10 random TiO2 and relax with MACE-MPA-0 (LBFGS; FIRE is the robust alternative) to 0.05 eV/Å on CPU; write cif files to random_structures/
 amorphgen --random-gen \
     --composition "TiO2*16" \
     --n-structures 10 \
-    --relax --model mace-mpa-0
+    --relax --model mace-mpa-0 \
+    --optimizer LBFGS --fmax 0.05 \
+    --device cpu --format cif \
+    --work-dir TiO2_structures/
+
+# Generate 10 random TiO2 at 3.5 g/cm³ and relax them with MACE-MPA-0 with --cell-filter none keeps the cubic cell fixed.
+amorphgen --random-gen \
+    --composition "TiO2*16" \
+    --target-density 3.5 \
+    --n-structures 10 \
+    --relax --model mace-mpa-0 \
+    --cell-filter none \
+    --optimizer LBFGS --fmax 0.05 \
+    --device cpu --format cif \
+    --work-dir TiO2_structures/
 
 # Resume after interruption (skips completed structures)
 amorphgen --random-gen \
@@ -546,6 +561,14 @@ amorphgen --analyse --input-dir optimised_structures/ \
 # Compare with literature ranges (a-Ga2O3, a-SiO2, a-GeO2, a-HfO2 ship in examples/)
 amorphgen --analyse --input-dir optimised_structures/ \
     --reference examples/reference_a_GeO2.yaml
+
+# Plot X-ray S(q) by Fourier transform of g(r) 
+amorphgen --analyse --input-dir optimised_structures/ \
+    --sq --sq-weighting xray --sq-method ft --save-plot plots/
+
+# Plot X-ray total correlation function T(r) 
+amorphgen --analyse --input-dir optimised_structures/ \
+    --tr --sq-weighting xray --save-plot plots/
 ```
 
 Notes on the options:
@@ -555,8 +578,7 @@ Notes on the options:
   transform of g(r). Weighting is `xray` (q-dependent Waasmaier–Kirfel form
   factors), `neutron` (Sears scattering lengths) or `unweighted`; `--sq-method ft`
   gives the g(r) transform for comparison. `--sq-partials` adds the Faber-Ziman
-  partials S_ab(q) of every element pair to the CSV and a second plot. A box of
-  about 20 Å (roughly 500 atoms) is needed to see the FSDP.
+  partials S_ab(q) of every element pair to the CSV and a second plot. 
 - `--pair-panels` draws each element pair in its own panel, for g(r) and for
   the S(q) partials, which is easier to read than one axis for a four-element
   system like IGZO.
@@ -587,9 +609,9 @@ Four elements give ten element pairs, three different cation sizes and an
 oxygen that is shared between them. One command covers it:
 
 ```bash
-amorphgen --analyse --input-dir igzo_final/ \
+amorphgen --analyse --input-dir random_opt/ \
     --sq --sq-partials --pair-panels \
-    --total-cn O --total-cn "O:In+Ga" \
+    --total-cn O --total-cn "O:In+Zn+Ga" \
     --save-report report.txt --save-plot plots/
 ```
 
