@@ -460,6 +460,19 @@ def _add_arguments(p):
                            "--save-plot.")
     g_an.add_argument("--voids", action="store_true",
                       help="Sample periodic free-space clearance and accessible volume.")
+    g_an.add_argument("--bond-order", action="store_true",
+                      help="Steinhardt q6, Lechner-Dellago averaged qbar6, ordered "
+                           "fraction and largest ordered cluster (uses "
+                           "--order-cutoff or --cutoff).")
+    g_an.add_argument("--order-cutoff", default=None, metavar="SPEC",
+                      help="Independent neighbor cutoff for bond order and MQ melt "
+                           "memory, in A (number or pair overrides; default: --cutoff).")
+    g_an.add_argument("--qbar6-threshold", type=float, default=None,
+                      help="Minimum qbar6 for crystal-like order (default 0.3; "
+                           "calibrate for the material). Also used by --mq-ensemble.")
+    g_an.add_argument("--order-min-neighbors", type=int, default=None,
+                      help="Minimum shell neighbors for crystal-like order "
+                           "(default 4). Also used by --mq-ensemble.")
     g_an.add_argument("--void-samples", type=int, default=None,
                       help="Random points per cell for --voids (default 10000).")
     g_an.add_argument("--void-probe-radius", type=float, default=None,
@@ -935,7 +948,7 @@ def _run_convert(args, yaml_cfg: dict | None = None) -> None:
 # Ensemble workflow helpers (--mq-ensemble, --hybrid-ensemble)
 # ═════════════════════════════════════════════════════════════════════════════
 
-def _run_mq_ensemble(args, override: dict) -> None:
+def _run_mq_ensemble(args, override: dict, analysis_config=None) -> None:
     """Full melt-quench ensemble: stages 1-4 once + N independent quenches.
 
     Output layout under args.work_dir:
@@ -943,12 +956,14 @@ def _run_mq_ensemble(args, override: dict) -> None:
         snapshots/   N uniform snapshots extracted from stage 4 trajectory
         quench_runs/ per-snapshot stages 5-6-7 outputs (run_0000, run_0001, ...)
         final/       collected final amorphous structures (mq_NNNN.<fmt>)
+        melt_memory.{json,csv,txt}  original-crystal order retention at melt endpoints
     """
-    import glob as _glob
     from .pipeline.run_pipeline import MeltQuenchPipeline
     from .pipeline import batch_quench
     from .utils import get_calculator, extract_snapshots
     from .pipeline.random_gen import _FORMAT_MAP
+    from .analysis.descriptors import bond_order_options
+    from .analysis.melt_memory import prepare_melt_memory, report_melt_memory
 
     work_dir   = args.work_dir or "mq_ensemble"
     shared_dir = os.path.join(work_dir, "shared")
@@ -956,6 +971,11 @@ def _run_mq_ensemble(args, override: dict) -> None:
     quench_dir = os.path.join(work_dir, "quench_runs")
     final_dir  = os.path.join(work_dir, "final")
     os.makedirs(work_dir, exist_ok=True)
+    if analysis_config is None:
+        analysis_config = override.get("analysis", {})
+    order_options = bond_order_options(args, analysis_config)
+    # Validate and resolve the original-crystal order definition before MD.
+    memory_reference = prepare_melt_memory(args.input_file, **order_options)
 
     bar = "=" * 70
     print(f"\n{bar}")
@@ -971,27 +991,44 @@ def _run_mq_ensemble(args, override: dict) -> None:
     pipe.run(stages=[1, 2, 3, 4], resume=args.resume)
 
     # ── Phase 2: extract N snapshots from stage 4 trajectory ─────────────────
-    traj = os.path.join(shared_dir, "stage4_eq_traj.xyz")
+    traj = os.path.join(shared_dir, override.get("eq_high", {}).get(
+        "traj_file", "stage4_eq_traj.xyz"))
     if not os.path.isfile(traj):
         # Backwards-compat: older runs wrote stage4_eq.xyz as the trajectory
         legacy = os.path.join(shared_dir, "stage4_eq.xyz")
         if os.path.isfile(legacy):
             traj = legacy
         else:
+            report_melt_memory(
+                args.input_file, shared_dir, [], work_dir,
+                cfg_override=override, prepared=memory_reference)
             print(f"Error: stage 4 trajectory not found "
                   f"({traj} or {legacy})")
             sys.exit(1)
     print(f"\n[Phase 2/3] Extracting {args.n_structures} snapshots from {traj}")
-    extract_snapshots(traj, n_snapshots=args.n_structures,
-                      select=args.select, output_dir=snap_dir,
-                      burn_in_frames=args.burn_in_frames)
+    try:
+        snap_files = extract_snapshots(traj, n_snapshots=args.n_structures,
+                                       select=args.select, output_dir=snap_dir,
+                                       burn_in_frames=args.burn_in_frames)
+    except Exception:
+        # Preserve diagnostics from completed MD even if a trajectory cannot
+        # be read or the requested sampling range is invalid.
+        try:
+            report_melt_memory(
+                args.input_file, shared_dir, [], work_dir,
+                cfg_override=override, prepared=memory_reference)
+        except Exception as report_error:
+            print(f"Warning: could not save melt-memory report: {report_error}")
+        raise  # Keep the original snapshot-extraction failure.
+
+    # Save melt diagnostics before any expensive or interrupted quench run.
+    # Use the exact extracted files, excluding stale snapshots on resume.
+    report_melt_memory(
+        args.input_file, shared_dir, snap_files, work_dir,
+        cfg_override=override, prepared=memory_reference)
 
     # ── Phase 3: stages 5-6-7 per snapshot (with resume) ─────────────────────
     print(f"\n[Phase 3/3] Stages 5-6-7 (per snapshot) -> {quench_dir}/")
-    snap_files = sorted(
-        _glob.glob(os.path.join(snap_dir, "*.xyz"))
-        + _glob.glob(os.path.join(snap_dir, "*.extxyz"))
-    )
     calc = get_calculator(
         **_classical_kwargs(override),
         model=override.get("model", args.model),
@@ -1344,7 +1381,7 @@ def main():
         if args.input_file is None:
             print("Error: input_file (crystal structure) is required for --mq-ensemble.")
             sys.exit(1)
-        _run_mq_ensemble(args, override)
+        _run_mq_ensemble(args, override, analysis_config=override.get("analysis", {}))
         return
 
     # ── Hybrid-ensemble mode ──────────────────────────────────────────────────

@@ -182,6 +182,10 @@ _BLOCK_SCHEMA = {
         "reference": _OPTIONAL_STRING,
         "energy_ranking": bool,
         "voids": bool,
+        "bond_order": bool,
+        "order_cutoff": (str, int, float, dict),
+        "qbar6_threshold": _NUMBER,
+        "order_min_neighbors": int,
         "void_samples": int,
         "void_probe_radius": _NUMBER,
         "void_bins": int,
@@ -277,6 +281,7 @@ def _validate_nested_values(cfg: dict, errors: list[str], path: str) -> None:
         },
         "analysis": {
             "cutoff": ("pair", _NUMBER),
+            "order_cutoff": ("pair", _NUMBER),
             "void_radii": ("element", _NUMBER),
         },
         "classical_params": {
@@ -291,7 +296,8 @@ def _validate_nested_values(cfg: dict, errors: list[str], path: str) -> None:
         for field, (kind, expected) in fields.items():
             _validate_data_map(
                 block.get(field), kind, expected, f"{block_name}.{field}",
-                errors, path, cutoff=(block_name == "analysis" and field == "cutoff"))
+                errors, path, cutoff=(block_name == "analysis"
+                                      and field in ("cutoff", "order_cutoff")))
 
     analysis = cfg.get("analysis")
     if not isinstance(analysis, dict):

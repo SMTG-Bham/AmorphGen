@@ -44,6 +44,8 @@ Usage
 from .analyser import StructureAnalyser
 from .energy import rank_from_log, format_log_ranking
 from .oxygen import compute_oxygen_speciation
+from .bond_order import compute_bond_order
+from .melt_memory import compute_melt_memory, format_melt_memory
 from .voids import compute_void_distribution
 from .elasticity import compute_elastic_moduli
 from .vibrations import compute_vibrational_dos
@@ -60,6 +62,9 @@ from .comparison_plots import (
 __all__ = [
     "StructureAnalyser",
     "compute_oxygen_speciation",
+    "compute_bond_order",
+    "compute_melt_memory",
+    "format_melt_memory",
     "compute_void_distribution",
     "compute_elastic_moduli",
     "compute_vibrational_dos",

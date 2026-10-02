@@ -3,7 +3,7 @@
 The ``amorphgen.analysis`` module provides ensemble structural analysis for
 amorphous structure files: pair distribution functions, structure factors,
 total correlation functions, coordination
-numbers, bond angles, ring statistics, Voronoi metrics, void distributions,
+numbers, bond angles, bond-orientational order, ring statistics, Voronoi metrics, void distributions,
 oxygen speciation, elastic moduli, harmonic vibrational DOS, energy ranking,
 and validation against literature reference ranges.
 
@@ -22,7 +22,7 @@ API is the ``StructureAnalyser`` class.
 ## Optional material descriptors
 
 The following functions are also exported from `amorphgen.analysis`.
-Their `StructureAnalyser` counterparts are `void_distribution()`,
+Their `StructureAnalyser` counterparts are `bond_order()`, `void_distribution()`,
 `oxygen_speciation()`, `elastic_moduli()` and `vibrational_dos()`.
 All return ensemble and per-structure results; the geometry functions need
 no calculator. Elastic and vibrational calculations require a live ASE
@@ -40,10 +40,12 @@ oxygen = compute_oxygen_speciation(frames, network_formers=["Si"],
 
 See {doc}`/guides/analysis` for physical conventions, calculator cost,
 CLI examples and exports. `amorphgen.analysis.descriptors.save_descriptor`
-accepts a result with the name `voids`, `oxygen_speciation`, `elastic` or
+accepts a result with the name `bond_order`, `voids`, `oxygen_speciation`, `elastic` or
 `vdos` and writes JSON, CSV and PNG, plus PDF with `save_pdf=True`.
 
 ```{eval-rst}
+.. autofunction:: amorphgen.analysis.compute_bond_order
+
 .. autofunction:: amorphgen.analysis.compute_void_distribution
 
 .. autofunction:: amorphgen.analysis.compute_oxygen_speciation
@@ -51,6 +53,58 @@ accepts a result with the name `voids`, `oxygen_speciation`, `elastic` or
 .. autofunction:: amorphgen.analysis.compute_elastic_moduli
 
 .. autofunction:: amorphgen.analysis.compute_vibrational_dos
+```
+
+### Bond order result
+
+```python
+from amorphgen.analysis import StructureAnalyser
+
+sa = StructureAnalyser("structures/", cutoff="auto-rdf")
+order = sa.bond_order(qbar6_threshold=0.3, min_neighbors=4,
+                      cutoff=3.5)  # example order shell; choose for the material
+frame = order["per_structure"][0]
+print(frame["ordered_fraction"], frame["largest_cluster_size"])
+print(frame["q6"], frame["qbar6"], frame["cluster_ids"])
+```
+
+`bond_order(..., cutoff=None)` uses the analyser's resolved cutoff unless
+overridden. The standalone `compute_bond_order(atoms_list, cutoff="auto-rdf",
+qbar6_threshold=0.3, min_neighbors=4)` accepts ASE frames directly. Neither
+method loads a calculator.
+
+`parameters` records the resolved `cutoff`, `qbar6_threshold` and
+`min_neighbors`. Each `per_structure` item contains `index`, `n_atoms`,
+per-atom arrays `q6`, `qbar6`, `neighbor_counts`, `ordered`, `cluster_ids`,
+and scalar `ordered_count`, `ordered_fraction`, `largest_cluster_size`,
+`largest_cluster_fraction`, `q6_mean` and `qbar6_mean`. Cluster IDs are -1
+for disordered atoms. Fractions divide by all atoms in the structure;
+cluster sizes count unique cell atoms. Top-level scalar summaries are
+arithmetic means across structures, including `largest_cluster_size`.
+
+See {doc}`/guides/analysis` for the order equations and threshold calibration,
+and {doc}`/guides/mq-ensemble` for the automatic initial-crystal retention
+report.
+
+### Initial-crystal retention
+
+`compute_melt_memory(initial_atoms, frames, cutoff="auto-rdf",
+qbar6_threshold=0.3, min_neighbors=4)` takes an original ASE structure and
+a mapping from checkpoint labels to ASE frames. Its `initial` and
+`comparisons` entries contain order summaries; `survival_fraction` divides
+the retained initially ordered atom count by the original ordered count.
+`parameters` stores the fixed cutoff resolved from the input.
+
+No initially ordered atoms gives an unavailable (`None`) survival fraction.
+Atom-count or element-sequence mismatches raise `ValueError` in this Python
+helper; the automatic MQ file report instead records unavailable checkpoint
+rows with reasons. Both require preserved atom indices and measure endpoint
+retention, so neither establishes uninterrupted crystal survival.
+
+```{eval-rst}
+.. autofunction:: amorphgen.analysis.compute_melt_memory
+
+.. autofunction:: amorphgen.analysis.format_melt_memory
 ```
 
 ## Reference-validation helpers
@@ -96,6 +150,8 @@ import these directly:
 |---|---|
 | ``analysis.rdf`` | Pair distribution function g(r), partial RDFs, S(q), T(r) |
 | ``analysis.structure`` | Coordination numbers, bond distances, bond angles |
+| ``analysis.bond_order`` | Steinhardt $q_6$, Lechner–Dellago $\bar q_6$ and periodic ordered clusters |
+| ``analysis.melt_memory`` | Initial ordered-atom retention at MQ melt endpoints and snapshots |
 | ``analysis.rings`` | Shortest-path ring statistics with periodic-image closure |
 | ``analysis.voronoi`` | Voronoi cell volumes and connectivity |
 | ``analysis.voids`` | Periodic Monte Carlo point clearance and accessible volume |

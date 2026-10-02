@@ -22,6 +22,7 @@ That's the entire workflow. Internally:
 
 1. **Stages 1-4** run once on `GaO.xyz`, writing `ga2o3_mq/shared/` (incl. `stage4_eq_traj.xyz`).
 2. **Up to N=20** uniformly spaced snapshots are extracted from the stage-4 trajectory into `ga2o3_mq/snapshots/`.
+   The initial crystal, melt endpoints and snapshots are compared in the automatic `melt_memory` report before quenching.
 3. **Stages 5-6-7** run independently on each snapshot, output to `ga2o3_mq/quench_runs/run_NNNN/`.
 4. **Final amorphous structures** are collected to `ga2o3_mq/final/mq_NNNN.<format>`.
 
@@ -31,6 +32,7 @@ That's the entire workflow. Internally:
 
 ```text
 ga2o3_mq/
+├── melt_memory.{json,csv,txt}     # initial crystal order retained at melt endpoints/snapshots
 ├── shared/
 │   ├── stage1_opt.xyz
 │   ├── stage2_eq.xyz
@@ -66,7 +68,71 @@ For a single input, the ASE engine writes the stage outputs directly inside
 `--mq-ensemble` uses the ASE engine; batched torch-sim MD is available in
 `--hybrid-ensemble`.
 
-### HPC job-array tip
+## How much starting crystal survives the melt?
+
+Every `--mq-ensemble` run writes `melt_memory.txt`, `melt_memory.csv` and
+`melt_memory.json` in its work directory, before the per-snapshot quenches.
+The report compares the original input with the end of stage 3
+(`shared/stage3_melted.xyz`), the end of stage 4 (`shared/stage4_eq.xyz`),
+and every extracted high-temperature snapshot. Resume runs regenerate this
+report from the input and available checkpoints.
+
+The order criterion is the same Lechner–Dellago $\bar q_6$ descriptor used by
+`--analyse --bond-order`: an atom must meet the `--qbar6-threshold` (default
+0.3) and `--order-min-neighbors` (default 4). The `--order-cutoff` (falling
+back to `--cutoff` when omitted) is resolved
+once on the **original input**, then kept fixed for all comparisons while
+using each frame's cell and periodic boundaries. Choose `--order-cutoff` and the
+order threshold against crystalline and liquid references for your material;
+the defaults are not a validated GeTe classifier.
+
+The report contains the total ordered fraction, largest ordered cluster and
+the surviving fraction of the initially ordered atoms. If $O_0$ denotes the
+ordered atom indices in the original input and $O_t$ those at a checkpoint,
+the survival diagnostic is
+
+$$f_{\mathrm{surviving}}(t)=\frac{|O_0\cap O_t|}{|O_0|}.$$
+
+Its denominator is the **initially ordered population**, not all atoms.
+For example, if 80 of 100 input atoms meet the criterion and 20 of those
+remain ordered at the end of heating, survival is 25%, even if additional
+atoms become ordered. Cluster sizes count unique atoms in the cell and
+include connections through periodic boundaries.
+
+This measures order at the sampled endpoints. It cannot distinguish
+continuous survival from melting followed by recrystallisation, establish
+retention of a specific lattice, or prove liquid equilibration. High retained
+order is a reason to inspect the melt before treating its quenches as
+independent amorphous samples. Check final structures separately for ordering
+that appears during quenching.
+
+Atom identities follow the input's atom indices. The report checks atom
+count and the full element sequence; missing checkpoints, incompatible
+structures or an input with no ordered atoms yield an explicit unavailable
+survival value (`null` in JSON), rather than zero survival. The pipeline
+preserves atom order; rearranging same-species indices outside the pipeline
+cannot be detected from the element sequence alone. JSON includes the
+criterion, resolved cutoffs and per-checkpoint data: `initial_ordered_count`,
+`retained_ordered_count`, `survival_fraction`, `lost_initial_order_count` and
+`newly_ordered_count`. Missing checkpoint files are recorded as unavailable;
+a trajectory is not silently substituted for an absent endpoint.
+
+The options can also be supplied in an `analysis:` block in the MQ YAML:
+
+```yaml
+analysis:
+  cutoff: auto-rdf
+  order_cutoff: 3.5   # illustrative ideal-rocksalt GeTe shell; calibrate for your system
+  qbar6_threshold: 0.3
+  order_min_neighbors: 4
+```
+
+The report is automatic for `--mq-ensemble`; `analysis.bond_order: true` is
+only needed when requesting the descriptor in a separate `--analyse` run.
+See {doc}`analysis` for the equations, output conventions and calibration
+guidance.
+
+## HPC job-array tip
 
 When splitting the per-snapshot quenches across SLURM array tasks, give **each
 task its own output directory**. A single-input `--batch-quench` writes directly
@@ -242,9 +308,14 @@ To compare structural metrics with reference ranges, pair `--mq-ensemble` with a
 
 ```bash
 amorphgen --analyse --input-dir ga2o3_mq/final/ \
-    --cutoff auto-rdf --per-structure \
+    --cutoff auto-rdf --per-structure --bond-order \
     --reference reference_a_Ga2O3.yaml \
     --save-report mq_report.txt --save-plot mq_plots/ --save-pdf
 ```
 
-This writes structural analysis (RDF, CN, bond angles) and a table comparing available metrics with the supplied ranges. Check the provenance of each range and use additional validation appropriate to the intended application. See {doc}`yaml-config` for the reference YAML format.
+This writes structural analysis (RDF, CN, bond angles, $q_6$/$\bar q_6$ and
+ordered clusters) and a table comparing available reference-supported metrics
+with the supplied ranges. Bond order is a separate diagnostic and is not
+scored by the reference YAML. Check the provenance of each range and use
+additional validation appropriate to the intended application. See
+{doc}`yaml-config` for the reference YAML format.

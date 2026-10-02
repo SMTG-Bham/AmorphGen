@@ -34,7 +34,7 @@ class StructureAnalyser:
     """
     Analyse amorphous structures: density, coordination, distances,
     angles, RDF, S(q), rings, Voronoi, voids, oxygen speciation,
-    elastic moduli, vibrational DOS and energy ranking.
+    crystal-like bond order, elastic moduli, vibrational DOS and energy ranking.
 
     Parameters
     ----------
@@ -272,6 +272,21 @@ class StructureAnalyser:
         """
         from .structure import compute_dimers
         return compute_dimers(self.atoms_list, threshold_frac=threshold_frac)
+
+    def bond_order(self, qbar6_threshold=0.3, min_neighbors=4, cutoff=None):
+        """Steinhardt q6, Lechner--Dellago qbar6 and ordered clusters.
+
+        Uses this analyser's resolved neighbour cutoffs unless ``cutoff``
+        is provided. Ordered atoms have qbar6 at least ``qbar6_threshold``
+        and at least ``min_neighbors`` neighbour images. Calibrate the
+        threshold against the material's crystal and liquid structures.
+        See :func:`amorphgen.analysis.compute_bond_order` for output fields.
+        """
+        from .bond_order import compute_bond_order
+        return compute_bond_order(
+            self.atoms_list, self.cutoff if cutoff is None else cutoff,
+            qbar6_threshold=qbar6_threshold, min_neighbors=min_neighbors,
+        )
 
     def bond_distances(self, pair=None):
         """Compute bond distance statistics.

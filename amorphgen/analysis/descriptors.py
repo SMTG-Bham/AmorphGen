@@ -11,6 +11,22 @@ import numpy as np
 
 def format_descriptor(name, result):
     """Return a compact, unit-labelled report for a computed descriptor."""
+    if name == "bond_order":
+        params = result["parameters"]
+        lines = ["\n  Crystal-like order (Steinhardt q6 / Lechner-Dellago qbar6):",
+                 f"    Criterion: qbar6 >= {params['qbar6_threshold']:g}; "
+                 f"neighbors >= {params['min_neighbors']}",
+                 f"    Neighbor cutoff (A): {params['cutoff']}",
+                 "    Structure    mean q6   mean qbar6    ordered     largest cluster"]
+        for row in result["per_structure"]:
+            lines.append(
+                f"    {row['index']:9d}    {row['q6_mean']:.5f}      "
+                f"{row['qbar6_mean']:.5f}    {100 * row['ordered_fraction']:6.2f}%"
+                f"    {row['largest_cluster_size']:6d}/{row['n_atoms']} "
+                f"({100 * row['largest_cluster_fraction']:.2f}%)")
+        lines.append("    Geometric order criterion; calibrate the cutoff and threshold "
+                     "against crystal and liquid references.")
+        return "\n".join(lines)
     if name == "voids":
         return ("\n  Void distribution (sampled point clearance):\n"
                 f"    Accessible fraction: {result['accessible_fraction']:.6f} "
@@ -77,7 +93,26 @@ def save_descriptor(name, result, output_dir, *, dpi=300, save_pdf=False,
             writer.writerows(rows)
 
     fig, ax = _figure(figsize=(6.0, 4.0))
-    if name == "voids":
+    if name == "bond_order":
+        columns = ["index", "n_atoms", "q6_mean", "qbar6_mean", "ordered_count",
+                   "ordered_fraction", "largest_cluster_size", "largest_cluster_fraction"]
+        write_csv(base.with_suffix(".csv"), columns,
+                  ([row[key] for key in columns] for row in result["per_structure"]))
+        write_csv(directory / "analysis_bond_order_atoms.csv",
+                  ["structure_index", "atom_index", "q6", "qbar6", "neighbor_count",
+                   "ordered", "cluster_id"],
+                  ([row["index"], i, q6, qbar6, count, int(ordered), cluster]
+                   for row in result["per_structure"]
+                   for i, (q6, qbar6, count, ordered, cluster) in enumerate(zip(
+                       row["q6"], row["qbar6"], row["neighbor_counts"],
+                       row["ordered"], row["cluster_ids"]))))
+        values = [value for row in result["per_structure"] for value in row["qbar6"]]
+        ax.hist(values, bins=np.linspace(0, 1, 51), color=_PALETTE[0])
+        ax.axvline(result["parameters"]["qbar6_threshold"], color=_PALETTE[1],
+                   linestyle="--", label="Order threshold")
+        ax.set(xlabel="Lechner–Dellago averaged q₆", ylabel="Atom count")
+        ax.legend(frameon=False)
+    elif name == "voids":
         write_csv(base.with_suffix(".csv"),
                   ["clearance_A", "probability_density_per_A", "bin_volume_fraction"],
                   zip(result["radius"], result["probability_density"],
@@ -128,6 +163,23 @@ def save_descriptor(name, result, output_dir, *, dpi=300, save_pdf=False,
     print(f"  Saved: {base}.csv / .json")
 
 
+def bond_order_options(args, config):
+    """Shared analysis/MQ settings, with explicit CLI values ahead of YAML."""
+    from ..cli import _typed
+
+    def option(key, default):
+        value = getattr(args, key, None)
+        return config.get(key, default) if value is None else value
+
+    cutoff = getattr(args, "cutoff", "auto-rdf")
+    if not _typed("--cutoff") and cutoff == "auto-rdf":
+        cutoff = config.get("cutoff", cutoff)
+    cutoff = option("order_cutoff", cutoff)
+    return {"cutoff": cutoff,
+            "qbar6_threshold": option("qbar6_threshold", 0.3),
+            "min_neighbors": option("order_min_neighbors", 4)}
+
+
 def run_descriptor_analysis(sa, args, config, override, *, plot_dir=None,
                             report_path=None, plot_kwargs=None):
     """Run explicitly selected descriptors; CLI options override YAML values."""
@@ -138,7 +190,7 @@ def run_descriptor_analysis(sa, args, config, override, *, plot_dir=None,
         value = getattr(args, key, None)
         return config.get(key, default) if value is None else value
 
-    selected = [name for name in ("voids", "oxygen_speciation", "elastic", "vdos")
+    selected = [name for name in ("bond_order", "voids", "oxygen_speciation", "elastic", "vdos")
                 if enabled(name)]
     if not selected:
         return
@@ -154,7 +206,13 @@ def run_descriptor_analysis(sa, args, config, override, *, plot_dir=None,
                if "classical_params" in override else {}))
     for name in selected:
         print(f"\n  Computing {name.replace('_', ' ')}...")
-        if name == "voids":
+        if name == "bond_order":
+            options = bond_order_options(args, config)
+            # Without a separate order cutoff, reuse the resolved shells.
+            if getattr(args, "order_cutoff", None) is None and "order_cutoff" not in config:
+                options["cutoff"] = sa.cutoff
+            result = sa.bond_order(**options)
+        elif name == "voids":
             result = sa.void_distribution(
                 n_samples=option("void_samples", 10000),
                 probe_radius=option("void_probe_radius", 0.0),

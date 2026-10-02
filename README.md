@@ -93,6 +93,13 @@ Crystalline input  (POSCAR / .xyz / .cif / .extxyz)
 
 > `--mq-ensemble` extends MQ: stages 1–4 run once, then N independent quenches (stages 5–6–7) are launched from snapshots of the stage-4 trajectory.
 
+It also writes `melt_memory.{txt,csv,json}` before the quenches, reporting
+how much of the initially ordered atom population is still ordered after
+heating and in each high-temperature snapshot. This endpoint comparison
+cannot distinguish uninterrupted survival from melting and recrystallisation.
+See the [MQ-ensemble guide](https://smtg-bham.github.io/AmorphGen/guides/mq-ensemble.html#how-much-starting-crystal-survives-the-melt)
+for the definition and order-threshold settings.
+
 ### 3. Hybrid: random → MQ stages 4-7 (`--hybrid-ensemble`)
 
 ```
@@ -552,7 +559,8 @@ Coordination-aware placement biases the initial structure toward the requested c
 density, bond lengths, coordination numbers, bond angles and partial RDFs. The
 same run can add the structure factor, ring statistics, polyhedral connectivity,
 Voronoi indices, a close-contact check and a validation against literature
-ranges. Optional descriptors add void distributions, oxygen speciation,
+ranges. Optional descriptors add crystal-like order and ordered cluster sizes,
+void distributions, oxygen speciation,
 stress-derived elastic moduli and harmonic vibrational DOS. Every quantity
 that is plotted is also written as a CSV.
 
@@ -586,6 +594,12 @@ amorphgen --analyse --input-dir optimised_structures/ \
 amorphgen --analyse --input-dir silica/ --voids --oxygen-speciation \
     --network-formers Si --save-plot descriptors/
 
+# Crystal-like order in a phase-change ensemble
+amorphgen --analyse --input-dir gete_mq/final/ --bond-order \
+    --order-cutoff 3.5 \
+    --qbar6-threshold 0.3 --order-min-neighbors 4 \
+    --save-report gete_report.txt --save-plot gete_plots/
+
 # Elastic response and harmonic cell modes, using the selected MLIP
 amorphgen --analyse --input-dir relaxed_silica/ --elastic --vdos \
     --model mace-mpa-0 --save-plot descriptors/ --save-report descriptors.txt
@@ -608,6 +622,14 @@ Notes on the options:
   polyhedra and the fraction of cations in edge-sharing pairs, which separates a
   corner-sharing network glass from a random packing with the same coordination.
 - `--check-dimers` flags unphysical close contacts (O–O peroxide, N–N) per structure.
+- `--bond-order` reports per-atom Steinhardt q6 and Lechner–Dellago q̄6,
+  ordered atom fractions and the largest connected ordered cluster, including
+  periodic connections. `--order-cutoff` selects the neighbour shell, defaulting
+  to `--cutoff`. The 3.5 Å example isolates the first shell of ideal rocksalt
+  GeTe with lattice constant 6 Å; calibrate it for your structures. The default
+  q̄6 threshold (0.3) and minimum neighbour count (4) need calibration against
+  crystal and liquid references for the material; they do not identify a phase.
+  `--save-plot` exports JSON, per-structure and per-atom CSVs, and a figure.
 - `--voids` samples periodic point clearance using configurable atomic radii;
   `--oxygen-speciation` counts each oxygen's selected network-former neighbours.
 - `--elastic` computes the stiffness tensor and Voigt/Reuss/Hill moduli from

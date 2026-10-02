@@ -120,3 +120,81 @@ def test_descriptor_validation_is_a_cli_error(tmp_path, monkeypatch, capsys):
         run_cli(monkeypatch, ["--analyse", source, "--cutoff", "4", "--voids", "--void-samples", "0"])
     assert exc.value.code == 1
     assert "n_samples" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("enable_in_yaml", [False, True])
+def test_bond_order_exports_and_cli_precedence(tmp_path, monkeypatch, enable_in_yaml):
+    import csv
+    import amorphgen.utils
+
+    def forbidden(**kwargs):
+        raise AssertionError("Bond order must not construct a calculator")
+
+    monkeypatch.setattr(amorphgen.utils, "get_calculator", forbidden)
+    source = tmp_path / "copper.xyz"
+    write(source, bulk("Cu", cubic=True))
+    out = tmp_path / "plots"
+    report = tmp_path / "report.txt"
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.safe_dump({"analysis": {
+        "bond_order": enable_in_yaml, "qbar6_threshold": 0.9,
+        "order_min_neighbors": 20, "cutoff": 2.8,
+        "save_plot": str(out), "save_report": str(report),
+    }}))
+    flags = [] if enable_in_yaml else ["--bond-order"]
+    run_cli(monkeypatch, ["--analyse", source, "--config", config, *flags,
+                          "--qbar6-threshold", "0.4", "--order-min-neighbors", "6",
+                          "--save-pdf", "--dpi", "50"])
+    result = json.loads((out / "analysis_bond_order.json").read_text())
+    assert result["parameters"] == {
+        "cutoff": 2.8, "qbar6_threshold": 0.4, "min_neighbors": 6}
+    row = result["per_structure"][0]
+    assert row["q6"] == pytest.approx([np.sqrt(169 / 512)] * 4)
+    assert row["qbar6"] == pytest.approx(row["q6"])
+    assert row["ordered_fraction"] == 1
+    assert row["largest_cluster_size"] == 4
+    assert result["structure_files"] == [str(source)]
+    for suffix in ("json", "csv", "png", "pdf"):
+        assert (out / f"analysis_bond_order.{suffix}").stat().st_size > 0
+    with (out / "analysis_bond_order_atoms.csv").open() as handle:
+        atoms = list(csv.DictReader(handle))
+    assert len(atoms) == 4
+    assert [int(atom["neighbor_count"]) for atom in atoms] == [12] * 4
+    assert all(atom["ordered"] == "1" for atom in atoms)
+    assert "largest cluster" in report.read_text()
+    args = _get_parser().parse_args(["--analyse", str(source), "--bond-order"])
+    assert not _requires_calculator(args)
+
+
+@pytest.mark.parametrize("option,value", [("--qbar6-threshold", "nan"),
+                                         ("--order-min-neighbors", "0")])
+def test_bond_order_invalid_settings_are_cli_errors(tmp_path, monkeypatch, capsys,
+                                                  option, value):
+    source = tmp_path / "copper.xyz"
+    write(source, bulk("Cu", cubic=True))
+    with pytest.raises(SystemExit) as exc:
+        run_cli(monkeypatch, ["--analyse", source, "--cutoff", "2.8",
+                              "--bond-order", option, value])
+    assert exc.value.code == 1
+    assert "Error: descriptor analysis:" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("use_cli", [False, True])
+def test_gete_order_shell_is_independent_of_chemical_shell(tmp_path, monkeypatch, use_cli):
+    source = tmp_path / "gete.xyz"
+    write(source, bulk("GeTe", "rocksalt", a=6.0, cubic=True))
+    out = tmp_path / "plots"
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.safe_dump({"analysis": {
+        "bond_order": True, "cutoff": 4.5,
+        "order_cutoff": 4.5 if use_cli else 3.5,
+        "save_plot": str(out),
+    }}))
+    flags = ["--order-cutoff", "3.5"] if use_cli else []
+    run_cli(monkeypatch, ["--analyse", source, "--config", config, *flags, "--dpi", "50"])
+    result = json.loads((out / "analysis_bond_order.json").read_text())
+    row = result["per_structure"][0]
+    assert result["parameters"]["cutoff"] == 3.5
+    assert row["neighbor_counts"] == [6] * 8
+    assert row["qbar6"] == pytest.approx([np.sqrt(1 / 8)] * 8)
+    assert row["largest_cluster_size"] == 8
