@@ -26,6 +26,7 @@ from ..utils import get_calculator, merge_config
 from ..utils.common import stage_file
 from ..utils.safety import SafetyMonitor
 from ..utils.repulsion import with_repulsive_core
+from ..utils.preemption import stop_if_requested
 from ..configs import DEFAULT_CONFIG
 
 OPTIMIZERS = {
@@ -81,6 +82,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt",
     ase.Atoms
     """
     global_cfg = merge_config(DEFAULT_CONFIG, cfg_override)
+    stop_if_requested()
     # Stage 7 inherits the common optimisation settings. CLI flags also
     # create a partial final_opt block, which must override individual
     # values without discarding the rest of a YAML opt block.
@@ -184,6 +186,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt",
             _log(sep, lf)
 
             for step in range(max_steps):
+                stop_if_requested()
                 optimizer.step()
                 # The manual step() loop bypasses ASE's irun(), so fire the
                 # observers ourselves or the .traj file is never written.
@@ -194,6 +197,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt",
                 # Cell filters may evaluate stress after the first check.
                 monitor.check(atoms, step=step + 1)
                 optimizer.call_observers()
+                stop_if_requested()
                 max_f = float((forces ** 2).sum(axis=1).max() ** 0.5)
                 cp = cell_to_cellpar(atoms.cell)
                 a, b, c = cp[:3]
@@ -338,12 +342,23 @@ def batch_optimize(
     output_paths = []
     try:
         for i, fpath in enumerate(files):
+            stop_if_requested()
             abs_path = os.path.join(orig_dir, fpath) if not os.path.isabs(fpath) else fpath
             print(f"\n  [{i+1}/{len(files)}] {os.path.basename(fpath)}")
             print(f"  {'-' * 60}")
+            output_name = os.path.splitext(os.path.basename(fpath))[0] + "_opt.xyz"
+            if kwargs.get("resume") and os.path.isfile(output_name):
+                try:
+                    read(output_name)
+                except Exception:
+                    pass  # Torn output is recomputed from its original input.
+                else:
+                    print(f"  [Resume] {output_name} already relaxed -- skipping")
+                    output_paths.append(os.path.join(output_dir, output_name))
+                    continue
             atoms = run(abs_path, cfg_override=cfg_override, calc=calc, **kwargs)
             output_paths.append(
-                os.path.join(output_dir, os.path.splitext(os.path.basename(fpath))[0] + "_opt.xyz")
+                os.path.join(output_dir, output_name)
             )
     finally:
         os.chdir(orig_dir)

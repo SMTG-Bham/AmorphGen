@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Summarise the class benchmark into one table.
 
-Usage: collect_class_benchmark.py CLASSES_DIR SYSTEMS_FILE
+Usage: collect_class_benchmark.py CLASSES_DIR SYSTEMS_FILE [OUTPUT_TSV]
 
 For every system listed in SYSTEMS_FILE it reads classes/<name>/random_gen.log
 (estimated density), the placed and relaxed structures (densities, energies)
@@ -52,7 +52,7 @@ def parse_report(path):
     return out
 
 
-def main(root, systems_file):
+def main(root, systems_file, output_tsv=None):
     rows = []
     for line in open(systems_file):
         if not line.strip() or line.startswith("#"):
@@ -82,7 +82,7 @@ def main(root, systems_file):
                          ratio=(rr / ref if rr == rr else np.nan), **rep))
     cols = ["cls", "code_cls", "name", "comp", "n_placed", "n_relaxed", "rho_est", "rho_placed", "rho_relaxed",
             "rho_std", "rho_ref", "kind", "ratio", "e_atom", "cn", "dimers", "edge"]
-    out = os.path.join(root, "class_benchmark.tsv")
+    out = output_tsv or os.path.join(root, "class_benchmark.tsv")
     with open(out, "w") as fh:
         fh.write("\t".join(cols) + "\n")
         for r in rows:
@@ -98,4 +98,4 @@ def main(root, systems_file):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[1], sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None)

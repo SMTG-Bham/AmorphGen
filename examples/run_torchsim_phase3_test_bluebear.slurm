@@ -7,6 +7,8 @@
 #      with `timeout` part-way through a stage, then resubmitted in-job with
 #      --resume. Look for "[Stage N] resuming from step" in the second run and
 #      check that the per-run logs continue without a gap.
+#SBATCH --signal=B:USR1@120
+#SBATCH --requeue
 #SBATCH --job-name=ts_phase3
 # Export AMORPHGEN_VENV=/path/to/venv before submitting (see docs/guides/hpc.md).
 # For repository files, AMORPHGEN_ROOT defaults to the submission directory.
@@ -19,14 +21,16 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=48G
 #SBATCH --output=logs/ts_phase3_%j.out
-set -uo pipefail
+set -euo pipefail
+PKG=${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
+if [[ ! -f "$PKG/amorphgen/slurm_runtime.sh" && -f "$PKG/../amorphgen/slurm_runtime.sh" ]]; then
+    PKG=$(cd "$PKG/.." && pwd)
+fi
+source "$PKG/amorphgen/slurm_runtime.sh"
+amorphgen_slurm_main "$0" "$@"
 export PYTHONUNBUFFERED=1
 mkdir -p logs
-module purge
-module load bear-apps/2024a/live
-module load Python/3.12.3-GCCcore-13.3.0
-source "${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}/bin/activate"
-PKG=${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
+amorphgen_slurm_bluebear_environment "bear-apps/2024a/live" "Python/3.12.3-GCCcore-13.3.0"
 python -m pip install -q pytest      # ensure the test runner is available
 python -c "import torch, torch_sim; print('torch', torch.__version__, '| cuda', torch.cuda.is_available(), '|', torch.cuda.get_device_name(0), '| torch-sim', torch_sim.__version__)"
 
@@ -35,16 +39,24 @@ echo "=== 1. GPU tests ==="
 ( cd "$PKG" && python -m pytest test/test_torchsim_engine.py test/test_mace_integration.py -q --tb=short --run-mace -p no:cacheprovider )
 
 echo "=== 2. auto batch size: batched relaxation of 4 x 350-atom IGZO ==="
-IN=igzo_100/subset10; T=phase3_test; rm -rf $T; mkdir -p $T/in4
+IN=igzo_100/subset10; T=phase3_test; mkdir -p $T/in4
 for i in 0 1 2 3; do cp $IN/random_000${i}_opt.xyz $T/in4/; done
-amorphgen --batch-opt --input-dir $T/in4 -o $T/relax_auto -m mace-mpa-0 -d cuda \
+amorphgen --batch-opt --resume --input-dir $T/in4 -o $T/relax_auto -m mace-mpa-0 -d cuda \
     --default-dtype float32 --engine torchsim --batch-size auto -C cubic -f 0.05 --opt-steps 200
 
 echo "=== 3. frame-level resume: kill a short hybrid MD run, then --resume ==="
 MD="--eq-high-ensemble NVT --eq-high-T 2000 --eq-high-steps 1000 --quench-ensemble NVT --quench-T-start 2000 --quench-T-end 300 --quench-T-step -100 --quench-steps-per-T 50 --eq-low-ensemble NVT --eq-low-T 300 --eq-low-steps 500 -C cubic -f 0.05"
-CMD="amorphgen --hybrid-ensemble --input-dir $T/in4 -o $T/md_resume -m mace-mpa-0 -d cuda --default-dtype float32 --seed 7 --engine torchsim --batch-size auto $MD"
+CMD="amorphgen --hybrid-ensemble --resume --input-dir $T/in4 -o $T/md_resume -m mace-mpa-0 -d cuda --default-dtype float32 --seed 7 --engine torchsim --batch-size auto $MD"
 # ~2350 steps x 4 structures at ~40 ms/step/structure = ~6 min; kill at 3 min (inside stage 4 or 5)
-timeout --signal=KILL 180 $CMD || echo "  (killed as intended after 180 s, exit $?)"
+if timeout --signal=KILL 180 $CMD; then
+    echo "  (run completed before the timeout)"
+else
+    status=$?
+    case $status in
+        124|137) echo "  (killed as intended after 180 s, exit $status)" ;;
+        *) exit "$status" ;;
+    esac
+fi
 echo "--- trajectory frames at the kill:"
 for r in $T/md_resume/quench_runs/run_*; do echo "  $(basename $r): $(ls $r)"; done
 echo "--- resume:"

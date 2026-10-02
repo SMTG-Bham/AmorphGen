@@ -10,9 +10,8 @@
 # fixed-cell run (run_iro2_validation_bluebear.slurm) to show that the local
 # structure (RDF/CN) stays correct while only the density is wrong.
 #
-# Each task generates a distinct structure: the CLI has no --seed, so each
-# process seeds np.random.default_rng(None) from OS entropy -> 20 independent
-# samples.
+# Each task uses seed 2026 + task ID, producing distinct reproducible samples
+# and preserving the same sample when a preempted task resumes.
 #
 # bbshort is CPU-only with a short walltime cap (~10 min). Each task is sized
 # to fit: 1 structure, CPU+float32, opt-steps 200. If your bbshort allows more
@@ -20,6 +19,8 @@
 # add `#SBATCH --gres=gpu:1` and switch to `--device cuda --default-dtype float64`.
 # ----------------------------------------------------------------------------
 
+#SBATCH --signal=B:USR1@120
+#SBATCH --requeue
 #SBATCH --job-name=amg_iro2_cubic
 # Export AMORPHGEN_VENV=/path/to/venv before submitting (see docs/guides/hpc.md).
 # For repository files, AMORPHGEN_ROOT defaults to the submission directory.
@@ -35,12 +36,15 @@
 #SBATCH --output=logs/iro2_cubic_%A_%a.out
 #SBATCH --error=logs/iro2_cubic_%A_%a.err
 
-set -eu
+set -euo pipefail
+PKG=${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
+if [[ ! -f "$PKG/amorphgen/slurm_runtime.sh" && -f "$PKG/../amorphgen/slurm_runtime.sh" ]]; then
+    PKG=$(cd "$PKG/.." && pwd)
+fi
+source "$PKG/amorphgen/slurm_runtime.sh"
+amorphgen_slurm_main "$0" "$@"
 
-module purge
-module load bear-apps/2023a/live
-module load Python/3.11.3-GCCcore-12.3.0
-source "${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}/bin/activate"
+amorphgen_slurm_bluebear_environment "bear-apps/2023a/live" "Python/3.11.3-GCCcore-12.3.0"
 
 mkdir -p logs
 TASK=$(printf "%02d" ${SLURM_ARRAY_TASK_ID})
@@ -51,7 +55,7 @@ python -c "from amorphgen.utils.radii import estimate_cell_length as e, _classif
 print('check:', c({'Ir':40,'O':80}), round(e({'Ir':40,'O':80}),2))"
 
 # One IrO2 structure, cubic-cell relaxation
-amorphgen --random-gen --composition "IrO2*40" -n 1 --relax \
+amorphgen --random-gen --resume --seed "$((2026 + ${SLURM_ARRAY_TASK_ID:-0}))" --composition "IrO2*40" -n 1 --relax \
     --model mace-mpa-0 --device cuda --default-dtype float64 \
     -C cubic -f 0.05 --opt-steps 300 --format vasp \
     -o iro2_cubic/struct_${TASK}/

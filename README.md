@@ -1030,56 +1030,33 @@ AmorphGen/
 ---
 
 <details>
-<summary><h2>HPC (SLURM) example</h2></summary>
+<summary><h2>HPC (Slurm) workflows</h2></summary>
+
+Generate portable job scripts, arrays and dependency chains from one YAML file:
 
 ```bash
-#!/bin/bash
-#SBATCH --job-name=amorphgen
-#SBATCH --gres=gpu:1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
-#SBATCH --time=4:00:00
-
-source /path/to/conda/env/bin/activate
-
-amorphgen /abs/path/to/In2O3_POSCAR \
-    --model mace-mpa-0 \
-    --device cuda \
-    --work-dir /scratch/InO_amorphous \
-    --melt-T-end 2500 --eq-high-T 2500 \
-    --quench-T-start 2500
+amorphgen-slurm examples/slurm_workflow.yaml --output-dir jobs
+bash jobs/submit.sh --account=your-project
 ```
 
-An ensemble of structures on one GPU can use the torch-sim
-engine, which batches the structures and, together with `--resume`, can be
-resubmitted into a short queue until it finishes. Outputs are written after
-every chunk and MD trajectories every 100 steps, so a walltime kill costs at
-most one relaxation chunk or 100 MD steps:
+Edit [the example workflow](examples/slurm_workflow.yaml) for your paths and
+resources. The generator writes standalone `.slurm` scripts and a submission
+script; it does not submit jobs. The default profile is generic; add
+`--profile bluebear` for BlueBEAR defaults. Arrays give every task its own
+work directory, and `aftercorr` dependencies connect matching array tasks.
 
-```bash
-#!/bin/bash
-#SBATCH --job-name=amorphgen_ens
-#SBATCH --gres=gpu:1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=48G
-#SBATCH --time=1:00:00
-export PYTHONUNBUFFERED=1            # progress in the log while the job runs
+Generated scripts handle `USR1` and `TERM` so resumable AmorphGen commands can
+stop at a checkpoint boundary. Include `--resume` in those commands. Optional
+requeue restarts interrupted jobs when the cluster permits it; preemption
+signals and grace periods are configured by the site. Completed structures
+are reused, unfinished optimisations restart, and MD resumes from saved
+frames without promising bitwise continuation.
 
-source /path/to/venv/bin/activate    # Python 3.12 with amorphgen[mace,torchsim]
-
-amorphgen --hybrid-ensemble --input-dir /scratch/geo2_seeds/random_opt/ \
-    --model mace-mpa-0 --device cuda \
-    --engine torchsim --batch-size auto \
-    --work-dir /scratch/geo2_hybrid --resume
-```
-
-Ready-made BlueBEAR scripts for generation arrays, batched relaxation, batched
-MD and the GPU test suite are in `examples/`. Set `AMORPHGEN_VENV`, select your
-account with `sbatch --account=your-project`, and create `logs/` before submitting.
-See the [HPC guide](https://github.com/SMTG-Bham/AmorphGen/blob/main/docs/guides/hpc.md#configuring-the-bundled-examples) for
-repository paths and cluster-specific setup.
+The existing 27 BlueBEAR scripts in `examples/` also support signal handling
+and dependency submission. Set `AMORPHGEN_VENV`, choose your account with
+`sbatch --account=your-project`, and create `logs/` before submitting.
+See the [HPC guide](docs/guides/hpc.md) for the YAML format, array isolation,
+dependency conditions and restart limits.
 
 </details>
 

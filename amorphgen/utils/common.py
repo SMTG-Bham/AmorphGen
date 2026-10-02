@@ -651,6 +651,8 @@ def attach_outputs(dyn, atoms, logfile: str, trajfile: str,
     Returns (logger, traj_writer) so they can be closed later.
     """
     from .safety import SafetyMonitor
+    from .preemption import stop_if_requested
+    stop_if_requested()
     stage_label = os.path.splitext(os.path.basename(trajfile))[0]
     monitor = SafetyMonitor(safety, context=f"MD stage '{stage_label}'")
     monitor.check_geometry(atoms, step=step_offset)
@@ -668,6 +670,7 @@ def attach_outputs(dyn, atoms, logfile: str, trajfile: str,
     def _observe():
         if state["skip"]:
             state["skip"] = False
+            stop_if_requested()
             return
         logger.log(dyn, atoms)
         # Write a wrapped COPY: wrapping the live atoms between run()
@@ -685,6 +688,9 @@ def attach_outputs(dyn, atoms, logfile: str, trajfile: str,
             if res:
                 img.calc = SinglePointCalculator(img, **res)
         traj.write(img)
+        # Keep the regular frame spacing used by read_md_checkpoint. Raising
+        # here runs each stage's finally block, closing both output streams.
+        stop_if_requested()
 
     dyn.attach(_observe, interval=interval)
 

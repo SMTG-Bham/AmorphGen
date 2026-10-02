@@ -11,7 +11,8 @@ momenta pass through without conversion; its public API takes the timestep in
 ps, temperatures in K and the Langevin friction in 1/ps.
 
 Not supported here: NPT stages (torch-sim has only Langevin NPT, which is not
-what the ASE path uses) and frame-level resume inside a stage.
+what the ASE path uses). The batch-quench driver resumes from synchronized
+per-run trajectory blocks.
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ import numpy as np
 
 from .torchsim_engine import _require, resolve_torch_device, _TorchSafetyBridge  # noqa: F401
 from .common import TRAJ_LOG_INTERVAL
+from .preemption import stop_if_requested
 
 _LOG_HEADER = (f"{'Step':>8}  {'Time_ps':>10}  {'T_K':>8}  {'Epot_eV':>12}  "
                f"{'Ekin_eV':>12}  {'Etot_eV':>12}  {'Vol_A3':>10}\n" + "-" * 84 + "\n")
@@ -115,6 +117,7 @@ def batch_nvt(atoms_list, model, temperatures, n_steps: int, timestep_fs: float 
     Returns the final structures as ASE Atoms with momenta.
     """
     _require()
+    stop_if_requested()
     import torch
     import torch_sim as ts
     from torch_sim.integrators.nvt import nvt_langevin_init, nvt_langevin_step
@@ -179,6 +182,9 @@ def batch_nvt(atoms_list, model, temperatures, n_steps: int, timestep_fs: float 
             frames = guard.check(md)
             for w, a in zip(writers, frames):
                 w.write(a, done, timestep_fs)
+        # All structures must reach the same output block before stopping.
+        # With no writers, the caller restarts this calculation from input.
+        stop_if_requested()
     out = guard.check(md)
     dt = time.time() - t0
     log(f"[torch-sim] done in {dt:.1f} s ({1000 * dt / n_steps / max(n, 1):.2f} ms per step per structure); "

@@ -308,11 +308,15 @@ def batch_relax(atoms_list, model, fmax: float = 0.01, max_steps: int = 1000,
     init_fn, step_fn = OPTIM_REGISTRY[ts_opt]
 
     def checked_init(state, model, **kwargs):
+        from .preemption import stop_if_requested
+        stop_if_requested()
         state = init_fn(state=state, model=model, **kwargs)
         guard.check(state)
         return state
 
     def checked_step(state, model, **kwargs):
+        from .preemption import stop_if_requested
+        stop_if_requested()
         guard.advance(state)
         state = step_fn(state=state, model=model, **kwargs)
         guard.check(state)

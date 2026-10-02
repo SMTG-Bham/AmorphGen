@@ -5,6 +5,8 @@
 # nonmetal in its positive state, Be2+ radii, chalcogenide_glass class), into
 # classes_v2/ so the before (classes/) and after tables can be compared.
 # Also retries any first-pass system that has no relaxed structures.
+#SBATCH --signal=B:USR1@120
+#SBATCH --requeue
 #SBATCH --job-name=cls_refix
 # Export AMORPHGEN_VENV=/path/to/venv before submitting (see docs/guides/hpc.md).
 # For repository files, AMORPHGEN_ROOT defaults to the submission directory.
@@ -17,20 +19,23 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=48G
 #SBATCH --output=logs/cls_refix_%j.out
-set -uo pipefail
+set -euo pipefail
+PKG=${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
+if [[ ! -f "$PKG/amorphgen/slurm_runtime.sh" && -f "$PKG/../amorphgen/slurm_runtime.sh" ]]; then
+    PKG=$(cd "$PKG/.." && pwd)
+fi
+source "$PKG/amorphgen/slurm_runtime.sh"
+amorphgen_slurm_main "$0" "$@"
 export PYTHONUNBUFFERED=1
 mkdir -p logs classes_v2
-module purge
-module load bear-apps/2024a/live
-module load Python/3.12.3-GCCcore-13.3.0
-source "${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}/bin/activate"
-PKG=${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
+amorphgen_slurm_bluebear_environment "bear-apps/2024a/live" "Python/3.12.3-GCCcore-13.3.0"
 SYS="$PKG/examples/class_benchmark_systems.txt"
 # EMPTY after the revert of 2026-09-29: no density rule has changed since the
 # last pass, so classes/ + classes_v2/ are current. Put system names here (space
 # separated) when a rule changes and they need regenerating.
 REFIX=""
-grep -v "^#" "$SYS" | grep -wE "$(echo $REFIX | tr ' ' '|')" > classes_v2/systems.txt
+awk -v names="$REFIX" 'BEGIN {n=split(names, selected, " "); for (i=1; i<=n; i++) wanted[selected[i]]=1}
+    !/^#/ && NF && ($2 in wanted) {print}' "$SYS" > classes_v2/systems.txt
 relax_and_analyse () {   # $1 = dir
     amorphgen --batch-opt --input-dir $1/random_initial -o $1/random_opt \
         -m mace-mpa-0 -d cuda --default-dtype float32 --engine torchsim --batch-size auto \
@@ -48,7 +53,10 @@ python "$PKG/examples/collect_class_benchmark.py" classes_v2 classes_v2/systems.
 echo "=== first-pass systems with no relaxed structures: retry"
 grep -v "^#" "$SYS" | while read CLASS NAME COMP RHO KIND; do
     D=classes/$NAME
-    [ -d $D/random_initial ] && [ "$(ls $D/random_opt/*_opt.xyz 2>/dev/null | wc -l)" -eq 0 ] && { echo "== retry $NAME"; relax_and_analyse $D; }
+    if [ -d $D/random_initial ] && [ "$(find "$D/random_opt" -maxdepth 1 -name '*_opt.xyz' 2>/dev/null | wc -l)" -eq 0 ]; then
+        echo "== retry $NAME"
+        relax_and_analyse "$D"
+    fi
 done
 python "$PKG/examples/collect_class_benchmark.py" classes "$SYS" 2>&1 | grep -v "Composition\]" | tail -3
 # merged view for the paper: every system in the current list, taken from

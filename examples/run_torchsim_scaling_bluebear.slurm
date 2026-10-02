@@ -7,6 +7,8 @@
 # engine for reference. Prints wall time and structures per 10 min for each.
 # ----------------------------------------------------------------------------
 
+#SBATCH --signal=B:USR1@120
+#SBATCH --requeue
 #SBATCH --job-name=tsim_scale
 # Export AMORPHGEN_VENV=/path/to/venv before submitting (see docs/guides/hpc.md).
 # For repository files, AMORPHGEN_ROOT defaults to the submission directory.
@@ -21,24 +23,27 @@
 #SBATCH --output=logs/tsim_scale_%j.out
 
 set -euo pipefail
+PKG=${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
+if [[ ! -f "$PKG/amorphgen/slurm_runtime.sh" && -f "$PKG/../amorphgen/slurm_runtime.sh" ]]; then
+    PKG=$(cd "$PKG/.." && pwd)
+fi
+source "$PKG/amorphgen/slurm_runtime.sh"
+amorphgen_slurm_main "$0" "$@"
 export PYTHONUNBUFFERED=1     # show progress lines in the log as they happen
 mkdir -p logs
-module purge
-module load bear-apps/2024a/live
-module load Python/3.12.3-GCCcore-13.3.0
-source "${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}/bin/activate"
+amorphgen_slurm_bluebear_environment "bear-apps/2024a/live" "Python/3.12.3-GCCcore-13.3.0"
 python -c "import torch, torch_sim; print('torch', torch.__version__, '| cuda', torch.cuda.is_available(), '| torch-sim', torch_sim.__version__)"
 
 COMP="InGaZnO4*50"; N=32; OUT=tsim_scale
 mkdir -p $OUT
-amorphgen --random-gen --composition "$COMP" -n $N --seed 1 --target-density 6.1 -o $OUT/initial
+amorphgen --random-gen --resume --composition "$COMP" -n $N --seed 1 --target-density 6.1 -o $OUT/initial
 
 for BS in 4 8 16 32; do
-    /usr/bin/time -f "%e" -o $OUT/time_bs$BS.txt amorphgen --batch-opt --input-dir $OUT/initial/random_initial \
+    /usr/bin/time -f "%e" -o $OUT/time_bs$BS.txt amorphgen --batch-opt --resume --input-dir $OUT/initial/random_initial \
         -m mace-mpa-0 -d cuda --default-dtype float64 -C cubic -O LBFGS -f 0.05 --opt-steps 1000 \
         --engine torchsim --batch-size $BS -o $OUT/torchsim_bs$BS > logs/tsim_scale_bs${BS}_$SLURM_JOB_ID.log 2>&1
 done
-/usr/bin/time -f "%e" -o $OUT/time_ase.txt amorphgen --batch-opt --input-dir $OUT/initial/random_initial \
+/usr/bin/time -f "%e" -o $OUT/time_ase.txt amorphgen --batch-opt --resume --input-dir $OUT/initial/random_initial \
     -m mace-mpa-0 -d cuda --default-dtype float64 -C cubic -O LBFGS -f 0.05 --opt-steps 1000 \
     -o $OUT/ase > logs/tsim_scale_ase_$SLURM_JOB_ID.log 2>&1
 

@@ -1294,6 +1294,26 @@ def _requires_calculator(args, analysis_config=None) -> bool:
 
 
 def main():
+    from .utils.preemption import (checkpoint_signals, stop_if_requested,
+                                   PreemptionRequested)
+    with checkpoint_signals():
+        try:
+            try:
+                result = _main()
+            except SystemExit as exc:
+                if exc.code in (None, 0):
+                    stop_if_requested()
+                raise
+            # A signal during a short stage or non-simulation command must
+            # still prevent successful Slurm dependencies from starting.
+            stop_if_requested()
+            return result
+        except PreemptionRequested as exc:
+            print(f"[Preemption] {exc}", file=sys.stderr)
+            raise SystemExit(exc.code) from None
+
+
+def _main():
     args = parse_args()
 
     # ── Smart default for --work-dir based on mode ───────────────────────────

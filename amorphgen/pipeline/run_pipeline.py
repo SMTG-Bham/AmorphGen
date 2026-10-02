@@ -460,6 +460,8 @@ class MeltQuenchPipeline:
 
         try:
             for s in stages:
+                from ..utils.preemption import stop_if_requested
+                stop_if_requested()
                 name = self.STAGE_NAMES.get(s, f"Stage {s}")
                 print(f"\n{'-' * 65}")
                 print(f"  Stage {s}: {name}")

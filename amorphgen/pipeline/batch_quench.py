@@ -191,6 +191,8 @@ def run(snapshot_files: list[str],
             # A stage whose trajectory is already complete resumes with 0
             # remaining steps (cheap skip); optimisation (7) restarts whole.
             for s in stages:
+                from ..utils.preemption import stop_if_requested
+                stop_if_requested()
                 if s == 4:
                     atoms = equilibrate.run(atoms, cfg_override=run_cfg,
                                             calc=calc, stage="high",

@@ -1657,6 +1657,8 @@ def _batch_random_unlocked(
                      lf)
 
         while generated < n_structures:
+            from ..utils.preemption import stop_if_requested
+            stop_if_requested()
             # Skip if resume and this index already completed
             if generated in not_selected:
                 generated += 1
@@ -1797,6 +1799,7 @@ def _batch_random_unlocked(
                 t_relax_start = time.perf_counter()
                 steps_done = 0
                 for step in range(max_relax_steps):
+                    stop_if_requested()
                     opt.step()
                     monitor.check(atoms, step=step + 1)
                     energy = atoms.get_potential_energy()
