@@ -19,6 +19,48 @@ API is the ``StructureAnalyser`` class.
    :show-inheritance:
 ```
 
+## Cutoff robustness
+
+`StructureAnalyser.cutoff_robustness(window=0.1, points=5)` measures contact
+and coordination sensitivity around the analyser's resolved pair cutoffs.
+`window` is a finite positive half-width in Å; `points` is an odd integer
+of at least three. Automatic cutoffs are resolved once and frozen while
+the same offset is applied to each positive pair cutoff. Values are clipped
+at zero and zero cutoffs stay zero throughout the sweep.
+
+The report includes pooled undirected periodic contact counts and the share
+whose inclusion changes from the lower to the upper endpoint, using the
+upper endpoint contact count as denominator. No contacts gives an undefined
+share. Coordination is directional, with pooled central-site means,
+per-structure means and equal-weight structure means retained. The ordinary
+`distance <= pair cutoff` and `distance < largest cutoff` boundary rules
+apply at every point. See {doc}`/guides/analysis` for interpretation.
+
+`summary(show_angles=True, cutoff_window=0.1)` and
+`per_structure_summary(cutoff_window=0.1)` include the five-point report by
+default. `plot(..., cutoff_window=0.1)` exports it when `save_csv=True`.
+
+```python
+from amorphgen.analysis import (
+    StructureAnalyser, format_cutoff_robustness, save_cutoff_robustness,
+)
+
+sa = StructureAnalyser("structures/", cutoff="auto-rdf")
+report = sa.cutoff_robustness(window=0.15, points=7)
+print(format_cutoff_robustness(report))
+paths = save_cutoff_robustness(report, output_dir="analysis/", prefix="analysis")
+```
+
+`save_cutoff_robustness(report, output_dir=".", prefix="analysis")` writes
+`analysis_cutoff_robustness.json`, `analysis_cutoff_robustness_pairs.csv`
+and `analysis_cutoff_robustness_coordination.csv` with the default prefix.
+
+```{eval-rst}
+.. autofunction:: amorphgen.analysis.format_cutoff_robustness
+
+.. autofunction:: amorphgen.analysis.save_cutoff_robustness
+```
+
 ## Measured scattering and XRD
 
 `StructureAnalyser.compare_experiment()` loads measured S(q) or T(r),

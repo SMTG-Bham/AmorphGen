@@ -505,6 +505,65 @@ second-shell oxygens. The report header lists the cutoff in force for
 every pair, so a per-pair override is easy to check. These numerical values are an
 example, not fixed cutoffs for every IGZO ensemble.
 
+### Cutoff robustness
+
+Every summary reports how sensitive the pair contacts and directional
+coordination are to the selected cutoffs. The default half-window is 0.1 Å:
+the report shows five coordination means at offsets −0.10, −0.05, 0,
++0.05 and +0.10 Å, plus the change from the lowest to the highest cutoff.
+Set the half-window with `--cutoff-window` or `analysis.cutoff_window` in YAML:
+
+```bash
+amorphgen --analyse --input-dir structures/ --cutoff-window 0.15 \
+    --save-report report.txt --save-plot analysis/
+```
+
+For each unordered element pair, the **near-cutoff share** is the number
+of contacts whose inclusion changes between the lower and upper endpoints,
+divided by the number included at the upper endpoint. Counts pool the
+structures and count each undirected periodic contact once; different
+periodic images count separately, as they do in coordination. A pair with
+no contacts at the upper endpoint has an undefined share, printed as `n/a`.
+This denominator makes the reported fraction local to the candidate
+neighbour shell, rather than to all possible atom pairs in the cell.
+
+The selected cutoffs are resolved once, including automatic RDF minima.
+The sweep adds the same offset to every positive pair cutoff, clipping
+negative values to zero; zero cutoffs stay zero throughout the sweep.
+Automatic cutoffs are not refitted during the sweep. Each point
+uses the ordinary coordination boundary rules: a contact must satisfy
+`distance <= pair cutoff` and `distance < largest cutoff`.
+
+Coordination remains directional: Si–O is O neighbours per Si, while O–Si
+is Si neighbours per O. The text shows means pooled over central sites.
+The returned data also retain per-structure means and an ensemble mean
+that weights structures equally, so unequal structure sizes need not be
+treated as equal site populations. A larger near-cutoff share or coordination
+change signals greater sensitivity to the chosen shell boundary; these are
+sensitivity measures, not confidence intervals.
+
+```python
+from amorphgen.analysis import (
+    StructureAnalyser, format_cutoff_robustness, save_cutoff_robustness,
+)
+
+sa = StructureAnalyser("structures/", cutoff="auto-rdf")
+report = sa.cutoff_robustness(window=0.1, points=5)
+print(format_cutoff_robustness(report))
+save_cutoff_robustness(report, output_dir="analysis/")
+sa.summary(cutoff_window=0.1)
+```
+
+`window` must be finite and positive; `points` must be an odd integer of at
+least three so the grid includes the selected cutoff. Summary methods and
+`sa.plot(cutoff_window=...)` use five points. With `--save-plot`, the default
+CSV export also writes `analysis_cutoff_robustness.json`,
+`analysis_cutoff_robustness_pairs.csv` and
+`analysis_cutoff_robustness_coordination.csv`. In Python,
+`sa.plot(save_csv=False)` suppresses these exports.
+
+### Total coordination
+
 For elements bonded to more than one partner type (O in IGZO, bonded to
 Ga, In and Zn) the report adds a `Total coordination` block with the
 first-shell count over all bonded partners, next to the per-pair O–Ga,
@@ -1062,6 +1121,7 @@ the command.
 amorphgen --analyse \
     --input-dir DIR_OF_STRUCTURES \
     [--cutoff MODE_OR_NUMBER] \
+    [--cutoff-window FLOAT] \
     [--per-structure] \
     [--save-report FILE] \
     [--save-plot DIR] \
@@ -1084,6 +1144,7 @@ amorphgen --analyse \
 |---|---|
 | `--input-dir DIR` | Read structure files in this directory. Same-stem duplicates count once, preferring ``.xyz``, then ``.extxyz``, ``.vasp`` and ``.cif``. |
 | `--cutoff MODE` | `auto-rdf` (default: first minimum of each partial g(r)), `auto` (radii table), a number in Å, or per-pair overrides such as `"In-O=2.6,Zn-O=2.3"` that keep `auto-rdf` for the other pairs (`"auto,In-O=2.6"` or `"2.4,In-O=2.6"` change the base). |
+| `--cutoff-window FLOAT` | Finite positive half-window in Å for the default near-cutoff contact shares and five-point coordination sweep (default 0.1). CLI overrides `analysis.cutoff_window`. |
 | `--per-structure` | Print a per-structure table (one row per file: density, E/atom, CN). |
 | `--save-report FILE` | Write the full text report (densities, bond distances, coordination, angles) to a file. |
 | `--save-plot DIR` | Save available standard figures (RDF, CN, angles, density) plus CSV data into ``DIR``. |
@@ -1139,6 +1200,8 @@ listed flags.
 | `analysis_sq_partials.png`, `analysis_sq_partials_panels.png` | With ``--sq --sq-partials``: the Faber-Ziman partials S_ab(q) on one axis and, with ``--pair-panels``, one panel per pair. |
 | `analysis_cn.png` / `.pdf` | Coordination distribution of the bonded pairs. Binary AB systems (SiO₂) as **mirrored bars**: A-B on top, B-A reflected below the zero line. Multi-cation compounds (IGZO) as one panel per cation-centred pair (Ga-O, In-O, Zn-O) plus the anion total over all its cations (O-(Ga+In+Zn)). Mono-element systems (a-Si) and alloys side-by-side. |
 | `analysis_cn.csv` | Per-pair CN counts as percentages of the centred atom population, plus the anion-total rows. |
+| `analysis_cutoff_robustness.json` | Resolved cutoffs, near-cutoff contact counts/shares and the coordination sweep, including per-structure values. |
+| `analysis_cutoff_robustness_pairs.csv`, `analysis_cutoff_robustness_coordination.csv` | Per-pair endpoint contact counts and near-cutoff shares; directional coordination across the cutoff window. |
 | `analysis_cn_total.png` / `.csv` | With ``--total-cn``: one panel per requested total (``O``, ``O:In+Ga``). |
 | `analysis_angles.png` / `.pdf` | Bond-angle histograms (normalised). One line per triplet. |
 | `analysis_angles.csv` | Raw angle values, one row per triplet observation. |

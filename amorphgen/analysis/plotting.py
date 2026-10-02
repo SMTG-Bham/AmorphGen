@@ -185,7 +185,7 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
                   save_csv=True, show_total_rdf=False,
                   smearing=DEFAULT_SMEARING,
                   dpi=300, save_pdf=False, show_title=False,
-                  pair_panels=False, total_cn=None):
+                  pair_panels=False, total_cn=None, cutoff_window=0.1):
     """
     Generate and save analysis plots and raw data.
 
@@ -209,6 +209,9 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
     total_cn : list of str, optional
         Total-coordination requests (``"O"``, ``"O:In+Ga"``) plotted as
         ``{prefix}_cn_total.png`` with a CSV.
+    cutoff_window : float
+        Half-window in Angstrom for the cutoff-robustness JSON/CSV exports
+        written with ``save_csv`` (default 0.10).
     """
     os.makedirs(output_dir, exist_ok=True)
     formula = analyser.atoms_list[0].get_chemical_formula(mode="hill")
@@ -545,7 +548,12 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
     if save_csv:
         import csv
         import json
+        from .robustness import save_cutoff_robustness
         from .structure import compute_bond_angle_stats
+        paths = save_cutoff_robustness(
+            analyser.cutoff_robustness(window=cutoff_window), output_dir, prefix)
+        for path in paths.values():
+            print(f"  Saved: {path}")
         # Scalar estimates retain raw structure identity as well as pooled
         # descriptors, so reports can be audited without rerunning geometry.
         statistics = {"density": density_dict, "coordination": cn_data,

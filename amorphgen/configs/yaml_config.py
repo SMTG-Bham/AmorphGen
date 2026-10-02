@@ -155,6 +155,7 @@ _BLOCK_SCHEMA = {
         "convergence_confidence": _NUMBER,
         "convergence_max_structures": int,
         "cutoff": (str, int, float, dict),
+        "cutoff_window": _NUMBER,
         "per_structure": bool,
         "check_dimers": bool,
         "total_cn": (str, list),
@@ -335,6 +336,10 @@ def _validate_nested_values(cfg: dict, errors: list[str], path: str) -> None:
     max_structures = analysis.get("convergence_max_structures")
     if type(max_structures) is int and max_structures < 2:
         errors.append("analysis.convergence_max_structures must be at least 2")
+    cutoff_window = analysis.get("cutoff_window")
+    if (type(cutoff_window) in _NUMBER
+            and (not math.isfinite(cutoff_window) or cutoff_window <= 0)):
+        errors.append("analysis.cutoff_window must be finite and positive")
     _validate_scattering_values(analysis, errors)
     for key in ("total_cn", "rdf_pairs", "angle_triplets", "tr_qrange",
                 "rings", "ring_bond_pair", "network_formers"):

@@ -132,6 +132,19 @@ def _convergence_options(args, config):
     return enabled, tolerances, confidence, max_structures
 
 
+def _cutoff_window_option(args, config):
+    """Resolve the positive cutoff half-window: CLI > YAML > 0.1 A."""
+    import math
+
+    window = args.cutoff_window
+    if window is None:
+        window = config.get("cutoff_window", 0.1)
+    if (isinstance(window, bool) or not isinstance(window, (int, float))
+            or not math.isfinite(window) or window <= 0):
+        raise ValueError("cutoff window must be a finite positive number in A")
+    return float(window)
+
+
 def _collect_convergence_summaries(target, prefix, summaries):
     """Flatten selected descriptor uncertainty trees to their public names."""
     if not isinstance(summaries, dict):
@@ -453,6 +466,10 @@ def _add_arguments(p):
                            "overrides keep auto-rdf for the rest: "
                            "'In-O=2.6,Zn-O=2.3'; prefix a base to change it: "
                            "'auto,In-O=2.6' or '2.4,In-O=2.6'.")
+    g_an.add_argument("--cutoff-window", type=float, default=None, metavar="FLOAT",
+                      help="Positive half-window in A for cutoff robustness: "
+                           "report nearby contact shares and coordination at "
+                           "five cutoffs across +/- this value (default 0.1).")
     g_an.add_argument("--sq", action="store_true",
                       help="Compute the total structure factor S(q) via the "
                            "direct (Debye) method: correct FSDP intensities "
@@ -1552,6 +1569,11 @@ def _main():
         # Read analysis block from YAML config (if present)
         an_cfg = override.get("analysis", {})
         try:
+            cutoff_window = _cutoff_window_option(args, an_cfg)
+        except ValueError as exc:
+            print(f"Error: cutoff robustness: {exc}")
+            sys.exit(1)
+        try:
             convergence_enabled, tolerances, convergence_confidence, convergence_max = (
                 _convergence_options(args, an_cfg))
         except ValueError as exc:
@@ -1577,9 +1599,9 @@ def _main():
         # Per-structure or grouped analysis
         per_structure = args.per_structure or an_cfg.get("per_structure", False)
         if per_structure:
-            text = sa.per_structure_summary()
+            text = sa.per_structure_summary(cutoff_window=cutoff_window)
         else:
-            text = sa.summary()
+            text = sa.summary(cutoff_window=cutoff_window)
 
         # Dimer check: CLI flag > YAML. summary() prints itself, so print the
         # dimer section too; the concatenated text feeds --save-report.
@@ -1628,7 +1650,7 @@ def _main():
             plot_dir = an_cfg["save_plot"]
 
         # Plot settings from YAML
-        plot_kwargs = {}
+        plot_kwargs = {"cutoff_window": cutoff_window}
         if "rdf_pairs" in an_cfg:
             plot_kwargs["rdf_pairs"] = an_cfg["rdf_pairs"]
         if "angle_triplets" in an_cfg:

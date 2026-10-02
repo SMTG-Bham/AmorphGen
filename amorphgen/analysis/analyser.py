@@ -250,6 +250,36 @@ class StructureAnalyser:
         return compute_coordination(self.atoms_list, self._max_cutoff,
                                     self._get_cutoff, pair)
 
+    def cutoff_robustness(self, window=0.1, points=5):
+        """Report near-cutoff pair shares and directional coordination curves.
+
+        Sweep the resolved cutoffs over +/- ``window`` Angstrom (default
+        0.10) at ``points`` evenly spaced values (odd and >= 3, default 5).
+        Auto cutoffs are held fixed, with no RDF refit. Positive cutoffs are
+        shifted together, lower radii clipped to zero, and zero cutoffs kept
+        at zero. The analyser and its structures are not modified.
+
+        ``pairs`` maps unordered element pairs to ``cutoff``, actual
+        ``cutoffs``, ``near_pairs``, ``n_pairs`` and ``near_fraction``.
+        The fraction divides contacts added across the window by contacts
+        included at its upper endpoint; it is None for an empty denominator.
+        Reciprocal contacts count once, distinct periodic images separately.
+
+        Each pair's ``coordination`` has one curve per direction: ``mean``
+        pools central sites, ``ensemble_mean`` weights contributing structures
+        equally, ``delta`` / ``ensemble_delta`` give upper-minus-lower changes,
+        and ``per_structure`` retains aligned curves (None for absent centres).
+        Pair counts also retain aligned ``per_structure`` observations.
+        Zero-neighbour sites are included. The central point matches
+        :meth:`coordination`, including its exact distance-boundary rules.
+        These perturbations measure sensitivity, not sampling uncertainty.
+        """
+        from .robustness import compute_cutoff_robustness
+        report = compute_cutoff_robustness(
+            self.atoms_list, self._max_cutoff, self._get_cutoff, window, points)
+        report["cutoff_mode"] = self._cutoff_mode
+        return report
+
     def dimer_report(self, threshold_frac=0.85):
         """Detect unphysical same-element / anion-anion close contacts.
 
@@ -808,7 +838,14 @@ class StructureAnalyser:
         }
         return report
 
-    def summary(self, show_angles=True):
+    def summary(self, show_angles=True, cutoff_window=0.1):
+        """Print and return structural statistics and cutoff sensitivity.
+
+        ``cutoff_window`` is the positive half-window in Angstrom used by
+        :meth:`cutoff_robustness` (default 0.10).
+        """
+        from .robustness import format_cutoff_robustness
+        robustness = self.cutoff_robustness(window=cutoff_window)
         lines = []
         bar = "=" * 65
 
@@ -917,6 +954,7 @@ class StructureAnalyser:
                 lines.append(f"    Angle {triplet}: " + _format_uncertainty(data["uncertainty"]))
         lines.append("    SD above describes spread; SEM and t intervals describe the mean.")
         lines.append("    Intervals assume independent structures; n < 2 is unavailable.")
+        lines.append(format_cutoff_robustness(robustness))
         lines.append(f"\n{bar}\n")
 
         text = "\n".join(lines)
@@ -968,14 +1006,18 @@ class StructureAnalyser:
                 out[pos] = log_by_idx[log_idx]
         return out
 
-    def per_structure_summary(self) -> str:
+    def per_structure_summary(self, cutoff_window=0.1) -> str:
         """
         Analyse each structure individually and produce a comparison table.
+
+        Appends ensemble cutoff sensitivity over +/- ``cutoff_window`` A.
 
         Returns
         -------
         str — formatted table (also printed).
         """
+        from .robustness import format_cutoff_robustness
+        robustness = self.cutoff_robustness(window=cutoff_window)
         lines = []
         bar = "=" * 80
         formula = self.atoms_list[0].get_chemical_formula(mode="hill")
@@ -1080,13 +1122,14 @@ class StructureAnalyser:
         for name, values in [("Density", all_densities), ("E/atom", all_energies),
                              *[(f"CN({p})", all_cns[p]) for p in bonding_pairs[:3]]]:
             lines.append(f"    {name}: " + _format_uncertainty(summarize_structures(values)))
+        lines.append(format_cutoff_robustness(robustness))
         lines.append(f"\n{bar}\n")
 
         text = "\n".join(lines)
         print(text)
         return text
 
-    def save_report(self, filepath, text=None, show_angles=True):
+    def save_report(self, filepath, text=None, show_angles=True, cutoff_window=0.1):
         """Save the summary report to a text file.
 
         Parameters
@@ -1097,9 +1140,12 @@ class StructureAnalyser:
             Pre-computed report text. If None, calls summary().
         show_angles : bool
             Include bond angles in the report (default True).
+        cutoff_window : float
+            Half-window in Angstrom for cutoff robustness (default 0.10).
+            Used only when generating report text here.
         """
         if text is None:
-            text = self.summary(show_angles=show_angles)
+            text = self.summary(show_angles=show_angles, cutoff_window=cutoff_window)
         # Create the parent directory like --save-plot does, so a report path
         # in a not-yet-existing folder doesn't abort the run.
         parent = os.path.dirname(os.path.abspath(filepath))

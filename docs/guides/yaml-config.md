@@ -396,6 +396,7 @@ analysis:
   cutoff: auto-rdf        # or auto, a number in A, or a dict of per-pair
                           # overrides such as {In-O: 2.6}; unlisted pairs
                           # keep auto-rdf, or the dict's "default" entry
+  cutoff_window: 0.1     # finite positive half-window in A for robustness
   smearing: 0.05          # RDF Gaussian smearing (A); 0 = raw histogram
   per_structure: true
   check_dimers: true
@@ -416,6 +417,13 @@ analysis:
   voronoi: Ge             # or true for all atoms
   connectivity: true      # corner/edge/face sharing of cation polyhedra
 ```
+
+The structural summary always reports near-cutoff contact shares and a
+five-point coordination sweep over `cutoff ± cutoff_window`. The default
+half-window is 0.1 Å; `--cutoff-window` overrides the YAML value. Cutoffs are
+resolved once, then swept without refitting automatic RDF minima. With
+`save_plot`, the robustness JSON and two CSV tables are exported alongside
+the plots. See {doc}`analysis` for contact counting and averaging conventions.
 
 ### Ensemble precision targets
 
