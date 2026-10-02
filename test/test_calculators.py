@@ -41,12 +41,13 @@ class TestDeviceAuto:
             get_calculator("lj", device="auto")
         load.assert_called_once_with("lj", device="cpu")
 
-    def test_explicit_cpu_is_preserved(self, monkeypatch):
-        # Explicit CPU selection must also work on a torch-free install.
+    @pytest.mark.parametrize("device", ["cpu", "cuda", "cuda:1", "mps"])
+    def test_explicit_device_is_preserved(self, monkeypatch, device):
+        # Explicit selection must not depend on importing torch.
         monkeypatch.setitem(sys.modules, "torch", None)
         with patch("amorphgen.utils.calculators._load_classical") as load:
-            get_calculator("lj", device="cpu")
-        load.assert_called_once_with("lj", device="cpu")
+            get_calculator("lj", device=device)
+        load.assert_called_once_with("lj", device=device)
 
 
 class TestBackendRouting:

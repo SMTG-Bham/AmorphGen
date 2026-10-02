@@ -5,6 +5,8 @@
 # overrides). One array task per system. Step 2 is
 # run_class_benchmark_relax_bluebear.slurm (GPU: batched MACE relaxation,
 # analysis, summary table).
+#SBATCH --signal=B:USR1@120
+#SBATCH --requeue
 #SBATCH --job-name=cls_gen
 # Export AMORPHGEN_VENV=/path/to/venv before submitting (see docs/guides/hpc.md).
 # For repository files, AMORPHGEN_ROOT defaults to the submission directory.
@@ -17,14 +19,16 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=8G
 #SBATCH --output=logs/cls_gen_%A_%a.out
-set -uo pipefail
+set -euo pipefail
+PKG=${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
+if [[ ! -f "$PKG/amorphgen/slurm_runtime.sh" && -f "$PKG/../amorphgen/slurm_runtime.sh" ]]; then
+    PKG=$(cd "$PKG/.." && pwd)
+fi
+source "$PKG/amorphgen/slurm_runtime.sh"
+amorphgen_slurm_main "$0" "$@"
 export PYTHONUNBUFFERED=1
 mkdir -p logs classes
-module purge
-module load bear-apps/2024a/live
-module load Python/3.12.3-GCCcore-13.3.0
-source "${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}/bin/activate"
-PKG=${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
+amorphgen_slurm_bluebear_environment "bear-apps/2024a/live" "Python/3.12.3-GCCcore-13.3.0"
 LINE=$(grep -v "^#" "$PKG/examples/class_benchmark_systems.txt" | sed -n "$((SLURM_ARRAY_TASK_ID+1))p")
 read CLASS NAME COMP RHO KIND <<< "$LINE"
 echo "=== task $SLURM_ARRAY_TASK_ID: $CLASS $NAME $COMP ($(date))"

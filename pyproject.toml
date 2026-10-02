@@ -137,12 +137,14 @@ Issues = "https://github.com/SMTG-Bham/AmorphGen/issues"
 
 [project.scripts]
 amorphgen = "amorphgen.cli:main"
+amorphgen-slurm = "amorphgen.slurm:main"
 
 [tool.setuptools.packages.find]
 include = ["amorphgen", "amorphgen.*"]
 namespaces = false
 
 [tool.setuptools.package-data]
+"amorphgen" = ["slurm_runtime.sh"]
 "amorphgen.configs" = ["*.yaml"]
 
 [tool.pytest.ini_options]

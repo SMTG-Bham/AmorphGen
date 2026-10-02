@@ -14,6 +14,8 @@
 #   for i in 2 3 4 5; do j=$(sbatch --parsable --dependency=afterany:$j examples/run_ensemble_resume_bluebear.slurm); done
 # ----------------------------------------------------------------------------
 
+#SBATCH --signal=B:USR1@120
+#SBATCH --requeue
 #SBATCH --job-name=amg_ens100
 # Export AMORPHGEN_VENV=/path/to/venv before submitting (see docs/guides/hpc.md).
 # For repository files, AMORPHGEN_ROOT defaults to the submission directory.
@@ -28,12 +30,15 @@
 #SBATCH --output=logs/ens100_%j.out
 
 set -euo pipefail
+PKG=${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
+if [[ ! -f "$PKG/amorphgen/slurm_runtime.sh" && -f "$PKG/../amorphgen/slurm_runtime.sh" ]]; then
+    PKG=$(cd "$PKG/.." && pwd)
+fi
+source "$PKG/amorphgen/slurm_runtime.sh"
+amorphgen_slurm_main "$0" "$@"
 export PYTHONUNBUFFERED=1     # show progress lines in the log as they happen
 mkdir -p logs
-module purge
-module load bear-apps/2024a/live
-module load Python/3.12.3-GCCcore-13.3.0
-source "${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}/bin/activate"
+amorphgen_slurm_bluebear_environment "bear-apps/2024a/live" "Python/3.12.3-GCCcore-13.3.0"
 
 COMP="InGaZnO4*50"      # 350 atoms
 N=100

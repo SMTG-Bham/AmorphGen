@@ -11,7 +11,8 @@ momenta pass through without conversion; its public API takes the timestep in
 ps, temperatures in K and the Langevin friction in 1/ps.
 
 Not supported here: NPT stages (torch-sim has only Langevin NPT, which is not
-what the ASE path uses) and frame-level resume inside a stage.
+what the ASE path uses). The batch-quench driver resumes from synchronized
+per-run trajectory blocks.
 """
 from __future__ import annotations
 
@@ -20,8 +21,9 @@ import time
 
 import numpy as np
 
-from .torchsim_engine import _require, resolve_torch_device  # noqa: F401
+from .torchsim_engine import _require, resolve_torch_device, _TorchSafetyBridge  # noqa: F401
 from .common import TRAJ_LOG_INTERVAL
+from .preemption import stop_if_requested
 
 _LOG_HEADER = (f"{'Step':>8}  {'Time_ps':>10}  {'T_K':>8}  {'Epot_eV':>12}  "
                f"{'Ekin_eV':>12}  {'Etot_eV':>12}  {'Vol_A3':>10}\n" + "-" * 84 + "\n")
@@ -93,7 +95,7 @@ class _RunWriter:
 def batch_nvt(atoms_list, model, temperatures, n_steps: int, timestep_fs: float = 0.5,
               friction: float = 0.01, seed=None, stage: int = 4, tag: int = 0,
               run_index: int = 0, interval: int = TRAJ_LOG_INTERVAL,
-              writers=None, log=print):
+              writers=None, log=print, safety=None, repulsive_core=None):
     """Batched NVT-Langevin MD of *atoms_list* for *n_steps*.
 
     Parameters
@@ -115,22 +117,36 @@ def batch_nvt(atoms_list, model, temperatures, n_steps: int, timestep_fs: float 
     Returns the final structures as ASE Atoms with momenta.
     """
     _require()
+    stop_if_requested()
     import torch
     import torch_sim as ts
-    from torch_sim.integrators.nvt import nvt_langevin_init
+    from torch_sim.integrators.nvt import nvt_langevin_init, nvt_langevin_step
+    from .repulsion import wrap_torch_model
 
+    atoms_list = list(atoms_list)
     n = len(atoms_list)
+    if n == 0:
+        return []
+    if int(n_steps) != n_steps or n_steps < 1:
+        raise ValueError("n_steps must be a positive integer")
+    if int(interval) != interval or interval < 1:
+        raise ValueError("interval must be a positive integer")
+    if writers is not None and len(writers) != n:
+        raise ValueError("writers must contain one writer per structure")
+    guard = _TorchSafetyBridge(atoms_list, safety, f"torch-sim NVT stage {stage}")
+    model = guard.wrap_model(wrap_torch_model(model, repulsive_core))
     T_sched = np.asarray(temperatures, dtype=float)
     if T_sched.ndim == 0:
         T_sched = np.full(int(n_steps), float(T_sched))
-    assert len(T_sched) == n_steps, "temperature schedule must have n_steps entries"
+    if T_sched.shape != (n_steps,) or not np.isfinite(T_sched).all() or (T_sched < 0).any():
+        raise ValueError("temperature schedule must contain n_steps finite nonnegative values")
     dt_ps = float(timestep_fs) / 1000.0
     gamma_ps = float(friction) * 1000.0
 
     # initial state; momenta carried in from the Atoms if present, else sampled.
     # Seed the state's generator: it is what nvt_langevin_init (momenta) and
     # the Langevin step (noise) use.
-    state = ts.initialize_state(list(atoms_list), model.device, model.dtype)
+    state = guard.attach(ts.initialize_state(atoms_list, model.device, model.dtype))
     state.rng = _derive_seed(seed, stage, tag, run_index)
     kT0 = float(T_sched[0]) * 8.617330337217213e-05
     md = nvt_langevin_init(state, model, kT=kT0)
@@ -138,6 +154,18 @@ def batch_nvt(atoms_list, model, temperatures, n_steps: int, timestep_fs: float 
     if have_p:
         md.momenta = torch.as_tensor(np.concatenate([a.get_momenta() for a in atoms_list]),
                                      dtype=model.dtype, device=model.device)
+    guard.check(md)
+
+    def checked_init(state, model, **kwargs):
+        state = nvt_langevin_init(state=state, model=model, **kwargs)
+        guard.check(state)
+        return state
+
+    def checked_step(state, model, **kwargs):
+        guard.advance(state)
+        state = nvt_langevin_step(state=state, model=model, **kwargs)
+        guard.check(state)
+        return state
 
     log(f"[torch-sim] NVT-Langevin: {n} structure(s) in one batch on {model.device}, "
         f"{n_steps} steps x {timestep_fs} fs, T {T_sched[0]:.0f} -> {T_sched[-1]:.0f} K, "
@@ -147,14 +175,17 @@ def batch_nvt(atoms_list, model, temperatures, n_steps: int, timestep_fs: float 
         block = min(int(interval), n_steps - done)
         T_block = T_sched[done:done + block]
         temp = float(T_block[0]) if np.allclose(T_block, T_block[0]) else T_block.tolist()
-        md = ts.integrate(system=md, model=model, integrator=ts.Integrator.nvt_langevin,
+        md = ts.integrate(system=md, model=model, integrator=(checked_init, checked_step),
                           n_steps=block, temperature=temp, timestep=dt_ps, gamma=gamma_ps)
         done += block
         if writers is not None:
-            frames = _state_to_atoms_with_momenta(md, model)
+            frames = guard.check(md)
             for w, a in zip(writers, frames):
                 w.write(a, done, timestep_fs)
-    out = _state_to_atoms_with_momenta(md, model)
+        # All structures must reach the same output block before stopping.
+        # With no writers, the caller restarts this calculation from input.
+        stop_if_requested()
+    out = guard.check(md)
     dt = time.time() - t0
     log(f"[torch-sim] done in {dt:.1f} s ({1000 * dt / n_steps / max(n, 1):.2f} ms per step per structure); "
         f"T = {np.mean([a.get_temperature() for a in out]):.0f} K")

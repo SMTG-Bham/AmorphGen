@@ -94,6 +94,8 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high",
             model_path=global_cfg.get("model_path"),
             default_dtype=global_cfg.get("default_dtype", "auto"),
         )
+    from ..utils.repulsion import with_repulsive_core
+    calc = with_repulsive_core(calc, global_cfg.get("repulsive_core"))
     atoms.calc = calc
 
     default_T = {"premelt": 300, "high": 3000, "low": 300}
@@ -116,7 +118,8 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high",
 
     logger, traj = attach_outputs(dyn, atoms, logfile, trajfile,
                                   fmt=global_cfg.get("traj_format", "extxyz"),
-                                  append=elapsed > 0, step_offset=elapsed)
+                                  append=elapsed > 0, step_offset=elapsed,
+                                  safety=global_cfg.get("safety"))
 
     from ..utils.common import compute_density_gcm3
     density = compute_density_gcm3(atoms)
@@ -125,10 +128,11 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high",
           f"{steps - elapsed} steps ({total_ps:.1f} ps total)  "
           f"density={density:.2f} g/cm3")
 
-    dyn.run(steps - elapsed)
-
-    logger.close()
-    traj.close()
+    try:
+        dyn.run(steps - elapsed)
+    finally:
+        logger.close()
+        traj.close()
 
     out_xyz = stage_file(cfg.get("output_xyz", f"stage{stage_label}_eq.xyz"), work_dir)
     write(out_xyz, atoms, format="extxyz")

@@ -29,7 +29,10 @@ for the full registry; available sizes depend on the model family.
 calc = get_calculator(model="mace-mpa-0", device="auto")
 ```
 
-`device="auto"` picks CUDA → MPS → CPU automatically. On Apple Silicon,
+`device="auto"` picks CUDA → MPS → CPU automatically, both in
+`get_calculator()` and the ASE pipeline stages. Without PyTorch it selects
+CPU. The torch-sim engine selects CUDA → CPU because it does not support MPS.
+On Apple Silicon,
 MACE and SevenNet default to float64, which MPS cannot represent; use
 `device="cpu"` (CLI: `--device cpu`) with those defaults. CHGNet uses float32
 and has an MPS loading path. See the

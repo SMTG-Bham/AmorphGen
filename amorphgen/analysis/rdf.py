@@ -20,6 +20,7 @@ import numpy as np
 from ase.neighborlist import neighbor_list
 
 from .cutoff import check_rmax
+from .uncertainty import summarize_structures
 
 # Default Gaussian smearing (A) applied to g(r)
 # the thermal/experimental broadening, so simulated peaks compare naturally
@@ -54,79 +55,89 @@ def _gaussian_smear(r, g_r, sigma):
     return np.convolve(padded, kernel, mode='valid')
 
 
-def compute_rdf(atoms_list, pair=None, rmax=None, nbins=200,
-                sigma=DEFAULT_SMEARING):
-    """Compute the radial distribution function g(r).
-
-    Parameters
-    ----------
-    atoms_list : list of Atoms
-    pair : str, optional
-        Pair to analyse, e.g. "Si-O". If None, total RDF.
-    rmax : float, optional
-        Maximum radius in A. Auto-detected from cell if None.
-    nbins : int
-        Number of histogram bins (default 200).
-    sigma : float
-        Gaussian smearing width in A (default ``DEFAULT_SMEARING`` = 0.05,
-        comparable to thermal/experimental broadening). Peak positions are
-        unchanged; heights drop and widths grow. Pass 0.0 for the raw
-        histogram.
-    """
-    if not atoms_list:
-        return {"r": [], "g_r": []}
+def _shared_rmax(atoms_list, rmax):
+    """Use one histogram grid, including for unequal simulation cells."""
     if rmax is None:
-        half_cells = [min(a.cell.lengths()) / 2 for a in atoms_list]
-        rmax = float(np.floor(min(half_cells) * 10) / 10)
+        rmax = float(np.floor(min(min(a.cell.lengths()) / 2
+                                  for a in atoms_list) * 10) / 10)
     check_rmax(atoms_list, rmax)
+    return rmax
 
+
+def _curve_mean(curves):
+    """Pointwise mean without warning on unobserved reciprocal shells."""
+    curves = np.asarray(curves, dtype=float)
+    valid = np.isfinite(curves)
+    count = valid.sum(axis=0)
+    return np.divide(np.where(valid, curves, 0.0).sum(axis=0), count,
+                     out=np.full(curves.shape[1:], np.nan), where=count > 0)
+
+
+def _curve_result(axis_name, axis, name, curves, confidence, n_bootstrap, seed):
+    summary = summarize_structures(curves, confidence=confidence,
+                                   n_bootstrap=n_bootstrap, seed=seed)
+    # Keep NaN in legacy curve arrays for NumPy consumers; uncertainty metadata
+    # uses JSON null for missing observations and unavailable intervals.
+    return {axis_name: np.asarray(axis).tolist(),
+            name: _curve_mean(curves).tolist(),
+            "per_structure": summary["per_structure"],
+            "uncertainty": summary}
+
+
+def _rdf_curves(atoms_list, pair, rmax, nbins, sigma):
     dr = rmax / nbins
-    r_centres = np.linspace(dr / 2, rmax - dr / 2, nbins)
-    shell_vols = 4 * np.pi * r_centres**2 * dr
-
-    g_r = np.zeros(nbins)
-    n_frames = len(atoms_list)
-
+    r = np.linspace(dr / 2, rmax - dr / 2, nbins)
+    shell_vols = 4 * np.pi * r**2 * dr
+    curves = []
     for atoms in atoms_list:
         idx_i, idx_j, dists = neighbor_list('ijd', atoms, cutoff=rmax)
         syms = np.array(atoms.get_chemical_symbols())
         vol = atoms.get_volume()
-        n = len(atoms)
-
         if pair is not None:
             p1, p2 = pair.split("-")
             n_source = int(np.sum(syms == p1))
-            n_target = int(np.sum(syms == p2))
-            if p1 == p2:
-                rho_target = (n_target - 1) / vol
-            else:
-                rho_target = n_target / vol
-            mask = (syms[idx_i] == p1) & (syms[idx_j] == p2)
-            pair_dists = dists[mask]
+            n_target = int(np.sum(syms == p2)) - int(p1 == p2)
+            pair_dists = dists[(syms[idx_i] == p1) & (syms[idx_j] == p2)]
         else:
-            n_source = n
-            rho_target = (n - 1) / vol
+            n_source = len(atoms)
+            n_target = n_source - 1
             pair_dists = dists
-
-        if len(pair_dists) == 0 or n_source == 0 or rho_target <= 0:
+        if n_source == 0 or n_target <= 0:
+            # An absent species has no defined partial RDF. A present pair
+            # with no neighbours inside rmax, on the other hand, has g=0.
+            curves.append(np.full(nbins, np.nan))
             continue
-
-        # Use proper histogram — skip distances outside [0, rmax]
         in_range = (pair_dists > 0) & (pair_dists < rmax)
-        if not np.any(in_range):
-            continue
         hist, _ = np.histogram(pair_dists[in_range], bins=nbins,
                                range=(0, rmax))
+        g = hist / (n_source * (n_target / vol) * shell_vols)
+        curves.append(_gaussian_smear(r, g, sigma))
+    return r, np.asarray(curves, dtype=float).reshape(len(atoms_list), nbins)
 
-        valid = shell_vols > 0
-        g_r[valid] += hist[valid] / (n_source * rho_target * shell_vols[valid])
 
-    g_r /= n_frames
+def compute_rdf(atoms_list, pair=None, rmax=None, nbins=200,
+                sigma=DEFAULT_SMEARING, *, confidence=0.95,
+                n_bootstrap=1000, seed=0):
+    """Equal-structure mean radial distribution function g(r).
 
-    if sigma > 0:
-        g_r = _gaussian_smear(r_centres, g_r, sigma)
+    Each structure is normalized using its own volume and species counts, on
+    the same radial grid. ``sigma`` broadens each curve (default 0.05 A; zero
+    gives the raw histogram). Absent pairs are missing, not zero-valued curves.
 
-    return {"r": r_centres.tolist(), "g_r": g_r.tolist()}
+    ``per_structure`` retains the normalized curves. ``uncertainty`` reports
+    sample standard deviation, standard error, Student-t intervals and
+    percentile bootstrap bands for the mean. Whole structures are resampled;
+    the bands are pointwise, not simultaneous. Fewer than two independent
+    structures cannot estimate uncertainty. Use ``n_bootstrap=0`` to omit
+    bootstrap bands. Correlated trajectory frames need blocking first.
+    """
+    atoms_list = list(atoms_list)
+    if not atoms_list:
+        return _curve_result("r", [], "g_r", np.empty((0, 0)),
+                             confidence, n_bootstrap, seed)
+    rmax = _shared_rmax(atoms_list, rmax)
+    r, curves = _rdf_curves(atoms_list, pair, rmax, nbins, sigma)
+    return _curve_result("r", r, "g_r", curves, confidence, n_bootstrap, seed)
 
 
 # Neutron coherent scattering lengths b_c (fm) — common amorphous-system
@@ -457,6 +468,52 @@ def _smooth_sq_weighted(q, s_q, n_per_bin, sigma_q):
 
 def compute_structure_factor_direct(atoms_list, qmax=15.0, nq=300,
                                     weighting="xray", q_batch=4096,
+                                    sigma_q=0.0, partials=False, *,
+                                    confidence=0.95, n_bootstrap=1000, seed=0):
+    """Direct Faber-Ziman S(q), averaged with equal weight per structure.
+
+    Scattering normalization, shell averaging and optional Gaussian rebinning
+    are performed within each structure using its own composition and cell.
+    ``n_per_bin`` counts reciprocal vectors, never independent observations;
+    ``uncertainty.n_per_point`` counts contributing structures. Unsampled
+    shells and absent partials are missing values. Whole-structure bootstrap
+    bands and Student-t intervals are pointwise uncertainty of the mean.
+    """
+    atoms_list = list(atoms_list)
+    if not atoms_list:
+        out = _curve_result("q", [], "s_q", np.empty((0, 0)),
+                            confidence, n_bootstrap, seed)
+        out["n_per_bin"] = []
+        return out
+    frames = [_compute_structure_factor_direct_single(
+        [a], qmax=qmax, nq=nq, weighting=weighting, q_batch=q_batch,
+        sigma_q=sigma_q, partials=partials) for a in atoms_list]
+    curves = np.asarray([frame["s_q"] for frame in frames])
+    out = _curve_result("q", frames[0]["q"], "s_q", curves,
+                        confidence, n_bootstrap, seed)
+    counts = np.asarray([frame["n_per_bin"] for frame in frames])
+    out["n_per_bin"] = counts.sum(axis=0).tolist()
+    out["n_per_bin_per_structure"] = counts.tolist()
+    if sigma_q > 0:
+        out["s_q_raw"] = _curve_mean([f["s_q_raw"] for f in frames]).tolist()
+    if partials:
+        keys = sorted({key for frame in frames for key in frame["partials"]})
+        out["partials"] = {}
+        out["partials_per_structure"] = {}
+        out["partials_uncertainty"] = {}
+        for key in keys:
+            rows = np.asarray([f["partials"].get(key, [np.nan] * nq)
+                               for f in frames])
+            summary = summarize_structures(rows, confidence=confidence,
+                                           n_bootstrap=n_bootstrap, seed=seed)
+            out["partials"][key] = _curve_mean(rows).tolist()
+            out["partials_per_structure"][key] = summary["per_structure"]
+            out["partials_uncertainty"][key] = summary
+    return out
+
+
+def _compute_structure_factor_direct_single(atoms_list, qmax=15.0, nq=300,
+                                    weighting="xray", q_batch=4096,
                                     sigma_q=0.0, partials=False):
     """Compute Faber-Ziman S(q) from reciprocal-lattice scattering amplitudes.
 
@@ -626,6 +683,34 @@ def compute_structure_factor_direct(atoms_list, qmax=15.0, nq=300,
 
 
 def compute_structure_factor(atoms_list, pair=None, qmax=15.0, nq=300,
+                             rmax=None, weighting="unweighted", *,
+                             confidence=0.95, n_bootstrap=1000, seed=0):
+    """Fourier-transform S(q) with uncertainty across independent structures.
+
+    Each raw g(r) is transformed using that structure's number density and,
+    for weighted totals, its composition. Radial and q grids are shared across
+    the ensemble. ``uncertainty`` contains standard errors, Student-t intervals
+    and pointwise percentile bands from resampling whole structure curves.
+    Finite-rmax truncation and other systematic errors are not included.
+    """
+    atoms_list = list(atoms_list)
+    if weighting not in ("unweighted", "xray", "neutron"):
+        raise ValueError("weighting must be 'unweighted', 'xray', or 'neutron'; "
+                         f"got {weighting!r}")
+    if not atoms_list:
+        return _curve_result("q", [], "s_q", np.empty((0, 0)),
+                             confidence, n_bootstrap, seed)
+    rmax = _shared_rmax(atoms_list, rmax)
+    q = np.linspace(0.1, qmax, nq)
+    curves = []
+    for atoms in atoms_list:
+        result = _compute_structure_factor_single(
+            [atoms], pair=pair, qmax=qmax, nq=nq, rmax=rmax, weighting=weighting)
+        curves.append(result["s_q"] if result["s_q"] else [np.nan] * nq)
+    return _curve_result("q", q, "s_q", curves, confidence, n_bootstrap, seed)
+
+
+def _compute_structure_factor_single(atoms_list, pair=None, qmax=15.0, nq=300,
                              rmax=None, weighting="unweighted"):
     """Compute the structure factor S(q) from g(r) via Fourier transform.
 
@@ -685,6 +770,13 @@ def compute_structure_factor(atoms_list, pair=None, qmax=15.0, nq=300,
         unique = sorted(set(syms))
         if not unique:
             return {"q": [], "s_q": []}
+        singletons = [s for s in unique if syms.count(s) < 2]
+        if singletons:
+            raise ValueError(
+                "Weighted FT S(q) needs at least two atoms of every species "
+                "to normalize its same-species RDF partials; insufficient "
+                f"atoms for {', '.join(singletons)}. Use "
+                "structure_factor_direct() for dilute species.")
         total_n = len(syms)
         fractions = {s: syms.count(s) / total_n for s in unique}
         # q-dependent scattering factors (x-ray f0(q); constant b for
@@ -697,7 +789,7 @@ def compute_structure_factor(atoms_list, pair=None, qmax=15.0, nq=300,
         for i, s1 in enumerate(unique):
             for s2 in unique[i:]:
                 pstr = f"{s1}-{s2}"
-                sq = compute_structure_factor(
+                sq = _compute_structure_factor_single(
                     atoms_list, pair=pstr, qmax=qmax, nq=nq, rmax=rmax,
                     weighting="unweighted",   # avoid recursion
                 )
@@ -731,10 +823,8 @@ def compute_structure_factor(atoms_list, pair=None, qmax=15.0, nq=300,
     # ── Unweighted / partial path (original behaviour) ───────────────────
     # Always transform the RAW g(r): smearing is a presentation choice for
     # RDF plots and would damp S(q) by exp(-q^2 sigma^2 / 2) (~16% at q=12).
-    rdf_data = compute_rdf(atoms_list, pair=pair, rmax=rmax, nbins=500,
-                           sigma=0.0)
-    r = np.array(rdf_data["r"])
-    g_r = np.array(rdf_data["g_r"])
+    r, curves = _rdf_curves(atoms_list, pair, rmax, 500, 0.0)
+    g_r = curves[0]
     dr = r[1] - r[0] if len(r) > 1 else 0.04
 
     atoms = atoms_list[0]
@@ -779,7 +869,8 @@ def compute_structure_factor(atoms_list, pair=None, qmax=15.0, nq=300,
 
 def compute_total_correlation(atoms_list, weighting="xray", qmin=0.3, qmax=20.0,
                               nq=400, rmax=10.0, nr=600, sigma_q=DEFAULT_SQ_SMOOTH,
-                              window="lorch"):
+                              window="lorch", *, confidence=0.95,
+                              n_bootstrap=1000, seed=0):
     """Total correlation function T(r) in the diffraction convention.
 
     This is the quantity a diffraction paper plots beside S(Q), because the area
@@ -822,7 +913,11 @@ def compute_total_correlation(atoms_list, weighting="xray", qmin=0.3, qmax=20.0,
     dict
         ``{"r", "g_r", "T_r", "G_r", "q", "s_q", "rho", "weighting",
         "qmin", "qmax", "window"}``. ``rho`` is the atomic number density in
-        atoms per cubic Angstrom, averaged over the ensemble.
+        atoms per cubic Angstrom, averaged over the ensemble. ``per_structure``
+        and ``uncertainty`` describe T(r); ``curve_uncertainty`` also contains
+        the g(r), G(r) and S(q) summaries. Each transform uses its own density,
+        so the mean T(r) need not equal 4*pi*r*mean(rho)*mean(g(r)). Bootstrap
+        bands are pointwise and resample whole independent structures.
     """
     if window not in ("lorch", None, "none"):
         raise ValueError(f"window must be 'lorch' or None, got {window!r}")
@@ -830,29 +925,53 @@ def compute_total_correlation(atoms_list, weighting="xray", qmin=0.3, qmax=20.0,
     if not atoms_list:
         raise ValueError("compute_total_correlation: no structures given")
 
-    sq = compute_structure_factor_direct(atoms_list, qmax=qmax, nq=nq,
-                                         weighting=weighting, sigma_q=sigma_q)
-    q = np.asarray(sq["q"], dtype=float)
-    s = np.asarray(sq["s_q"], dtype=float)
-    n = np.asarray(sq.get("n_per_bin", np.ones_like(q)), dtype=float)
-    keep = (n > 0) & np.isfinite(s) & (q >= qmin)
-    if keep.sum() < 8:
-        raise ValueError(
-            f"compute_total_correlation: only {int(keep.sum())} usable S(Q) points "
-            f"above qmin={qmin}; the cell may be too small (q_min = 2*pi/L).")
-    q, s = q[keep], s[keep]
-
-    rho = float(np.mean([len(a) / a.get_volume() for a in atoms_list]))
+    # Transform each realization before averaging. Multiplying an ensemble
+    # mean g(r) by an ensemble mean density loses their covariance.
+    frames = [_compute_structure_factor_direct_single(
+        [a], qmax=qmax, nq=nq, weighting=weighting, sigma_q=sigma_q)
+        for a in atoms_list]
+    q_all = np.asarray(frames[0]["q"], dtype=float)
+    s_rows = np.asarray([frame["s_q"] for frame in frames])
+    union = np.isfinite(s_rows).any(axis=0) & (q_all >= qmin)
+    q = q_all[union]
+    s_rows = s_rows[:, union]
+    rho_rows = np.asarray([len(a) / a.get_volume() for a in atoms_list])
     r = np.linspace(max(0.1, rmax / nr), rmax, nr)
-    w = np.sinc(q / q.max()) if window == "lorch" else np.ones_like(q)
-    integrand = (q * (s - 1.0) * w)[None, :] * np.sin(np.outer(r, q))
-    g = 1.0 + _trapezoid(integrand, q, axis=1) / (2.0 * np.pi ** 2 * r * rho)
-    return {"r": r.tolist(), "g_r": g.tolist(),
-            "T_r": (4.0 * np.pi * r * rho * g).tolist(),
-            "G_r": (4.0 * np.pi * r * rho * (g - 1.0)).tolist(),
-            "q": q.tolist(), "s_q": s.tolist(), "rho": rho,
-            "weighting": weighting, "qmin": float(qmin), "qmax": float(qmax),
-            "window": window}
+    g_rows, T_rows, G_rows = [], [], []
+    for i, (s, rho_i) in enumerate(zip(s_rows, rho_rows)):
+        keep = np.isfinite(s)
+        if keep.sum() < 8:
+            raise ValueError(
+                f"compute_total_correlation: only {int(keep.sum())} usable S(Q) "
+                f"points for structure {i} above qmin={qmin}; the cell may be "
+                "too small (q_min = 2*pi/L).")
+        qi, si = q[keep], s[keep]
+        # The shared window uses the same high-q cutoff in every structure;
+        # integration respects the spacing of its observed reciprocal shells.
+        w = np.sinc(qi / qmax) if window == "lorch" else np.ones_like(qi)
+        integrand = (qi * (si - 1.0) * w)[None, :] * np.sin(np.outer(r, qi))
+        G = 2.0 / np.pi * _trapezoid(integrand, qi, axis=1)
+        baseline = 4.0 * np.pi * r * rho_i
+        g_rows.append(1.0 + G / baseline)
+        T_rows.append(baseline + G)
+        G_rows.append(G)
+    rows = {"g_r": g_rows, "T_r": T_rows, "G_r": G_rows, "s_q": s_rows}
+    summaries = {name: summarize_structures(values, confidence=confidence,
+                                            n_bootstrap=n_bootstrap, seed=seed)
+                 for name, values in rows.items()}
+    result = {name: _curve_mean(values).tolist() for name, values in rows.items()}
+    result.update({"r": r.tolist(), "q": q.tolist(),
+                   "rho": float(rho_rows.mean()),
+                   "per_structure_rho": rho_rows.tolist(),
+                   "per_structure": summaries["T_r"]["per_structure"],
+                   "uncertainty": summaries["T_r"],
+                   "per_structure_curves": {
+                       name: summary["per_structure"]
+                       for name, summary in summaries.items()},
+                   "curve_uncertainty": summaries,
+                   "weighting": weighting, "qmin": float(qmin),
+                   "qmax": float(qmax), "window": window})
+    return result
 
 
 def first_Tr_peak(result, floor=0.05, prominence_frac=0.2, min_g=0.5, rmin=1.0):
@@ -1007,60 +1126,24 @@ def format_Tr_scan(rows) -> str:
     return "\n".join(out)
 
 
-def compute_averaged_rdf(atoms_list, pair=None, rmax=None, nbins=200):
-    """Compute RDF per structure with mean and std."""
-    if rmax is None:
-        half_cells = [min(a.cell.lengths()) / 2 for a in atoms_list]
-        rmax = float(np.floor(min(half_cells) * 10) / 10)
+def compute_averaged_rdf(atoms_list, pair=None, rmax=None, nbins=200, *,
+                         confidence=0.95, n_bootstrap=1000, seed=0):
+    """Raw per-structure RDFs with spread and uncertainty of their mean.
 
-    dr = rmax / nbins
-    r_centres = np.linspace(dr / 2, rmax - dr / 2, nbins)
-    shell_vols = 4 * np.pi * r_centres**2 * dr
-
-    all_g_r = []
-
-    for atoms in atoms_list:
-        idx_i, idx_j, dists = neighbor_list('ijd', atoms, cutoff=rmax)
-        syms = np.array(atoms.get_chemical_symbols())
-        vol = atoms.get_volume()
-        n = len(atoms)
-
-        if pair is not None:
-            p1, p2 = pair.split("-")
-            n_source = int(np.sum(syms == p1))
-            n_target = int(np.sum(syms == p2))
-            if p1 == p2:
-                rho_target = (n_target - 1) / vol
-            else:
-                rho_target = n_target / vol
-            mask = (syms[idx_i] == p1) & (syms[idx_j] == p2)
-            pair_dists = dists[mask]
-        else:
-            n_source = n
-            rho_target = (n - 1) / vol
-            pair_dists = dists
-
-        if len(pair_dists) == 0 or n_source == 0 or rho_target <= 0:
-            all_g_r.append(np.zeros(nbins))
-            continue
-
-        in_range = (pair_dists > 0) & (pair_dists < rmax)
-        if not np.any(in_range):
-            all_g_r.append(np.zeros(nbins))
-            continue
-        hist, _ = np.histogram(pair_dists[in_range], bins=nbins,
-                               range=(0, rmax))
-
-        g_r = np.zeros(nbins)
-        valid = shell_vols > 0
-        g_r[valid] = hist[valid] / (n_source * rho_target * shell_vols[valid])
-        all_g_r.append(g_r)
-
-    all_g_r = np.array(all_g_r)
-
-    return {
-        "r": r_centres.tolist(),
-        "g_r_mean": np.mean(all_g_r, axis=0).tolist(),
-        "g_r_std": np.std(all_g_r, axis=0).tolist(),
-        "n_structures": len(atoms_list),
-    }
+    ``g_r_std`` retains the legacy population spread (ddof=0); the sample
+    spread and standard error of the mean are in ``uncertainty``.
+    """
+    result = compute_rdf(atoms_list, pair=pair, rmax=rmax, nbins=nbins,
+                         sigma=0.0, confidence=confidence,
+                         n_bootstrap=n_bootstrap, seed=seed)
+    rows = np.asarray(result["per_structure"], dtype=float)
+    mean = np.asarray(result["g_r"], dtype=float)
+    if rows.size:
+        variance = _curve_mean((rows - mean)**2)
+        spread = np.sqrt(variance).tolist()
+    else:
+        spread = []
+    return {"r": result["r"], "g_r_mean": result["g_r"],
+            "g_r_std": spread, "n_structures": result["uncertainty"]["n_structures"],
+            "per_structure": result["per_structure"],
+            "uncertainty": result["uncertainty"]}

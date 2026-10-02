@@ -20,7 +20,10 @@ import json
 import logging
 import os
 import importlib
+import inspect
+import tempfile
 import time
+from functools import wraps
 from collections import Counter
 import numpy as np
 from ase import Atoms
@@ -1163,6 +1166,146 @@ _FORMAT_MAP = {
     "cif":    ("cif",    ".cif"),
 }
 
+# Capture the real signature once so instrumentation of generate_random does
+# not change a run's identity. Explicit defaults and omitted defaults match.
+_GENERATION_DEFAULTS = {
+    name: param.default
+    for name, param in inspect.signature(generate_random).parameters.items()
+    if name != "composition"
+}
+_RESUME_SCHEMA = 2
+
+
+def _resume_value(value):
+    """Convert scientific Python settings to stable, JSON-safe values."""
+    if isinstance(value, dict):
+        return {
+            (key if isinstance(key, str) else json.dumps(_resume_value(key))):
+            _resume_value(item) for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple, np.ndarray)):
+        return [_resume_value(item) for item in value]
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, os.PathLike):
+        return os.fspath(value)
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    raise ValueError(f"Cannot record run setting of type {type(value).__name__}")
+
+
+def _random_calculator_settings(calc, config):
+    """Include model weights and ASE/classical parameters in resume identity."""
+    from ..utils.run_provenance import calculator_provenance
+
+    if calc is None and config is None:
+        return None
+    result = calculator_provenance(config or {}, calc, injected=config is None)
+    # An unavailable hash is represented by null; exception text is diagnostic,
+    # not part of a calculator's identity.
+    result["model"].pop("hash_unavailable_reason", None)
+    if calc is not None:
+        result["parameters"] = dict(getattr(calc, "parameters", {}) or {})
+        for name in ("pair_params", "charges", "cutoff", "coulomb_method",
+                     "alpha", "coulomb", "repulsive_core_config"):
+            if hasattr(calc, name):
+                result[name] = getattr(calc, name)
+        for name in ("model", "model_path", "model_paths", "head", "model_type"):
+            value = getattr(calc, name, None)
+            if value is not None:
+                try:
+                    normalized = _resume_value(value)
+                except ValueError:
+                    # Loaded neural networks are identified by their weights,
+                    # not their repr (which may include memory addresses).
+                    pass
+                else:
+                    result.setdefault("attributes", {})[name] = normalized
+        base = getattr(calc, "base_calculator", None)
+        if base is not None:
+            result["base_calculator"] = _random_calculator_settings(base, config)
+    return _resume_value(result)
+
+
+def _changed_setting(previous, current, prefix=""):
+    """Return the first changed setting, including missing nested fields."""
+    if isinstance(previous, dict) and isinstance(current, dict):
+        for key in sorted(previous.keys() | current.keys()):
+            path = f"{prefix}.{key}" if prefix else key
+            if key not in previous or key not in current:
+                return path
+            difference = _changed_setting(previous[key], current[key], path)
+            if difference:
+                return difference
+        return None
+    return prefix if previous != current else None
+
+
+def _validate_random_metadata(meta_path, current_meta, output_dir):
+    """Fail closed for old or incompatible checkpoints before modifying them."""
+    if not os.path.isfile(meta_path):
+        # A truly empty directory is a fresh run. Even partial/corrupt outputs
+        # need provenance: their original physical settings cannot be inferred.
+        prior_outputs = any(
+            name.startswith("random_")
+            for _, _, files in os.walk(output_dir) for name in files
+        )
+        if prior_outputs:
+            raise ValueError(
+                "Cannot resume: missing run metadata with complete settings. "
+                "Use a separate output directory for a new run."
+            )
+        return
+    try:
+        with open(meta_path, encoding="utf-8") as handle:
+            previous = json.load(handle)
+    except (OSError, ValueError) as exc:
+        raise ValueError(
+            f"Cannot resume: cannot read run metadata {meta_path!r}. "
+            "Use a separate output directory for a new run."
+        ) from exc
+    if not isinstance(previous, dict) or "composition" not in previous:
+        raise ValueError(f"Cannot resume: invalid run metadata {meta_path!r}.")
+    for key in ("composition", "output_format", "relax"):
+        if key in previous and previous[key] != current_meta[key]:
+            raise ValueError(
+                f"Cannot resume: {key} changed from {previous[key]!r} "
+                f"to {current_meta[key]!r}. Use a separate output directory "
+                "for an incompatible run."
+            )
+    if previous.get("schema_version") != _RESUME_SCHEMA or not isinstance(
+        previous.get("settings"), dict
+    ) or not all(key in previous for key in ("output_format", "relax")):
+        raise ValueError(
+            "Cannot resume: run metadata lacks complete settings provenance. "
+            "Use a separate output directory for a new run."
+        )
+    difference = _changed_setting(previous["settings"], current_meta["settings"])
+    if difference:
+        raise ValueError(
+            f"Cannot resume: {difference} changed. Use a separate output "
+            "directory for an incompatible run."
+        )
+
+
+def _write_random_metadata(path, metadata):
+    """Publish metadata atomically so interruptions cannot truncate it."""
+    name = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=os.path.dirname(path),
+            prefix=".random-metadata-", suffix=".tmp", delete=False,
+        ) as handle:
+            name = handle.name
+            json.dump(metadata, handle, indent=2, sort_keys=True, allow_nan=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(name, path)
+    finally:
+        if name is not None and os.path.exists(name):
+            os.unlink(name)
+
 
 def _derive_structure_seed(base_seed: int, index: int, attempt: int) -> int:
     """Deterministic per-structure seed from ``(base_seed, index, attempt)``.
@@ -1183,7 +1326,7 @@ def _derive_structure_seed(base_seed: int, index: int, attempt: int) -> int:
     return int(ss.generate_state(1, dtype=np.uint32)[0])
 
 
-def batch_random(
+def _batch_random_unlocked(
     composition: dict[str, int],
     n_structures: int = 1,
     output_dir: str = "random_structures",
@@ -1196,6 +1339,9 @@ def batch_random(
     cell_filter: str = "FrechetCellFilter",
     max_retries: int = 10,
     resume: bool = False,
+    safety: dict | None = None,
+    repulsive_core: dict | None = None,
+    resume_settings: dict | None = None,
     **kwargs,
 ) -> list[str]:
     """
@@ -1217,10 +1363,18 @@ def batch_random(
     cell_filter : str
     max_retries : int
     resume : bool
-        Reuse completed structures only when the stored composition, format,
-        and relaxation mode match. Incompatible or unreadable run metadata
-        raises ValueError before any existing output is changed. Legacy runs
-        without metadata are checked against the structures' atom counts.
+        Reuse completed structures only when all stored generation and
+        relaxation settings match. Missing, legacy, incompatible or unreadable
+        metadata raises ValueError before any existing output is changed.
+        Fresh runs also refuse incompatible occupied directories, so remaining
+        outputs cannot be attributed to a different set of settings.
+    safety : dict, optional
+        MLIP safety limits used during relaxation (see the YAML safety block).
+    repulsive_core : dict, optional
+        Optional short-range repulsion added to the relaxation calculator.
+    resume_settings : dict, optional
+        Effective external relaxation settings, including model selection.
+        The CLI supplies these for both ASE and torch-sim relaxation.
     **kwargs
         Forwarded to generate_random().
 
@@ -1247,16 +1401,18 @@ def batch_random(
         )
     ase_format, ext = _FORMAT_MAP[output_format]
 
-    os.makedirs(output_dir, exist_ok=True)
+    from ..utils.safety import validate_safety_config
+    from ..utils.repulsion import validate_repulsive_core_config
+    effective_safety = validate_safety_config(safety)
+    effective_core = validate_repulsive_core_config(repulsive_core)
+
     # v1.0.0rc2: initial and optimised structures now live in their own
     # subdirectories so that `amorphgen --analyse --input-dir
     # random_structures/random_opt` works without any *_opt.vasp filter.
     initial_dir = os.path.join(output_dir, "random_initial")
     opt_dir     = os.path.join(output_dir, "random_opt")
-    os.makedirs(initial_dir, exist_ok=True)
-    if relax:
-        os.makedirs(opt_dir, exist_ok=True)
     paths = []
+    reference_calc = None  # load one reference model for the whole batch
 
     # ── Index selection: `indices="80-90"` (or a list) generates only those
     # structure indices; seeds are index-derived, so the files are identical
@@ -1265,73 +1421,10 @@ def batch_random(
     selected = parse_index_spec(kwargs.pop("indices", None), n_structures)
     not_selected = (set(range(n_structures)) - selected) if selected else set()
 
-    # ── Resume support: scan for existing completed structures ──
-    meta_path = os.path.join(output_dir, "run_metadata.json")
-    current_meta = {
-        "composition": composition,
-        "output_format": output_format,
-        "relax": relax,
-    }
-    existing_indices = set()
-    if resume:
-        if os.path.isfile(meta_path):
-            try:
-                with open(meta_path, encoding="utf-8") as mf:
-                    prev_meta = json.load(mf)
-            except (OSError, ValueError) as exc:
-                raise ValueError(
-                    f"Cannot resume: cannot read run metadata {meta_path!r}. "
-                    "Use a separate output directory for a new run."
-                ) from exc
-            if not isinstance(prev_meta, dict) or "composition" not in prev_meta:
-                raise ValueError(f"Cannot resume: invalid run metadata {meta_path!r}.")
-            for key, value in current_meta.items():
-                if key in prev_meta and prev_meta[key] != value:
-                    raise ValueError(
-                        f"Cannot resume: {key} changed from {prev_meta[key]!r} "
-                        f"to {value!r}. Use a separate output directory "
-                        "for an incompatible run."
-                    )
-
-        # Scan for completed files (resume against the new subdir layout
-        # introduced in v1.0.0rc2)
-        for idx in range(n_structures):
-            initial_file = os.path.join(initial_dir, f"random_{idx:04d}{ext}")
-            opt_file = os.path.join(opt_dir, f"random_{idx:04d}_opt{ext}")
-            check_file = opt_file if relax else initial_file
-            # Check unfinished initial structures too, and do not rely solely
-            # on metadata: it may be missing from an older or copied run.
-            for candidate in (initial_file, opt_file) if relax else (initial_file,):
-                if not os.path.isfile(candidate) or os.path.getsize(candidate) == 0:
-                    continue
-                try:
-                    from ase.io import read as _read
-                    saved_atoms = _read(candidate)
-                except Exception:
-                    continue  # corrupted file, will regenerate
-                saved_composition = dict(Counter(saved_atoms.get_chemical_symbols()))
-                if saved_composition != composition:
-                    raise ValueError(
-                        f"Cannot resume: composition of {candidate!r} is "
-                        f"{saved_composition!r}, expected {composition!r}. "
-                        "Use a separate output directory for an incompatible run."
-                    )
-                if candidate == check_file:
-                    existing_indices.add(idx)
-                    paths.append(check_file)
-
-        if existing_indices:
-            missing = [i for i in range(n_structures)
-                       if i not in existing_indices]
-            print(f"  Resume: found {len(existing_indices)} existing "
-                  f"structures, generating {len(missing)} more "
-                  f"(indices {missing[0]}-{missing[-1]})"
-                  if missing else
-                  f"  Resume: all {n_structures} structures already exist.")
-        else:
-            print(f"  Resume: no existing structures found, "
-                  f"starting fresh.")
-
+    requested_generation = {**_GENERATION_DEFAULTS, **kwargs}
+    unknown = set(requested_generation) - set(_GENERATION_DEFAULTS)
+    if unknown:
+        raise TypeError(f"Unknown generation setting(s): {sorted(unknown)}")
     base_seed = kwargs.pop("seed", None)
 
     target_cn = kwargs.get("target_cn")
@@ -1379,6 +1472,89 @@ def batch_random(
                               composition=composition)
     else:
         dmax_log = dmax_user
+
+    # Persist both supplied/defaulted controls and resolved chemistry-derived
+    # values. The latter detect changed auto-derivation behavior across versions.
+    current_meta = _resume_value({
+        "schema_version": _RESUME_SCHEMA,
+        "composition": composition,
+        "output_format": "xyz" if output_format == "extxyz" else output_format,
+        "relax": relax,
+        "settings": {
+            "generation": requested_generation,
+            "composition_order": list(composition),
+            "resolved": {"target_cn": target_cn, "minsep": minsep_log,
+                         "dmax": dmax_log, "cell_length_ang": cell_L,
+                         "cn_tolerance": kwargs.get("cn_tolerance") or 0},
+            "max_retries": max_retries,
+            "relaxation": {"enabled": relax, "fmax": fmax,
+                           "max_steps": max_relax_steps, "optimizer": optimizer,
+                           "cell_filter": cell_filter,
+                           "safety": effective_safety,
+                           "reference_calculator": _random_calculator_settings(
+                               None, effective_safety["reference"])
+                               if effective_safety["reference"] else None,
+                           "repulsive_core": effective_core,
+                           "calculator": _random_calculator_settings(
+                               calc, resume_settings) if relax or resume_settings else None,
+                           "external": resume_settings},
+        },
+    })
+    # Check JSON validity now, before directories, logs, or outputs are changed.
+    json.dumps(current_meta, allow_nan=False)
+    meta_path = os.path.join(output_dir, "run_metadata.json")
+    existing_indices = set()
+    try:
+        _validate_random_metadata(meta_path, current_meta, output_dir)
+    except ValueError as exc:
+        if resume:
+            raise
+        raise ValueError(str(exc).replace(
+            "Cannot resume:", "Cannot reuse output directory:", 1
+        )) from exc
+    if resume:
+        # Scan for completed files (resume against the new subdir layout
+        # introduced in v1.0.0rc2)
+        for idx in range(n_structures):
+            initial_file = os.path.join(initial_dir, f"random_{idx:04d}{ext}")
+            opt_file = os.path.join(opt_dir, f"random_{idx:04d}_opt{ext}")
+            check_file = opt_file if relax else initial_file
+            # Also check unfinished initial structures against the manifest.
+            for candidate in (initial_file, opt_file) if relax else (initial_file,):
+                if not os.path.isfile(candidate) or os.path.getsize(candidate) == 0:
+                    continue
+                try:
+                    from ase.io import read as _read
+                    saved_atoms = _read(candidate)
+                except Exception:
+                    continue  # corrupted file, will regenerate
+                saved_composition = dict(Counter(saved_atoms.get_chemical_symbols()))
+                if saved_composition != composition:
+                    raise ValueError(
+                        f"Cannot resume: composition of {candidate!r} is "
+                        f"{saved_composition!r}, expected {composition!r}. "
+                        "Use a separate output directory for an incompatible run."
+                    )
+                if candidate == check_file:
+                    existing_indices.add(idx)
+                    paths.append(check_file)
+
+        if existing_indices:
+            missing = [i for i in range(n_structures)
+                       if i not in existing_indices]
+            print(f"  Resume: found {len(existing_indices)} existing "
+                  f"structures, generating {len(missing)} more "
+                  f"(indices {missing[0]}-{missing[-1]})"
+                  if missing else
+                  f"  Resume: all {n_structures} structures already exist.")
+        else:
+            print(f"  Resume: no existing structures found, "
+                  f"starting fresh.")
+
+    os.makedirs(initial_dir, exist_ok=True)
+    if relax:
+        os.makedirs(opt_dir, exist_ok=True)
+    _write_random_metadata(meta_path, {**current_meta, "n_structures": n_structures})
 
     # -- Write log file --
     logfile = os.path.join(output_dir, "random_gen.log")
@@ -1457,10 +1633,6 @@ def batch_random(
                     reduced[pair] = reduced[pair] * (1.0 - reduction)
             return reduced
 
-        # Save run metadata for resume consistency checks
-        with open(meta_path, "w", encoding="utf-8") as mf:
-            json.dump({**current_meta, "n_structures": n_structures}, mf, indent=2)
-
         # Pre-warm calculator: model load + MPS graph compile happen once,
         # outside the per-structure timing. Otherwise the first structure
         # (or first structure after --resume) absorbs ~minutes of init cost.
@@ -1485,6 +1657,8 @@ def batch_random(
                      lf)
 
         while generated < n_structures:
+            from ..utils.preemption import stop_if_requested
+            stop_if_requested()
             # Skip if resume and this index already completed
             if generated in not_selected:
                 generated += 1
@@ -1581,8 +1755,15 @@ def batch_random(
 
             if relax and calc is not None:
                 from ..utils.common import compute_density_gcm3, require_stress
+                from ..utils.safety import SafetyMonitor
+                from ..utils.repulsion import with_repulsive_core
                 from ase.geometry import cell_to_cellpar
+                calc = with_repulsive_core(calc, repulsive_core)
                 atoms.calc = calc
+                monitor = SafetyMonitor(safety, context=f"random structure {generated:04d} relaxation",
+                                        reference_calc=reference_calc)
+                monitor.check(atoms, step=0)
+                reference_calc = monitor.reference_calc
                 # A cell filter relaxes the cell and needs stress; classical
                 # potentials (LJ/Buckingham) don't provide it. Fail clearly
                 # instead of crashing inside ASE (the default cell_filter for
@@ -1618,9 +1799,12 @@ def batch_random(
                 t_relax_start = time.perf_counter()
                 steps_done = 0
                 for step in range(max_relax_steps):
+                    stop_if_requested()
                     opt.step()
+                    monitor.check(atoms, step=step + 1)
                     energy = atoms.get_potential_energy()
                     forces = target.get_forces()
+                    monitor.check(atoms, step=step + 1)
                     max_f = float((forces ** 2).sum(axis=1).max() ** 0.5)
                     cp = cell_to_cellpar(atoms.cell)
                     vol = atoms.get_volume()
@@ -1696,6 +1880,26 @@ def batch_random(
         lf.close()
 
     return paths
+
+
+# The private implementation is also used by the CLI while it owns the lock
+# across placement and a separate torch-sim relaxation phase.
+_BATCH_SIGNATURE = inspect.signature(_batch_random_unlocked)
+
+
+@wraps(_batch_random_unlocked)
+def batch_random(*args, **kwargs):
+    """Generate a batch while holding exclusive ownership of its directory."""
+    from ..utils.run_lock import run_lock
+
+    bound = _BATCH_SIGNATURE.bind(*args, **kwargs)
+    output_dir = bound.arguments.get("output_dir", "random_structures")
+    with run_lock(output_dir):
+        return _batch_random_unlocked(*args, **kwargs)
+
+
+batch_random.__name__ = "batch_random"
+batch_random.__qualname__ = "batch_random"
 
 
 def random_gen_dir_hint(directory: str) -> str:

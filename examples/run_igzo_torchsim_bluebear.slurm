@@ -12,6 +12,8 @@
 #     logs/igzo_torchsim_<jobid>.out           timings of both engines
 # ----------------------------------------------------------------------------
 
+#SBATCH --signal=B:USR1@120
+#SBATCH --requeue
 #SBATCH --job-name=igzo_tsim
 # Export AMORPHGEN_VENV=/path/to/venv before submitting (see docs/guides/hpc.md).
 # For repository files, AMORPHGEN_ROOT defaults to the submission directory.
@@ -26,14 +28,16 @@
 #SBATCH --output=logs/igzo_torchsim_%j.out
 
 set -euo pipefail
+PKG=${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
+if [[ ! -f "$PKG/amorphgen/slurm_runtime.sh" && -f "$PKG/../amorphgen/slurm_runtime.sh" ]]; then
+    PKG=$(cd "$PKG/.." && pwd)
+fi
+source "$PKG/amorphgen/slurm_runtime.sh"
+amorphgen_slurm_main "$0" "$@"
 export PYTHONUNBUFFERED=1     # show progress lines in the log as they happen
 mkdir -p logs
 
-# >>> put the two module lines that `module spider Python/3.12` gave you here <<<
-module purge
-module load bear-apps/2024a/live
-module load Python/3.12.3-GCCcore-13.3.0
-source "${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}/bin/activate"
+amorphgen_slurm_bluebear_environment "bear-apps/2024a/live" "Python/3.12.3-GCCcore-13.3.0"
 
 python -c "import torch, torch_sim; print('torch', torch.__version__, '| cuda', torch.cuda.is_available(), '| torch-sim', torch_sim.__version__)"
 python -c "from amorphgen.utils.radii import estimate_cell_length as e; print('radii check', e({'Ir':40,'O':80}))"
@@ -46,15 +50,15 @@ OUT=igzo_torchsim_v2     # v2: LBFGS on both engines, cell forces in torch-sim's
 mkdir -p $OUT
 
 # 1. the same 4 placements for both engines
-amorphgen --random-gen --composition "$COMP" -n $N --seed $SEED --target-density $RHO -o $OUT/initial
+amorphgen --random-gen --resume --composition "$COMP" -n $N --seed $SEED --target-density $RHO -o $OUT/initial
 
 # 2a. ASE engine (one structure after another)
-/usr/bin/time -v amorphgen --batch-opt --input-dir $OUT/initial/random_initial \
+/usr/bin/time -v amorphgen --batch-opt --resume --input-dir $OUT/initial/random_initial \
     -m mace-mpa-0 -d cuda --default-dtype float64 -C cubic -O LBFGS -f 0.05 --opt-steps 1000 \
     -o $OUT/ase/random_opt 2>&1 | tee logs/igzo_ase_$SLURM_JOB_ID.log
 
 # 2b. torch-sim engine (all 4 in one batched call)
-/usr/bin/time -v amorphgen --batch-opt --input-dir $OUT/initial/random_initial \
+/usr/bin/time -v amorphgen --batch-opt --resume --input-dir $OUT/initial/random_initial \
     -m mace-mpa-0 -d cuda --default-dtype float64 -C cubic -O LBFGS -f 0.05 --opt-steps 1000 --engine torchsim \
     -o $OUT/torchsim/random_opt 2>&1 | tee logs/igzo_tsim_$SLURM_JOB_ID.log
 

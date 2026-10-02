@@ -311,10 +311,8 @@ class TestFullPipelineEMT:
             input_file=input_file,
             work_dir=str(tmp_work_dir / "full_run"),
             cfg_override=EMT_CFG,
+            calc=emt_calc,
         )
-        # Override calculator to EMT
-        pipe._calc = emt_calc
-        pipe.share_calc = True
 
         result = pipe.run(stages=[1, 2, 3, 4, 5, 6, 7])
         assert result is not None
@@ -338,9 +336,8 @@ class TestFullPipelineEMT:
             input_file=input_file,
             work_dir=str(tmp_work_dir / "hybrid_run"),
             cfg_override=EMT_CFG,
+            calc=emt_calc,
         )
-        pipe._calc = emt_calc
-        pipe.share_calc = True
 
         result = pipe.run(stages=[1, 4, 5, 6, 7])
         assert result is not None
@@ -360,9 +357,8 @@ class TestFullPipelineEMT:
             input_file=input_file,
             work_dir=str(tmp_work_dir / "log_run"),
             cfg_override=EMT_CFG,
+            calc=emt_calc,
         )
-        pipe._calc = emt_calc
-        pipe.share_calc = True
 
         pipe.run(stages=[1, 4, 5, 6, 7])
         logfile = tmp_work_dir / "log_run" / "pipeline_summary.log"
@@ -378,10 +374,8 @@ class TestFullPipelineEMT:
 
         # Run first two stages
         pipe = MeltQuenchPipeline(
-            input_file=input_file, work_dir=work, cfg_override=EMT_CFG,
+            input_file=input_file, work_dir=work, cfg_override=EMT_CFG, calc=emt_calc,
         )
-        pipe._calc = emt_calc
-        pipe.share_calc = True
         pipe.run(stages=[1, 4])
 
         assert os.path.isfile(os.path.join(work, "stage1_opt.xyz"))
@@ -389,10 +383,8 @@ class TestFullPipelineEMT:
 
         # Resume — should run 5, 6, 7
         pipe2 = MeltQuenchPipeline(
-            input_file=input_file, work_dir=work, cfg_override=EMT_CFG,
+            input_file=input_file, work_dir=work, cfg_override=EMT_CFG, calc=emt_calc,
         )
-        pipe2._calc = emt_calc
-        pipe2.share_calc = True
         result = pipe2.run(stages=[1, 4, 5, 6, 7], resume=True)
 
         assert result is not None

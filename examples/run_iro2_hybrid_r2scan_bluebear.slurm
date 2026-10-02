@@ -19,6 +19,8 @@
 # Collect:  final structures land in iro2_hybrid_r2scan/task_NN/final/
 # ----------------------------------------------------------------------------
 
+#SBATCH --signal=B:USR1@120
+#SBATCH --requeue
 #SBATCH --job-name=amg_iro2_hyb_r2s
 # Export AMORPHGEN_VENV=/path/to/venv before submitting (see docs/guides/hpc.md).
 # For repository files, AMORPHGEN_ROOT defaults to the submission directory.
@@ -34,12 +36,15 @@
 #SBATCH --output=logs/iro2_hyb_r2s_%A_%a.out
 #SBATCH --error=logs/iro2_hyb_r2s_%A_%a.err
 
-set -eu
+set -euo pipefail
+PKG=${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
+if [[ ! -f "$PKG/amorphgen/slurm_runtime.sh" && -f "$PKG/../amorphgen/slurm_runtime.sh" ]]; then
+    PKG=$(cd "$PKG/.." && pwd)
+fi
+source "$PKG/amorphgen/slurm_runtime.sh"
+amorphgen_slurm_main "$0" "$@"
 
-module purge
-module load bear-apps/2023a/live
-module load Python/3.11.3-GCCcore-12.3.0
-source "${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}/bin/activate"
+amorphgen_slurm_bluebear_environment "bear-apps/2023a/live" "Python/3.11.3-GCCcore-12.3.0"
 
 # Resolve paths relative to the submit directory (where this + the config live)
 cd "${SLURM_SUBMIT_DIR:-.}"
@@ -55,11 +60,11 @@ python -c "from amorphgen.utils.calculators import _detect_backend as d; print('
 # (1) Generate ONE disordered Ir40O80 input — fixed cell at the estimator
 #     density, min-CN floor-repair on by default. No --relax (placement only);
 #     each array task draws a fresh random structure (CLI uses a random seed).
-amorphgen --random-gen --composition "IrO2*40" -n 1 \
+amorphgen --random-gen --resume --seed "$((2026 + ${SLURM_ARRAY_TASK_ID:-0}))" --composition "IrO2*40" -n 1 \
     --format vasp -o ${WORK}/gen/
 
 # (2) Hybrid melt-quench (stages 4-7) on that structure with matpes-r2scan.
-amorphgen --hybrid-ensemble --input-dir ${WORK}/gen/random_initial/ \
+amorphgen --hybrid-ensemble --resume --seed "$((2026 + ${SLURM_ARRAY_TASK_ID:-0}))" --input-dir ${WORK}/gen/random_initial/ \
     --config hybrid_iro2_r2scan.yaml \
     --model mace-matpes-r2scan --device cuda --default-dtype float64 \
     -o ${WORK}/

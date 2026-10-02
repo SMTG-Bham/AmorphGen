@@ -191,6 +191,8 @@ def run(snapshot_files: list[str],
             # A stage whose trajectory is already complete resumes with 0
             # remaining steps (cheap skip); optimisation (7) restarts whole.
             for s in stages:
+                from ..utils.preemption import stop_if_requested
+                stop_if_requested()
                 if s == 4:
                     atoms = equilibrate.run(atoms, cfg_override=run_cfg,
                                             calc=calc, stage="high",
@@ -224,7 +226,8 @@ def run(snapshot_files: list[str],
     return results
 
 
-def _batched_stage_checkpoint(dirs, logname, trajname, endname, n_steps, interval, resume):
+def _batched_stage_checkpoint(dirs, logname, trajname, endname, n_steps, interval, resume,
+                              validate=None):
     """Frame-level resume for one batched MD stage across a chunk of runs.
 
     Returns ``(start_atoms, done_steps, complete)``:
@@ -240,7 +243,10 @@ def _batched_stage_checkpoint(dirs, logname, trajname, endname, n_steps, interva
     if not resume:
         return None, 0, False
     if all(os.path.isfile(os.path.join(d, endname)) for d in dirs):
-        return [read(os.path.join(d, endname)) for d in dirs], n_steps, True
+        selected = [read(os.path.join(d, endname)) for d in dirs]
+        if validate is not None:
+            selected = validate(selected)
+        return selected, n_steps, True
     frames = []
     for d in dirs:
         path = os.path.join(d, trajname)
@@ -260,11 +266,14 @@ def _batched_stage_checkpoint(dirs, logname, trajname, endname, n_steps, interva
     # at step min(k * interval, n_steps)), so clamp; a trajectory that reached
     # the end but lost its end file (killed while writing it) counts as complete
     done = min(n_common * interval, n_steps)
+    selected = [fr[n_common - 1] for fr in frames]
+    if validate is not None:
+        selected = validate(selected)
     if done >= n_steps:
-        for d, fr in zip(dirs, frames):
+        for d, atoms in zip(dirs, selected):
             if not os.path.isfile(os.path.join(d, endname)):
-                write(os.path.join(d, endname), fr[n_common - 1], format="extxyz")
-        return [fr[n_common - 1] for fr in frames], n_steps, True
+                write(os.path.join(d, endname), atoms, format="extxyz")
+        return selected, n_steps, True
     for d, fr in zip(dirs, frames):
         if len(fr) > n_common:                   # ran ahead of the chunk, or torn: cut back
             write(os.path.join(d, trajname), fr[:n_common], format="extxyz")
@@ -277,7 +286,7 @@ def _batched_stage_checkpoint(dirs, logname, trajname, endname, n_steps, interva
             body = [l for l, r in zip(lines, is_row) if r][:n_common]
             with open(logpath, "w") as fh:
                 fh.write("\n".join(head + body) + "\n")
-    return [fr[n_common - 1] for fr in frames], done, False
+    return selected, done, False
 
 
 def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
@@ -336,6 +345,21 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
     model = build_model(cfg.get("model", "mace-mpa-0"), device=cfg.get("device", "auto"),
                         model_path=cfg.get("model_path"), classical_params=cfg.get("classical_params"),
                         dtype="float64" if cfg.get("default_dtype") in (None, "auto") else cfg["default_dtype"])
+
+    def validate_checkpoint(frames):
+        """Re-evaluate resumed frames before writing any reconstructed output."""
+        import torch
+        import torch_sim as ts
+        from ..utils.repulsion import wrap_torch_model
+        from ..utils.torchsim_engine import _TorchSafetyBridge
+        guard = _TorchSafetyBridge(frames, cfg.get("safety"), "torch-sim resumed checkpoint")
+        checked_model = guard.wrap_model(wrap_torch_model(model, cfg.get("repulsive_core")))
+        state = guard.attach(ts.initialize_state(frames, model.device, model.dtype))
+        state.atom_extras["momenta"] = torch.as_tensor(
+            np.concatenate([atoms.get_momenta() for atoms in frames]),
+            device=model.device, dtype=model.dtype)
+        return guard.check(state, checked_model(state))
+
     size_file = os.path.join(work_dir, "batch_size.json")
     if str(batch_size).lower() == "auto" and resume and os.path.isfile(size_file):
         with open(size_file) as fh:
@@ -344,7 +368,8 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
     if str(batch_size).lower() == "auto":
         from ..utils.torchsim_engine import estimate_batch_size
         batch_size = estimate_batch_size(model, [read(f) for _, f in runs[:4]], fraction=0.5,
-                                         md=True, fallback=16)
+                                         md=True, fallback=16, safety=cfg.get("safety"),
+                                         repulsive_core=cfg.get("repulsive_core"))
     batch_size = int(batch_size)
     with open(size_file, "w") as fh:
         json.dump({"batch_size": batch_size}, fh)
@@ -363,7 +388,8 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
         if 4 in stages:
             c = cfg["eq_high"]; n = int(c["steps"])
             start, done, complete = _batched_stage_checkpoint(dirs, "stage4_eq.log", "stage4_eq_traj.xyz",
-                                                              "stage4_eq.xyz", n, TRAJ_LOG_INTERVAL, resume)
+                                                              "stage4_eq.xyz", n, TRAJ_LOG_INTERVAL, resume,
+                                                              validate=validate_checkpoint)
             if complete:
                 print("  [Stage 4] already complete for this chunk -- skipping"); atoms = start
             else:
@@ -372,7 +398,8 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
                 ws = [_RunWriter(d, "stage4_eq.log", "stage4_eq_traj.xyz", append=done > 0, step_offset=done) for d in dirs]
                 print(f"  [Stage 4] NVT {c['T']} K, {n - done} steps")
                 atoms = batch_nvt(atoms, model, float(c["T"]), n - done, timestep_fs=float(c.get("timestep", 0.5)),
-                                  friction=float(c.get("friction", 0.01)), seed=seed, stage=4, tag=ci * 1_000_000 + done, run_index=job_index, writers=ws)
+                                  friction=float(c.get("friction", 0.01)), seed=seed, stage=4, tag=ci * 1_000_000 + done, run_index=job_index, writers=ws,
+                                  safety=cfg.get("safety"), repulsive_core=cfg.get("repulsive_core"))
                 for d, a in zip(dirs, atoms):
                     write(os.path.join(d, "stage4_eq.xyz"), a, format="extxyz")
         if 5 in stages:
@@ -385,7 +412,8 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
                 spt = int(c.get("steps_per_T", 1000))
             sched = np.repeat(temps, spt)
             start, done, complete = _batched_stage_checkpoint(dirs, "stage5_quench.log", "stage5_quench_traj.xyz",
-                                                              "stage5_quenched.xyz", len(sched), TRAJ_LOG_INTERVAL, resume)
+                                                              "stage5_quenched.xyz", len(sched), TRAJ_LOG_INTERVAL, resume,
+                                                              validate=validate_checkpoint)
             if complete:
                 print("  [Stage 5] already complete for this chunk -- skipping"); atoms = start
             else:
@@ -395,13 +423,15 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
                 print(f"  [Stage 5] quench {c['T_start']} -> {c['T_end']} K, {len(temps)} segments x {spt} steps"
                       + (f" (from step {done})" if done else ""))
                 atoms = batch_nvt(atoms, model, sched[done:], len(sched) - done, timestep_fs=dt,
-                                  friction=float(c.get("friction", 0.01)), seed=seed, stage=5, tag=ci * 1_000_000 + done, run_index=job_index, writers=ws)
+                                  friction=float(c.get("friction", 0.01)), seed=seed, stage=5, tag=ci * 1_000_000 + done, run_index=job_index, writers=ws,
+                                  safety=cfg.get("safety"), repulsive_core=cfg.get("repulsive_core"))
                 for d, a in zip(dirs, atoms):
                     write(os.path.join(d, "stage5_quenched.xyz"), a, format="extxyz")
         if 6 in stages:
             c = cfg["eq_low"]; n = int(c["steps"])
             start, done, complete = _batched_stage_checkpoint(dirs, "stage6_eq.log", "stage6_eq_traj.xyz",
-                                                              "stage6_eq.xyz", n, TRAJ_LOG_INTERVAL, resume)
+                                                              "stage6_eq.xyz", n, TRAJ_LOG_INTERVAL, resume,
+                                                              validate=validate_checkpoint)
             if complete:
                 print("  [Stage 6] already complete for this chunk -- skipping"); atoms = start
             else:
@@ -410,7 +440,8 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
                 ws = [_RunWriter(d, "stage6_eq.log", "stage6_eq_traj.xyz", append=done > 0, step_offset=done) for d in dirs]
                 print(f"  [Stage 6] NVT {c['T']} K, {n - done} steps")
                 atoms = batch_nvt(atoms, model, float(c["T"]), n - done, timestep_fs=float(c.get("timestep", 0.5)),
-                                  friction=float(c.get("friction", 0.01)), seed=seed, stage=6, tag=ci * 1_000_000 + done, run_index=job_index, writers=ws)
+                                  friction=float(c.get("friction", 0.01)), seed=seed, stage=6, tag=ci * 1_000_000 + done, run_index=job_index, writers=ws,
+                                  safety=cfg.get("safety"), repulsive_core=cfg.get("repulsive_core"))
                 for d, a in zip(dirs, atoms):
                     write(os.path.join(d, "stage6_eq.xyz"), a, format="extxyz")
         if 7 in stages:
@@ -420,7 +451,8 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
                 a.set_momenta(np.zeros_like(a.positions))
             atoms = batch_relax(atoms, model, fmax=float(c.get("fmax", 0.01)), max_steps=int(c.get("max_steps", 1000)),
                                 cell_filter=str(c.get("cell_filter", "cubic")), optimizer=str(c.get("optimizer", "LBFGS")),
-                                pressure_tol_gpa=float(c.get("pressure_tol_gpa", 0.02)))
+                                pressure_tol_gpa=float(c.get("pressure_tol_gpa", 0.02)),
+                                safety=cfg.get("safety"), repulsive_core=cfg.get("repulsive_core"))
             for d, a in zip(dirs, atoms):
                 write(os.path.join(d, "stage7_opt.xyz"), a, format="extxyz")
         for d, a in zip(dirs, atoms):

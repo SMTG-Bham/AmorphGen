@@ -91,7 +91,23 @@ Crystalline input  (POSCAR / .xyz / .cif / .extxyz)
    stage7_opt.cif  +  stage7_opt.xyz
 ```
 
-> `--mq-ensemble` extends MQ: stages 1–4 run once, then N independent quenches (stages 5–6–7) are launched from snapshots of the stage-4 trajectory.
+> `--mq-ensemble` extends MQ: stages 1–4 run once, then up to N separate quenches (stages 5–6–7) are launched from snapshots of the stage-4 trajectory.
+
+The default `--select decorrelated` chooses burn-in and spacing from scalar
+autocorrelation and per-species diffusion, and writes
+`snapshot_sampling.{txt,json}` with an estimated effective independent
+snapshot count. A short or slowly diffusing trajectory can yield fewer than
+N snapshots; the default 10 ps hold is not extended automatically. The count
+is a sampling diagnostic, not proof of equilibrium or final-glass independence.
+See the [sampling guide](https://smtg-bham.github.io/AmorphGen/guides/mq-ensemble.html#burn-in-spacing-and-effective-snapshot-count)
+for details and the explicit legacy `--select uniform` / `--select last` modes.
+
+It also writes `melt_memory.{txt,csv,json}` before the quenches, reporting
+how much of the initially ordered atom population is still ordered after
+heating and in each high-temperature snapshot. This endpoint comparison
+cannot distinguish uninterrupted survival from melting and recrystallisation.
+See the [MQ-ensemble guide](https://smtg-bham.github.io/AmorphGen/guides/mq-ensemble.html#how-much-starting-crystal-survives-the-melt)
+for the definition and order-threshold settings.
 
 ### 3. Hybrid: random → MQ stages 4-7 (`--hybrid-ensemble`)
 
@@ -142,6 +158,16 @@ Only install the backend(s) you need. Classical potentials (Lennard-Jones, Bucki
 For ensembles on a GPU there is a second execution engine, [torch-sim](https://github.com/torchsim/torch-sim), selected with `--engine torchsim`. It relaxes structures in batches and supports NVT annealing and quenching in the hybrid workflow. Batch sizes adapt to available memory. It works with MACE, SevenNet and Lennard-Jones (CHGNet and Buckingham stay on the ASE engine), needs Python 3.12+, the `[torchsim]` extra and a C/C++ compiler (it compiles kernels while it runs), and writes the same files as the ASE engine. See the [backends guide](https://smtg-bham.github.io/AmorphGen/guides/backends.html) for details.
 
 > **ASE pass-through.** AmorphGen wraps each backend's upstream ASE calculator without modifying unit conventions, stress signs, or PBC handling; energies (eV), forces (eV/Å), stress (eV/Å³), and `atoms.pbc` are inherited directly from the upstream MLIP package. See [docs/guides/backends](https://smtg-bham.github.io/AmorphGen/guides/backends.html) for details.
+
+### MLIP failure checks
+
+MD and relaxation (ASE, torch-sim, and random-gen relaxation) stop on NaN/Inf,
+close contacts, abrupt energy changes, or temperature/volume runaway before
+saving invalid results. Configure the limits with the top-level `safety` YAML
+block. Optional `repulsive_core` and `safety.reference` settings add short-range
+repulsion and periodic checks against an independent model. See the
+[YAML configuration guide](docs/guides/yaml-config.md#mlip-failure-checks-and-optional-stabilisation)
+for defaults, units, and examples.
 
 </details>
 
@@ -542,7 +568,10 @@ Coordination-aware placement biases the initial structure toward the requested c
 density, bond lengths, coordination numbers, bond angles and partial RDFs. The
 same run can add the structure factor, ring statistics, polyhedral connectivity,
 Voronoi indices, a close-contact check and a validation against literature
-ranges. Every quantity that is plotted is also written as a CSV.
+ranges. Optional descriptors add crystal-like order and ordered cluster sizes,
+void distributions, oxygen speciation,
+stress-derived elastic moduli and harmonic vibrational DOS. Every quantity
+that is plotted is also written as a CSV.
 
 ```bash
 # Summary to the terminal
@@ -551,6 +580,11 @@ amorphgen --analyse --input-dir optimised_structures/
 # Report + figures (RDF, coordination, angles, density) + CSVs
 amorphgen --analyse --input-dir optimised_structures/ \
     --save-report report.txt --save-plot plots/
+
+# Declare precision targets and estimate how many more structures are needed
+amorphgen --analyse --input-dir optimised_structures/ --convergence \
+    --tolerance density=0.02 --tolerance coordination.Si-O=0.05 \
+    --save-report convergence.txt --save-plot convergence/
 
 # Neutron S(q) by the direct (Debye) method, with ring statistics,
 # corner/edge-sharing analysis and Voronoi indices for Ge
@@ -569,10 +603,30 @@ amorphgen --analyse --input-dir optimised_structures/ \
 # Plot X-ray total correlation function T(r) 
 amorphgen --analyse --input-dir optimised_structures/ \
     --tr --sq-weighting xray --save-plot plots/
+
+# Free-space sampling and oxygen connectivity, without a calculator
+amorphgen --analyse --input-dir silica/ --voids --oxygen-speciation \
+    --network-formers Si --save-plot descriptors/
+
+# Crystal-like order in a phase-change ensemble
+amorphgen --analyse --input-dir gete_mq/final/ --bond-order \
+    --order-cutoff 3.5 \
+    --qbar6-threshold 0.3 --order-min-neighbors 4 \
+    --save-report gete_report.txt --save-plot gete_plots/
+
+# Elastic response and harmonic cell modes, using the selected MLIP
+amorphgen --analyse --input-dir relaxed_silica/ --elastic --vdos \
+    --model mace-mpa-0 --save-plot descriptors/ --save-report descriptors.txt
 ```
 
 Notes on the options:
 
+- `--convergence` adds uncertainty-versus-ensemble-size planning curves and
+  JSON/CSV exports. Repeat `--tolerance NAME=VALUE` to declare absolute
+  confidence half-widths in descriptor units (density in g/cm³, coordination
+  in neighbours). Curves use full-ensemble variance and are independent of
+  input order. Estimated additional counts assume independent structures
+  with unchanged variance; see the [convergence guide](docs/guides/analysis.md#declared-tolerances-and-ensemble-convergence).
 - `--sq` computes S(q) at the reciprocal-lattice q-vectors of each cell, so the
   first sharp diffraction peak is resolved without the truncation of a Fourier
   transform of g(r). Weighting is `xray` (q-dependent Waasmaier–Kirfel form
@@ -588,6 +642,20 @@ Notes on the options:
   polyhedra and the fraction of cations in edge-sharing pairs, which separates a
   corner-sharing network glass from a random packing with the same coordination.
 - `--check-dimers` flags unphysical close contacts (O–O peroxide, N–N) per structure.
+- `--bond-order` reports per-atom Steinhardt q6 and Lechner–Dellago q̄6,
+  ordered atom fractions and the largest connected ordered cluster, including
+  periodic connections. `--order-cutoff` selects the neighbour shell, defaulting
+  to `--cutoff`. The 3.5 Å example isolates the first shell of ideal rocksalt
+  GeTe with lattice constant 6 Å; calibrate it for your structures. The default
+  q̄6 threshold (0.3) and minimum neighbour count (4) need calibration against
+  crystal and liquid references for the material; they do not identify a phase.
+  `--save-plot` exports JSON, per-structure and per-atom CSVs, and a figure.
+- `--voids` samples periodic point clearance using configurable atomic radii;
+  `--oxygen-speciation` counts each oxygen's selected network-former neighbours.
+- `--elastic` computes the stiffness tensor and Voigt/Reuss/Hill moduli from
+  stresses; `--elastic-relax` adds fixed-cell atomic relaxation. `--vdos` uses
+  6N force evaluations per cell for harmonic Gamma-point modes in THz.
+  These four descriptors also save full per-structure JSON under `--save-plot`.
 - `--smearing SIGMA` sets the Gaussian smearing of g(r) (default 0.05 Å; 0 for the
   raw histogram). `--cutoff` is `auto-rdf` (first minimum of each partial g(r),
   so every pair gets its own value), `auto` (radii table), a number in Å, or
@@ -655,8 +723,26 @@ sa.save_report("report.txt")
 sa.plot(output_dir="plots/")
 ```
 
-The analysis guide in the documentation covers the S(q) conventions and the
-reference-YAML format.
+Measured S(q) or T(r) can be compared with pointwise ensemble bands and
+goodness-of-fit metrics:
+
+```python
+from amorphgen.analysis import save_experiment_comparison, save_xrd_pattern
+
+fit = sa.compare_experiment("measured_sq.dat", kind="sq", x_range=(1.5, 10),
+                            calculation_options={"qmax": 12, "sigma_q": 0.05})
+print(fit["metrics"])  # RMSE, MAE, bias, Rw; chi-square with measurement sigma
+save_experiment_comparison(fit, output_dir="comparison/")
+xrd = sa.xrd_pattern(wavelength=1.5406, qmax=8, nq=400)
+save_xrd_pattern(xrd, output_dir="comparison/")
+```
+
+The CLI equivalents are `--experiment-sq FILE`, `--experiment-tr FILE` and
+`--xrd`, with `--save-plot DIR` for exports. Experimental text/CSV files have
+coordinate, value and optional one-sigma uncertainty columns. XRD returns
+coherent intensity per atom versus 2θ before instrument corrections. The
+analysis guide covers file formats, fit definitions, scattering conventions
+and the reference-YAML format.
 
 </details>
 
@@ -680,6 +766,9 @@ amorphgen POSCAR \
 command below extracts 20 evenly spaced frames from the saved trajectory. Use
 `--burn-in-frames` to exclude an initial unequilibrated portion; choose snapshot
 spacing long enough for the structural correlations relevant to your system.
+For adaptive burn-in and spacing, replace `--select uniform` with
+`--select decorrelated`; this may select fewer than 20 frames and reports the
+estimated effective independent snapshot count.
 
 ```bash
 amorphgen --batch-quench \
@@ -970,56 +1059,33 @@ AmorphGen/
 ---
 
 <details>
-<summary><h2>HPC (SLURM) example</h2></summary>
+<summary><h2>HPC (Slurm) workflows</h2></summary>
+
+Generate portable job scripts, arrays and dependency chains from one YAML file:
 
 ```bash
-#!/bin/bash
-#SBATCH --job-name=amorphgen
-#SBATCH --gres=gpu:1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
-#SBATCH --time=4:00:00
-
-source /path/to/conda/env/bin/activate
-
-amorphgen /abs/path/to/In2O3_POSCAR \
-    --model mace-mpa-0 \
-    --device cuda \
-    --work-dir /scratch/InO_amorphous \
-    --melt-T-end 2500 --eq-high-T 2500 \
-    --quench-T-start 2500
+amorphgen-slurm examples/slurm_workflow.yaml --output-dir jobs
+bash jobs/submit.sh --account=your-project
 ```
 
-An ensemble of structures on one GPU can use the torch-sim
-engine, which batches the structures and, together with `--resume`, can be
-resubmitted into a short queue until it finishes. Outputs are written after
-every chunk and MD trajectories every 100 steps, so a walltime kill costs at
-most one relaxation chunk or 100 MD steps:
+Edit [the example workflow](examples/slurm_workflow.yaml) for your paths and
+resources. The generator writes standalone `.slurm` scripts and a submission
+script; it does not submit jobs. The default profile is generic; add
+`--profile bluebear` for BlueBEAR defaults. Arrays give every task its own
+work directory, and `aftercorr` dependencies connect matching array tasks.
 
-```bash
-#!/bin/bash
-#SBATCH --job-name=amorphgen_ens
-#SBATCH --gres=gpu:1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=48G
-#SBATCH --time=1:00:00
-export PYTHONUNBUFFERED=1            # progress in the log while the job runs
+Generated scripts handle `USR1` and `TERM` so resumable AmorphGen commands can
+stop at a checkpoint boundary. Include `--resume` in those commands. Optional
+requeue restarts interrupted jobs when the cluster permits it; preemption
+signals and grace periods are configured by the site. Completed structures
+are reused, unfinished optimisations restart, and MD resumes from saved
+frames without promising bitwise continuation.
 
-source /path/to/venv/bin/activate    # Python 3.12 with amorphgen[mace,torchsim]
-
-amorphgen --hybrid-ensemble --input-dir /scratch/geo2_seeds/random_opt/ \
-    --model mace-mpa-0 --device cuda \
-    --engine torchsim --batch-size auto \
-    --work-dir /scratch/geo2_hybrid --resume
-```
-
-Ready-made BlueBEAR scripts for generation arrays, batched relaxation, batched
-MD and the GPU test suite are in `examples/`. Set `AMORPHGEN_VENV`, select your
-account with `sbatch --account=your-project`, and create `logs/` before submitting.
-See the [HPC guide](https://github.com/SMTG-Bham/AmorphGen/blob/main/docs/guides/hpc.md#configuring-the-bundled-examples) for
-repository paths and cluster-specific setup.
+The existing 27 BlueBEAR scripts in `examples/` also support signal handling
+and dependency submission. Set `AMORPHGEN_VENV`, choose your account with
+`sbatch --account=your-project`, and create `logs/` before submitting.
+See the [HPC guide](docs/guides/hpc.md) for the YAML format, array isolation,
+dependency conditions and restart limits.
 
 </details>
 

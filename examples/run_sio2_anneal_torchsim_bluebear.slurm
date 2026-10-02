@@ -3,6 +3,8 @@
 # run_sio2_anneal_bluebear.slurm but through torch-sim for all 10 structures
 # at once (chunks of 5 x 600 atoms, float32 MD). Compare wall time and the
 # analysis report with the ASE version. Resumable at run level.
+#SBATCH --signal=B:USR1@120
+#SBATCH --requeue
 #SBATCH --job-name=sio2_ann_ts
 # Export AMORPHGEN_VENV=/path/to/venv before submitting (see docs/guides/hpc.md).
 # For repository files, AMORPHGEN_ROOT defaults to the submission directory.
@@ -16,12 +18,15 @@
 #SBATCH --mem=48G
 #SBATCH --output=logs/sio2_anneal_ts_%j.out
 set -euo pipefail
+PKG=${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
+if [[ ! -f "$PKG/amorphgen/slurm_runtime.sh" && -f "$PKG/../amorphgen/slurm_runtime.sh" ]]; then
+    PKG=$(cd "$PKG/.." && pwd)
+fi
+source "$PKG/amorphgen/slurm_runtime.sh"
+amorphgen_slurm_main "$0" "$@"
 export PYTHONUNBUFFERED=1
 mkdir -p logs
-module purge
-module load bear-apps/2024a/live
-module load Python/3.12.3-GCCcore-13.3.0
-source "${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}/bin/activate"
+amorphgen_slurm_bluebear_environment "bear-apps/2024a/live" "Python/3.12.3-GCCcore-13.3.0"
 OUT=sio2_100
 mkdir -p $OUT/subset10
 for i in 0 1 2 3 4 5 6 7 8 9; do cp $OUT/random_opt/random_000${i}_opt.xyz $OUT/subset10/; done

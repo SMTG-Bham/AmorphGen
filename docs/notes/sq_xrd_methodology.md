@@ -49,11 +49,10 @@ The isotropic relation used by the FT method is
 $$S(q)-1=4\pi\rho\int_0^{r_{\max}}[g(r)-1]
 \frac{\sin(qr)}{qr}\,r^2\,\mathrm{d}r.$$
 
-The implementation transforms the unsmoothed RDF with 500 radial bins and
-uses $(N-1)/V$ from the first structure for its finite-system density
-prefactor. For ensembles with varying volumes, this is a single density
-applied to the averaged RDF. By default, `rmax`
-is half the shortest cell-vector length, rounded down to 0.1 Å. Truncation
+The implementation transforms each structure's unsmoothed RDF with 500 radial
+bins and its own $(N-1)/V$ finite-system density prefactor before averaging
+the resulting curves. By default, the shared `rmax` is half the shortest
+cell-vector length across the ensemble, rounded down to 0.1 Å. Truncation
 can change peak heights and introduce ripples. Its size and direction depend
 on the structure and chosen range; there is no general factor-of-two
 correction, nor a guarantee that truncation errors cancel between ensembles.
@@ -84,3 +83,18 @@ q range, temperature and resolution. A normalized `S(q)` must be converted
 back to coherent intensity before applying any instrument-specific model;
 see the simulated-XRD tab in {doc}`/guides/analysis`. Reference publications
 and software citation guidance are in {doc}`sq_xrd_credits`.
+
+`load_experiment()` accepts measured S(q) or T(r), and `compare_experiment()`
+interpolates each calculated structure onto the measured grid before
+summarizing residuals and pointwise confidence intervals. Extrapolation and
+missing-bin gaps are excluded and counted. Measurement uncertainties, when
+supplied, weight Rw and chi-square; ensemble SEM is not substituted for them.
+No scaling, offset, resolution or background is fitted. Correlated points
+limit interpretation of the diagonal chi-square statistic.
+
+`xrd_pattern()` restores coherent intensity per atom using each structure's
+own composition, then forms an equal-weight ensemble mean. The direct method
+uses bin-centre form factors for this conversion, so finite shell width
+introduces an approximation. q maps to 2θ using the supplied wavelength;
+inaccessible requested q ranges are rejected. The returned profile has no
+Lorentz–polarization, absorption, background or instrument-response correction.

@@ -4,7 +4,7 @@ Quench multiple snapshot structures through the final stages of the pipeline in 
 
 ## Use case
 
-After a high-temperature equilibration, you may want to extract multiple snapshots and quench each separately. Choose the frame spacing from the liquid’s decorrelation time; uniform sampling alone does not establish independence. This produces an ensemble of amorphous structures from a single melt trajectory.
+After a high-temperature equilibration, you may want to extract multiple snapshots and quench each separately. For trajectory input, `--select decorrelated` chooses burn-in and spacing from scalar autocorrelation and per-species diffusion. Uniform sampling remains the batch default and alone does not establish independence.
 
 ## CLI usage
 
@@ -21,15 +21,29 @@ The `--resume` flag skips runs containing `final_amorphous.xyz` (or the legacy `
 
 `--n-runs` defaults to 20 and selects at most that many inputs. Use `--select uniform` (default) or `--select last`. A directory is searched in order for `*.xyz`, `*.extxyz`, `*.vasp`, `*.cif`, then `POSCAR*`; only the first matching format is used. Keep inputs in one format to avoid accidentally excluding files.
 
-`--snapshot-dir` also accepts a trajectory file. Frames are extracted to `batch_run/snapshots_extracted/`; `--burn-in-frames` discards leading frames before selection:
+`--snapshot-dir` also accepts a trajectory file. Frames are extracted to
+`batch_run/snapshots_extracted/`. Use `--select decorrelated` for adaptive
+burn-in and spacing, matching the `--mq-ensemble` default:
 
 ```bash
 amorphgen --batch-quench --snapshot-dir shared/stage4_eq_traj.xyz \
-    --config mq.yaml --n-runs 20 --burn-in-frames 50 \
+    --config mq.yaml --n-runs 20 --select decorrelated \
     --batch-stages 5 6 7 --resume -o batch_run/
 ```
 
-Choose burn-in and frame spacing for the trajectory; the values above are examples. To anneal already-disordered inputs before quenching, use `--batch-stages 4 5 6 7`.
+Decorrelated selection can return fewer than the requested number of frames;
+if decorrelation cannot be resolved, it returns only the final frame and
+reports the limitation. `snapshot_sampling.json` and `.txt` record burn-in,
+spacing, selected frame indices and the estimated effective independent
+snapshot count. The estimate is a diagnostic, not proof of equilibration or
+independence of the resulting glasses. See {doc}`mq-ensemble` for the method.
+
+Set `--burn-in-frames N` to override adaptive burn-in, or to discard leading
+frames with uniform/last selection. An explicit zero is honoured.
+`--decorrelation-distance` overrides the displacement proxy's distance in Å.
+Adaptive selection requires an ordered trajectory; use uniform/last selection
+for a directory of preselected structures. To anneal already-disordered inputs
+before quenching, use `--batch-stages 4 5 6 7`.
 
 ## Python API
 

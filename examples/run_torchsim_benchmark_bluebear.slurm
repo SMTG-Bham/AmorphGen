@@ -12,6 +12,8 @@
 #     logs/bench_torchsim_<jobid>.out      timings of both runs
 # ----------------------------------------------------------------------------
 
+#SBATCH --signal=B:USR1@120
+#SBATCH --requeue
 #SBATCH --job-name=amg_torchsim
 # Export AMORPHGEN_VENV=/path/to/venv before submitting (see docs/guides/hpc.md).
 # For repository files, AMORPHGEN_ROOT defaults to the submission directory.
@@ -26,37 +28,31 @@
 #SBATCH --output=logs/bench_torchsim_%j.out
 
 set -euo pipefail
+PKG=${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
+if [[ ! -f "$PKG/amorphgen/slurm_runtime.sh" && -f "$PKG/../amorphgen/slurm_runtime.sh" ]]; then
+    PKG=$(cd "$PKG/.." && pwd)
+fi
+source "$PKG/amorphgen/slurm_runtime.sh"
+amorphgen_slurm_main "$0" "$@"
 export PYTHONUNBUFFERED=1     # show progress lines in the log as they happen
 mkdir -p logs
 
-module purge
-module load bear-apps/2023b/live        # provides Python 3.12; check with `module avail Python`
-module load Python/3.12.3-GCCcore-13.2.0
-VENV="${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}"
-
-# ── one-off setup (run interactively once, then comment out) ─────────────────
-# python -m venv "$VENV"
-# source "$VENV/bin/activate"
-# pip install --upgrade pip
-# pip install -e "${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}[mace,torchsim]"
-# python -c "import torch, torch_sim; print(torch.__version__, torch.cuda.is_available(), torch_sim.__version__)"
-# ─────────────────────────────────────────────────────────────────────────────
-source "$VENV/bin/activate"
+amorphgen_slurm_bluebear_environment "bear-apps/2023b/live" "Python/3.12.3-GCCcore-13.2.0"
 python -c "from amorphgen.utils.radii import estimate_cell_length as e; print('radii check', e({'Ir':40,'O':80}))"
 
 COMP="GeO2*192"; N=20; SEED=1
 mkdir -p bench_torchsim
 
 # 1. generate the ensemble once, unrelaxed (same seed -> same 20 placements)
-amorphgen --random-gen --composition "$COMP" -n $N --seed $SEED -o bench_torchsim/initial
+amorphgen --random-gen --resume --composition "$COMP" -n $N --seed $SEED -o bench_torchsim/initial
 
 # 2a. ASE engine: one structure after another (MACE-MPA-0, cubic cell filter)
-/usr/bin/time -v amorphgen --batch-opt --input-dir bench_torchsim/initial/random_initial \
+/usr/bin/time -v amorphgen --batch-opt --resume --input-dir bench_torchsim/initial/random_initial \
     -m mace-mpa-0 -d cuda --default-dtype float64 -C cubic -f 0.05 \
     -o bench_torchsim/ase/random_opt 2>&1 | tee logs/bench_ase_$SLURM_JOB_ID.log
 
 # 2b. torch-sim engine: all 20 in one batched call (autobatching by GPU memory)
-/usr/bin/time -v amorphgen --batch-opt --input-dir bench_torchsim/initial/random_initial \
+/usr/bin/time -v amorphgen --batch-opt --resume --input-dir bench_torchsim/initial/random_initial \
     -m mace-mpa-0 -d cuda --default-dtype float64 -C cubic -f 0.05 --engine torchsim \
     -o bench_torchsim/torchsim/random_opt 2>&1 | tee logs/bench_torchsim_$SLURM_JOB_ID.log
 

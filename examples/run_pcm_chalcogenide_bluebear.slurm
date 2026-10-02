@@ -5,11 +5,13 @@
 # For each: 10 random structures -> batched MACE relaxation (torch-sim) ->
 # analysis of the UNANNEALED set -> hybrid anneal + quench + relax (batched,
 # 10 ps at the anneal T, 0.5 fs) -> analysis of the ANNEALED set, both with
-# neutron S(q) + partials, rings, connectivity, dimers and (GeTe) the
+# neutron S(q) + partials, rings, connectivity, dimers, qbar6/clusters and (GeTe) the
 # literature reference. Compare the two analysis reports: the anneal is what
 # should build the fourfold-ring, Peierls-distorted local order that random
 # placement cannot. ~2 h per task; both commands carry --resume, so resubmit
 # after a walltime kill.
+#SBATCH --signal=B:USR1@120
+#SBATCH --requeue
 #SBATCH --job-name=pcm
 # Export AMORPHGEN_VENV=/path/to/venv before submitting (see docs/guides/hpc.md).
 # For repository files, AMORPHGEN_ROOT defaults to the submission directory.
@@ -23,14 +25,16 @@
 #SBATCH --mem=48G
 #SBATCH --array=0-1
 #SBATCH --output=logs/pcm_%A_%a.out
-set -uo pipefail
+set -euo pipefail
+PKG=${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
+if [[ ! -f "$PKG/amorphgen/slurm_runtime.sh" && -f "$PKG/../amorphgen/slurm_runtime.sh" ]]; then
+    PKG=$(cd "$PKG/.." && pwd)
+fi
+source "$PKG/amorphgen/slurm_runtime.sh"
+amorphgen_slurm_main "$0" "$@"
 export PYTHONUNBUFFERED=1
 mkdir -p logs
-module purge
-module load bear-apps/2024a/live
-module load Python/3.12.3-GCCcore-13.3.0
-source "${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}/bin/activate"
-PKG=${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
+amorphgen_slurm_bluebear_environment "bear-apps/2024a/live" "Python/3.12.3-GCCcore-13.3.0"
 
 case ${SLURM_ARRAY_TASK_ID:-0} in
   0) SYS=gete;   COMP="GeTe*108";  CN="Ge=4,Te=3"; T_ANNEAL=800; RHO=5.7
@@ -44,7 +48,12 @@ esac
 # every pair makes random sequential addition jam near 3.8 g/cm3 and expand
 # the cell (10 min per structure, density lost) instead of seconds.
 N=10; SEED=2026; MODEL="-m mace-mpa-0 -d cuda --default-dtype float32"
-ANALYSE="--sq --sq-weighting neutron --sq-partials --pair-panels --rings --connectivity --check-dimers --per-structure --save-pdf"
+# Keep the same geometric shell for both sets. These order settings are
+# illustrative: calibrate against crystal/liquid references for each system.
+# The separate cutoff leaves the chemical CN/RDF analysis settings intact.
+ORDER_CUTOFF=${AMORPHGEN_ORDER_CUTOFF:-3.5}
+ORDER_THRESHOLD=${AMORPHGEN_QBAR6_THRESHOLD:-0.3}
+ANALYSE="--sq --sq-weighting neutron --sq-partials --pair-panels --rings --connectivity --check-dimers --bond-order --order-cutoff $ORDER_CUTOFF --qbar6-threshold $ORDER_THRESHOLD --per-structure --save-pdf"
 echo "=== $SYS: $COMP, $N structures, anneal $T_ANNEAL K, $(date)"
 
 # 1. random placement + batched relaxation (torch-sim, cubic cell filter)
@@ -68,3 +77,4 @@ amorphgen --analyse --input-dir $SYS/anneal_${T_ANNEAL}K/final $ANALYSE "${REF[@
 
 echo "=== done $(date). Compare: $SYS/analysis_unannealed/report.txt vs $SYS/analysis_annealed/report.txt"
 echo "    S(q): analysis_sq.png in each folder; rings: analysis_rings.png (look for the 4-ring share)"
+echo "    Order: analysis_bond_order.csv / .json (ordered fraction and largest cluster)"

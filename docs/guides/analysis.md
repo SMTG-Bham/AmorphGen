@@ -19,6 +19,210 @@ directory. Files with the same stem count once, in that format priority
 order. Each file contributes its last frame; to analyse a trajectory as an
 ensemble, first extract snapshots or pass a list of frames to the Python API.
 
+## Spread and uncertainty of the mean
+
+Each input structure is one independent sampling unit. Pooled site, bond and
+angle spreads remain available as the legacy `mean`/`std` fields and the
+explicit `pooled_mean`/`pooled_std` fields. They describe structural disorder;
+they are not errors on an ensemble mean. Density retains its population
+spread over structures in `std`.
+
+Scalar results include an `uncertainty` summary calculated from **one mean per
+structure**, giving every contributing structure equal weight. This matters
+when cell sizes, numbers of bonds or numbers of angles differ. Its fields are:
+
+| Field | Meaning |
+|---|---|
+| `per_structure` | Values in input order; `None` for missing descriptors |
+| `mean`, `std` | Equal-weight mean and sample SD between structures (`ddof=1`) |
+| `sem` | Standard error, sample SD divided by the square root of the number of contributing structures |
+| `ci_low`, `ci_high` | Student-t confidence interval with `n - 1` degrees of freedom; 95% by default |
+| `bootstrap_low`, `bootstrap_high` | Percentile interval of resampled structure means; 1,000 draws and seed 0 by default |
+| `n_structures`, `n_total_structures` | Contributing structures and all supplied structures |
+| `n_per_point` | Number contributing to each curve bin (scalar for a scalar descriptor) |
+
+With fewer than two contributing structures, SEM and interval bounds are
+`None` (blank in CSV). Missing descriptors are excluded, not replaced with
+zero. A present species with no neighbors has zero coordination; a missing
+central species has no coordination observation. Repeating sites within one
+structure does not increase the independent sample count.
+
+`rdf()`, `averaged_rdf()`, `structure_factor()`, `structure_factor_direct()`,
+`total_correlation()` and `angle_distribution()` return per-structure curves
+and pointwise uncertainty on common grids. Angle histograms are normalized
+within each structure before averaging. S(q) and T(r) transformations use each
+structure's own composition and density before averaging, preserving their
+covariance. Direct S(q) bins with no reciprocal vectors are missing; their
+`n_per_point` can be smaller than the ensemble size. The `n_per_bin` field
+counts reciprocal vectors, not independent samples.
+The weighted Fourier-transform S(q) needs at least two atoms of every species
+for its same-species RDF normalization; use `structure_factor_direct()` for
+singleton dopants. An unestimable partial is never silently treated as an
+observed zero curve.
+
+```python
+sa = StructureAnalyser("ensemble/")
+cn = sa.coordination("Si-O")["Si-O"]
+print(cn["pooled_std"], cn["uncertainty"]["sem"])
+rdf = sa.rdf(confidence=0.95, n_bootstrap=2000, seed=42)
+angles = sa.angle_distribution("O-Si-O", bins=90, seed=42)
+tr = sa.total_correlation(weighting="xray", seed=42)
+# T(r)'s primary uncertainty is for T_r; other curves have separate summaries.
+print(tr["curve_uncertainty"]["G_r"]["ci_low"])
+```
+
+Bootstrap resampling selects **whole structures**, retaining correlations
+between bins. The shaded bands are **pointwise**, not simultaneous confidence
+bands for the entire curve. Set `n_bootstrap=0` to skip bootstrap draws in the
+curve APIs. These intervals quantify sampling of independent configurations;
+they do not include force-field bias, finite-cell error, cutoff selection, or
+transform-parameter uncertainty. Correlated trajectory frames require
+independent sampling or a separate correlation/block analysis before using
+these intervals.
+
+RDF, angle, S(q), and T(r) exports include companion
+`*_uncertainty.csv`, `*_per_structure.csv`, and `*_uncertainty.json` files.
+The JSON records confidence level, seed, resampling count, and sampling unit;
+the CSV includes contributing counts, SEM, t bounds and bootstrap bounds.
+Raw angle CSV rows also carry the structure index. The density plot shows a
+t interval for the mean, alongside individual structures.
+`analysis_statistics.json` retains core scalar descriptors and their aligned
+per-structure observations; `analysis_statistics.csv` separates pooled spread
+from structure means, sample SD, SEM and t intervals.
+
+Coordination and oxygen-speciation outputs distinguish `fraction_of_sites`
+(pooled sites, between 0 and 1) from `fraction_of_structures` (the fraction of
+all input structures containing **at least one** site in that category).
+Structure prevalence is not a distribution: categories can overlap and need
+not sum to one. Crystal-like order and dimer/connectivity reports make the
+same distinction. Per-structure site-fraction summaries estimate the
+**equal-weight mean site fraction**, which can differ from the pooled fraction.
+Optional descriptors (rings, Voronoi, oxygen speciation, bond order, voids,
+elastic moduli, vibrational DOS and energy) also retain per-structure values
+and named uncertainty summaries. Existing void Monte Carlo errors remain
+separate from uncertainty across structures.
+
+Reference validation uses the structure-weighted mean and its t interval.
+A confidence interval admitting both in-range and out-of-range values is
+`inconclusive`, even when its mean is inside the reference range. A finite
+mean with no estimable interval is also `inconclusive`; an absent descriptor
+remains `n/a`. Reports include intervals and count inconclusive verdicts.
+
+(ensemble-convergence)=
+## Declared tolerances and ensemble convergence
+
+Declare an absolute tolerance for the uncertainty of each descriptor's
+**ensemble mean**, in its native units. A tolerance of `0.02` for density
+means a 95% Student-t interval half-width no greater than 0.02 g/cm³; it is
+neither a relative percentage nor a bound on the spread of individual structures.
+
+```bash
+amorphgen --analyse --input-dir ensemble/ \
+    --tolerance density=0.02 \
+    --tolerance coordination.Si-O=0.05 \
+    --tolerance bond_angle.O-Si-O=1.0 \
+    --convergence-confidence 0.95 --save-plot analysis/ \
+    --save-report analysis.txt
+```
+
+Each `--tolerance NAME=VALUE` enables convergence reporting. Use `--convergence`
+alone to inspect available descriptor names and their uncertainty before
+declaring tolerances. Default names include `density`, `coordination.PAIR`,
+`total_coordination.ELEMENT`, `bond_distance.PAIR` and `bond_angle.TRIPLET`.
+Pair ordering is significant: silica bond distance is `bond_distance.O-Si`,
+whereas coordination has separate `coordination.Si-O` and `coordination.O-Si`.
+Unknown names and nonpositive or nonfinite tolerances are rejected.
+
+Selected optional analyses add named descriptors, such as
+`bond_order.ordered_fraction`, `voids.accessible_fraction`, `sq.total`,
+`sq.Si-O` with `--sq-partials`, and `tr.T_r`. A tolerance on `rdf.total` or
+`rdf.PAIR` also computes that RDF for convergence. For curve descriptors the
+tolerance must hold at **every point**: the plotted quantity is the largest
+pointwise half-width, not a simultaneous confidence band for the entire curve.
+Optional descriptors require their corresponding analysis flags.
+
+The equivalent YAML entries live under `analysis`:
+
+```yaml
+analysis:
+  convergence: true
+  tolerances:
+    density: 0.02
+    coordination.Si-O: 0.05
+  convergence_confidence: 0.95
+  convergence_max_structures: 1000000
+```
+
+CLI tolerance declarations replace YAML tolerances of the same name and
+preserve the others. `--convergence-max-structures` sets the upper search bound
+for forecasts; it never truncates the input ensemble.
+
+```python
+from amorphgen.analysis import (
+    StructureAnalyser, format_convergence_report, save_convergence_report,
+)
+
+sa = StructureAnalyser("ensemble/")
+report = sa.convergence_report({"density": 0.02, "coordination.Si-O": 0.05})
+print(format_convergence_report(report))
+save_convergence_report(report, "analysis/", save_pdf=True)
+
+# Include any aligned per-structure descriptor, including a whole curve.
+rdf = sa.rdf(n_bootstrap=0)
+curve_report = sa.convergence_report(
+    {"rdf.total": 0.05}, descriptors={"rdf.total": rdf["uncertainty"]},
+    sizes=[2, 5, 10, 20, 50, 100],
+)
+```
+
+The curves are independent of generation order. For complete scalar data,
+AmorphGen plots
+
+$$h(n) = t_{(1+c)/2,\,n-1}\,s_N / \sqrt{n},$$
+
+where $c$ is the chosen confidence and $s_N$ is the sample standard deviation
+of all $N$ structures. For $2 \leq n \leq N$, this is the exact
+root-mean-square Student-t half-width over **all** subsets of size $n$,
+because their mean sample variance equals
+$s_N^2$. No randomized shuffling, seed, or generation-order prefixes enter
+the calculation. A vector descriptor takes the maximum of these componentwise
+RMS values, not the RMS of the subset-wise maxima. At $n=N$ the curve equals
+the observed full-ensemble half-width; beyond $N$ it is an extrapolation.
+The interval formula follows the
+[NIST Student-t confidence interval](https://www.itl.nist.gov/div898/handbook/eda/section3/eda352.htm).
+
+Missing observations are excluded rather than treated as zero. If a component
+appears in $k$ of $N$ structures, planning at size $n$ uses
+$\lfloor nk/N\rfloor$ contributing observations with the observed sample
+variance. This is an availability-adjusted approximation, not an exact
+all-subset result. Any component with fewer than two observations makes that
+descriptor's uncertainty and forecast unavailable; empty bins are retained.
+
+The report returns `met`, `not_met`, `insufficient_data`, or `undeclared`
+per descriptor and overall. Undeclared descriptors do not decide the overall
+status. It estimates the smallest total ensemble size satisfying all declared
+tolerances under unchanged variance and availability, and subtracts the
+current size to give the additional structures needed. A met tolerance needs
+zero additional structures; an estimate beyond the search bound is reported
+as `exceeds_max_structures`, with no invented finite forecast.
+
+Forecasts assume independent structures and representative, stable variance
+and missingness. They do not account for correlated trajectory frames,
+force-field bias, finite-size error or undiscovered rare configurations.
+Zero observed variance yields a zero estimated half-width once two values
+exist, but does not establish zero population variance. Reassess the report
+as new independent structures arrive.
+
+With `--save-plot`, exports include `analysis_convergence.json` (full report,
+strict JSON with missing values as `null`), `analysis_convergence.txt`,
+`analysis_convergence_summary.csv`, and `analysis_convergence_curves.csv`
+(one row per descriptor, planned size and point). Each descriptor has its
+own figure, for example `analysis_convergence_density.png`, with an optional
+PDF. Figures distinguish the observed endpoint, declared tolerance, solid
+planning curve and dashed projection through the estimated target. CSV
+columns retain counts, confidence, units in the summary, forecast status,
+and pointwise uncertainty so the decisions can be reproduced.
+
 ## Recipes
 
 Common cases:
@@ -409,47 +613,41 @@ term and form-factor scale, then map momentum transfer to angle:
 $$I_{\mathrm{coh}}(q)/N = \langle f(q)\rangle^2[S(q)-1]
 +\langle f^2(q)\rangle, \qquad q=\frac{4\pi\sin\theta}{\lambda}.$$
 
-The following post-processing example uses Cu-Kα wavelength and the
-composition of the first structure. It approximates the form factors
-at each bin centre; use narrow q bins when comparing intensities.
+`xrd_pattern()` performs this conversion independently for each structure,
+using its own composition, before averaging. Cu-Kα is the default wavelength.
+Form factors are evaluated at q-bin centres for the direct method; use narrow
+bins and inspect the counts when comparing intensities.
 
 ```python
-import numpy as np
-from amorphgen.analysis import StructureAnalyser
-from amorphgen.analysis.rdf import xray_form_factor
+from amorphgen.analysis import StructureAnalyser, save_xrd_pattern
 
 sa = StructureAnalyser("ga2o3_ensemble/")
-sq = sa.structure_factor_direct(weighting="xray", qmax=8.0, nq=400)
-q, s, counts = (np.asarray(sq[k]) for k in ("q", "s_q", "n_per_bin"))
-symbols = sa.atoms_list[0].get_chemical_symbols()
-fractions = {el: symbols.count(el) / len(symbols) for el in set(symbols)}
-f = {el: xray_form_factor(el, q) for el in fractions}
-f_mean = sum(fractions[el] * f[el] for el in fractions)
-f2_mean = sum(fractions[el] * f[el]**2 for el in fractions)
-coherent = f_mean**2 * (s - 1.0) + f2_mean
-
-wavelength = 1.5406  # Å, Cu-Kα
-keep = (counts >= 5) & np.isfinite(coherent)
-if np.count_nonzero(keep) < 2:
-    raise ValueError("Too few populated q bins; use more structures or wider bins")
-two_theta = np.linspace(20.0, 90.0, 1000)
-q_at_angle = 4.0 * np.pi * np.sin(np.deg2rad(two_theta / 2)) / wavelength
-intensity = np.interp(q_at_angle, q[keep], coherent[keep],
-                      left=np.nan, right=np.nan)
+xrd = sa.xrd_pattern(wavelength=1.5406, qmax=8.0, nq=400)
+save_xrd_pattern(xrd, output_dir="plots/", save_pdf=True)
+# xrd["two_theta"] in degrees, xrd["intensity"] in electron²/atom
+# xrd["per_structure"] and xrd["uncertainty"] retain ensemble information
 ```
 
-This gives a coherent-scattering profile before instrument and sample
-corrections. Polarization, geometry, absorption, background and resolution
-must match the measurement. A powder-diffraction Lorentz–polarization
-factor applied to `S(q)` alone is not a general prediction of an amorphous
-sample's measured trace. Any additional broadening should come from the
-instrument's resolution; the structural halo width is already present
-in the calculated profile.
+```bash
+amorphgen --analyse --input-dir ga2o3_ensemble/ --xrd \
+    --xrd-wavelength 1.5406 --xrd-qmax 8 --xrd-nq 400 --save-plot plots/
+```
 
-AmorphGen currently has no `xrd_pattern()` convenience method; this is
-Python post-processing. For a comparison to an experimentally reduced
-Faber–Ziman `S(Q)`, compare directly to the calculated `S(q)` using matching
-weights and normalization.
+The API also supports `method="ft"` with an optional `rmax`. The default
+qmax is min(15, 4π/λ) Å⁻¹; inaccessible requested q ranges are rejected.
+The angular grid comes from the calculated q grid and is not uniformly
+spaced in 2θ. Intensities are sampled values, without an integration Jacobian
+or peak-height normalization. Unsampled direct shells remain unavailable.
+Optional `sigma_q` smooths each coherent intensity curve before averaging;
+raw values are retained. No smoothing is applied by default.
+
+The output is a coherent-scattering profile per atom before instrument and
+sample corrections. Polarization, geometry, absorption, background and
+resolution must match the measurement. A powder-diffraction
+Lorentz–polarization factor applied to `S(q)` alone is not a general prediction
+of an amorphous sample's measured trace. Ensemble bands do not include these
+systematic effects. For experimentally reduced Faber–Ziman S(Q), compare
+against S(q) directly using matching weights and normalization.
 
 :::
 
@@ -537,11 +735,323 @@ Peak positions and intensities depend on the supplied structures, cell
 size and settings. The same API applies to other compositions; select
 weights and a q range appropriate to the reference data.
 
-### Open issues / future work
+### Compare measured S(q) or T(r)
 
-- Per-bin uncertainty estimates from independent configurations.
-- An `xrd_pattern()` convenience method with explicit intensity conventions
-  and instrument settings.
+Supply a whitespace or CSV file with two columns (coordinate, value), or
+three columns (coordinate, value, one-sigma measurement uncertainty):
+
+```bash
+amorphgen --analyse --input-dir structures/ \
+    --experiment-sq measured_sq.csv --experiment-skiprows 1 \
+    --sq-weighting xray --sq-method direct --sq-qmax 12 --sq-nq 300 \
+    --sq-fit-range 1.5 10 --save-plot comparison/ --save-report report.txt
+
+amorphgen --analyse --input-dir structures/ \
+    --experiment-tr measured_tr.dat --sq-weighting neutron \
+    --tr-qrange 0.5 20 --tr-window lorch --tr-fit-range 1 8 \
+    --save-plot comparison/
+```
+
+The file options enable the corresponding calculation. Comment lines start
+with `#`; use `--experiment-skiprows` for an uncommented header. Files with
+extra columns require `--experiment-columns 0 2 3` (zero-based coordinate,
+value, sigma), or two indices when sigma is unavailable. Coordinates are
+sorted together with values and errors. Duplicate coordinates, nonfinite
+values and nonpositive sigma are rejected. q is in Å⁻¹, r in Å, S(q) is
+dimensionless, and T(r) = 4πrρg(r) is in Å⁻². No convention or unit conversion
+is inferred from a filename or column label. Both files may be supplied in
+one run; shared loader options apply to both. YAML `analysis` keys use
+underscores, for example `experiment_sq`, `sq_fit_range`, and `sq_qmax`;
+explicit CLI values take precedence.
+
+Python exposes the loader and comparison independently, so a calculated
+curve can be reused:
+
+```python
+from amorphgen.analysis import (
+    StructureAnalyser, load_experiment, compare_experiment,
+    format_experiment_report, save_experiment_comparison,
+)
+
+sa = StructureAnalyser("structures/")
+measured = load_experiment("measured_sq.csv", kind="sq", skiprows=1)
+sq = sa.structure_factor_direct(qmax=12, nq=300, weighting="xray", sigma_q=0.05)
+comparison = compare_experiment(sq, measured, x_range=(1.5, 10))
+print(format_experiment_report(comparison))
+save_experiment_comparison(comparison, output_dir="comparison/", save_pdf=True)
+
+# Or load, calculate and compare in one call:
+comparison = sa.compare_experiment(
+    "measured_tr.dat", kind="tr", weighting="neutron", x_range=(1, 8),
+    calculation_options={"qmin": 0.5, "qmax": 20, "window": "lorch"},
+)
+```
+
+Each structure is linearly interpolated onto the measured coordinates before
+averaging. Extrapolation and interpolation across missing calculated bins
+are excluded. The report counts excluded points and records the number of
+contributing structures at each retained point. Match the scattering weights,
+normalization, temperature, resolution and, for T(r), q range and window.
+Changing these choices can alter the residuals independently of model quality.
+
+Metrics use the same retained measured points. For residual Δ = calculated
+minus measured, RMSE = √mean(Δ²), MAE = mean(|Δ|), and bias = mean(Δ).
+Rw = √[ΣwΔ² / Σw(measured)²], expressed as a fraction, with w = 1/σ² when
+measurement uncertainties are supplied and w = 1 otherwise. A zero
+denominator leaves Rw unavailable. χ² = Σ(Δ/σ)² and reduced χ² = χ²/N are
+reported only with measured sigma; no scale or offset is fitted. These
+diagonal-error statistics are descriptive for correlated points, particularly
+Fourier-transformed T(r); no p-value is inferred.
+
+The shaded bands are pointwise Student-t confidence intervals of the
+equal-weight ensemble mean. They require at least two independent contributing
+structures and do not include instrument or model systematic error. Measurement
+error bars remain separate. Whole-structure bootstrap bounds, standard
+deviations and SEM are also exported. The CLI saves
+`analysis_experiment_sq.{json,csv,txt,png}` or `analysis_experiment_tr.*`, plus
+PDF with `--save-pdf`. Figures show the overlay and residuals; JSON retains
+per-structure curves and reproducibility metadata, and CSV contains values,
+residuals, counts and interval bounds.
+
+## Crystal-like order and the largest ordered cluster
+
+Use `--bond-order` to look for residual or newly formed crystal-like regions
+in a quenched ensemble, including phase-change systems such as GeTe:
+
+```bash
+amorphgen --analyse --input-dir gete_mq/final/ --bond-order \
+    --order-cutoff 3.5 \
+    --qbar6-threshold 0.3 --order-min-neighbors 4 \
+    --save-report gete_report.txt --save-plot gete_plots/
+```
+
+This geometry-only descriptor reports each atom's Steinhardt $q_6$ and
+Lechner–Dellago $\bar q_6$, the fraction of atoms classified as ordered, and
+the largest connected ordered cluster in each structure. For atom $i$ with
+neighbour shell $N(i)$, the complex spherical-harmonic coefficients are
+
+$$q_{6m}(i)=\frac{1}{|N(i)|}\sum_{j\in N(i)}Y_{6m}(\hat{\mathbf r}_{ij}),
+\qquad q_6(i)=\sqrt{\frac{4\pi}{13}\sum_{m=-6}^{6}|q_{6m}(i)|^2}.$$
+
+Lechner–Dellago averaging includes the central atom and its neighbours,
+**before** taking the rotationally invariant norm:
+
+$$\bar q_{6m}(i)=\frac{q_{6m}(i)+\sum_{j\in N(i)}q_{6m}(j)}{|N(i)|+1},
+\qquad \bar q_6(i)=\sqrt{\frac{4\pi}{13}\sum_{m=-6}^{6}|\bar q_{6m}(i)|^2}.$$
+
+These follow [Steinhardt, Nelson and Ronchetti (1983)](https://doi.org/10.1103/PhysRevB.28.784)
+and [Lechner and Dellago (2008)](https://doi.org/10.1063/1.2977970).
+Averaging the scalar $q_6$ values would give a different descriptor.
+
+The neighbour shell uses all element pairs within `--order-cutoff`, falling
+back to the analyser's `--cutoff` when no order-specific cutoff is supplied.
+It does not apply the chemical bonding filter used for coordination and angles.
+Periodic images contribute their actual bond directions; cluster sizes count
+unique atoms in the supplied cell. Two ordered atoms belong to the same
+cluster when connected by a path of cutoff neighbours that are all ordered,
+including connections across periodic boundaries. This is a connectivity
+measure; it does not additionally require aligned $q_{6m}$ vectors.
+
+An atom is ordered when `qbar6 >= qbar6_threshold` and it has at least
+`order_min_neighbors` neighbours. The defaults, 0.3 and 4, are **heuristic**.
+They do not identify a crystal phase or give a universal crystalline volume
+fraction. Calibrate the cutoff and threshold using crystalline and liquid
+references at relevant temperatures, especially for GeTe. Separate partial-RDF
+cutoffs can include different geometric shells for different element pairs;
+inspect the resolved cutoffs and use an explicit scalar or pair cutoff when
+needed. Compare distributions as well as ordered fractions and cluster sizes.
+
+The example's 3.5 Å order cutoff illustrates the first shell of an **ideal
+rocksalt GeTe cell with lattice constant 6 Å**. Its six neighbours lie at
+3 Å and give $q_6=\bar q_6=\sqrt{1/8}\approx0.35355$; all atoms therefore
+pass the 0.3 threshold. With pairwise `auto-rdf` cutoffs, the same ideal cell
+can include twelve same-element neighbours as well, giving
+$\bar q_6\approx0.26517$ and no ordered atoms at that threshold. The explicit
+`--order-cutoff` prevents changing the shell used for the other chemical
+analyses. This ideal-cell example is not a calibration for thermally distorted
+or rhombohedral GeTe; inspect short and long bonds and reference distributions
+before choosing the shell for a phase-change workflow.
+
+To reproduce the ideal-cell check without a calculator:
+
+```python
+from ase.build import bulk
+from amorphgen.analysis import compute_bond_order
+
+ideal = bulk("GeTe", "rocksalt", a=6.0, cubic=True).repeat((2, 2, 2))
+frame = compute_bond_order([ideal], cutoff=3.5)["per_structure"][0]
+print(frame["qbar6_mean"])           # approximately 0.353553
+print(frame["largest_cluster_size"]) # 64: the whole cell
+```
+
+The equivalent YAML settings are:
+
+```yaml
+analysis:
+  bond_order: true
+  qbar6_threshold: 0.3
+  order_min_neighbors: 4
+  order_cutoff: 3.5       # illustrative ideal-rocksalt shell; calibrate for your system
+  cutoff: auto-rdf
+```
+
+`--save-report` includes the order summary; `--save-plot` adds
+`analysis_bond_order.json`, `analysis_bond_order.csv`,
+`analysis_bond_order_atoms.csv` and
+`analysis_bond_order.png` (`.pdf` with `--save-pdf`). JSON retains the
+per-atom values, labels and resolved cutoffs for reproducible comparisons.
+
+```python
+from amorphgen.analysis import StructureAnalyser
+from amorphgen.analysis.descriptors import save_descriptor
+
+sa = StructureAnalyser("gete_mq/final/", cutoff="auto-rdf")
+order = sa.bond_order(qbar6_threshold=0.3, min_neighbors=4, cutoff=3.5)
+frame = order["per_structure"][0]
+print(frame["ordered_fraction"], frame["largest_cluster_size"])
+save_descriptor("bond_order", order, "gete_plots/")
+```
+
+`ordered_fraction` and `largest_cluster_fraction` use all atoms in each
+structure as the denominator. The top-level result summarizes structures
+with equal weight; inspect `per_structure` for individual clusters and
+per-atom arrays. An isolated atom has $q_6=\bar q_6=0$ and is disordered.
+
+For a crystal-started `--mq-ensemble` run, a separate automatic
+`melt_memory` report measures how much of the initially ordered atom
+population is also ordered after heating and in the high-temperature
+snapshots. See {doc}`mq-ensemble` for the definition and its limitations.
+
+## Void, oxygen, elastic and vibrational descriptors
+
+These four descriptors are opt-in. Void sampling and oxygen speciation use
+geometry alone and do not load an ML model. Elastic and vibrational analysis
+load the selected calculator (`--model`, `--model-path`, `--device`) and
+evaluate new configurations; saved single-point stresses or forces are
+insufficient.
+
+### Void distribution
+
+```bash
+amorphgen --analyse --input-dir silica/ --voids \
+    --void-samples 20000 --void-probe-radius 0.5 --void-seed 42 \
+    --save-plot descriptors/
+```
+
+Uniform random points sample **point clearance**: the distance to the nearest
+atomic-sphere surface, in Å. A point is accessible when its clearance is at
+least the probe radius. This measures local free space; it does not find
+connected pores, pore throats or maximal cavities. The reported radius is
+clearance, not diameter, and sampled maxima underestimate the true maximum.
+
+Atomic spheres use ASE covalent radii by default. Choose a consistent radius
+convention for comparisons; override individual elements with YAML
+`analysis.void_radii` or the Python `radii` argument. The histogram density
+integrates to one over accessible points, while `bin_volume_fraction` sums
+to the accessible fraction. Ensemble fractions are weighted by cell volume;
+`accessible_volume` is the mean accessible volume per structure. Standard
+errors describe Monte Carlo sampling only. Per-structure 95% Wilson intervals
+also cover cases where no accessible points were found; neither measure
+captures variation between structures. All cells must be fully periodic in 3D.
+
+### Bridging and non-bridging oxygen
+
+```bash
+amorphgen --analyse --input-dir aluminosilicate/ --oxygen-speciation \
+    --network-formers Si,Al --cutoff "Si-O=2.0,Al-O=2.3" \
+    --save-plot descriptors/
+```
+
+Each oxygen is classified by its number of neighbouring selected network
+formers: zero = `free`, one = `non_bridging`, two = `bridging`, three =
+`tricluster`, and four or more = `higher_coordinated`. Fractions pool oxygen
+counts across structures. The selection defaults to the Al, B, Ge, P and Si
+present. Select the appropriate formers explicitly for other oxides and
+exclude modifiers such as Na or Ca. All ensemble structures must have the
+same element set; analyse different chemistries separately.
+
+This uses the analyser's pair cutoffs and periodic neighbours. Check those
+cutoffs before interpreting the counts. `free` means no selected former
+neighbour; the descriptor does not infer charge, bond order or hydroxyl
+speciation. The former/modifier distinction follows the connectivity
+convention described by [Stebbins and Xu](https://www.nature.com/articles/36312).
+
+### Elastic moduli from calculator stresses
+
+```bash
+amorphgen --analyse --input-dir relaxed_silica/ --elastic \
+    --model mace-mpa-0 --device cpu --elastic-strain 0.005 \
+    --save-plot descriptors/ --save-report descriptors.txt
+```
+
+Central differences require 13 stress evaluations per structure. The default
+keeps fractional atomic coordinates fixed under strain (clamped ions).
+`--elastic-relax` instead optimises internal positions at each fixed cell,
+including the reference; `--fmax` and `--opt-steps` control convergence.
+Optimise the starting cell separately for equilibrium moduli. Input
+structures remain unchanged and failed internal relaxation raises an error.
+
+The symmetrized stiffness tensor uses engineering strain in ASE Voigt order
+`xx, yy, zz, yz, xz, xy`; stiffness and moduli are in GPa. The report includes
+Voigt, Reuss and Hill bulk, shear and Young's moduli, dimensionless Poisson
+ratios, residual stress and stability diagnostics. Reuss/Hill estimates are
+unavailable for unstable or ill-conditioned tensors. Residual stress above
+0.1 GPa is flagged: these are static tangent stress-strain coefficients with
+no finite-pressure correction. Check convergence with strain amplitude and
+calculator precision. The averaging equations follow the
+[NIST atomman reference](https://www.ctcms.nist.gov/potentials/atomman/tutorial/3.1._ElasticConstants_class.html).
+
+### Harmonic vibrational density of states
+
+```bash
+amorphgen --analyse --input-dir relaxed_silica/ --vdos \
+    --model mace-mpa-0 --device cpu --vdos-displacement 0.01 \
+    --vdos-sigma 0.1 --vdos-npoints 800 --save-plot descriptors/
+```
+
+The mass-weighted force-constant matrix is built using central finite
+differences, as in [ASE's harmonic vibration formulation](https://docs.ase-lib.org/_modules/ase/vibrations/data.html).
+This requires **6N force evaluations** and dense diagonalisation of a
+`3N × 3N` matrix per structure. Begin with small cells to assess cost.
+The spectrum contains all 3N modes of each supplied cell; for periodic
+structures these are Gamma-point modes, without Brillouin-zone sampling.
+
+Optimise the reference positions beforehand. No automatic optimisation or
+acoustic sum rule is applied, and atomic constraints are rejected. Negative
+plotted frequencies denote imaginary modes. The Gaussian width is in THz;
+the displacement is in Å. The total DOS integrates to one on its returned
+grid, with equal weight per mode across structures. Element projections use
+squared mass-weighted eigenvector components and sum to the total DOS;
+they are not scattering-weighted experimental intensities. Check displacement,
+broadening and grid convergence before interpreting fine features.
+
+With `--save-plot`, each requested descriptor writes full JSON (including
+per-structure results), a CSV and a PNG; add `--save-pdf` for PDF figures.
+`--save-report` appends the compact text summaries. Python methods return
+results without automatically writing files:
+
+```python
+from amorphgen.analysis import StructureAnalyser
+from amorphgen.analysis.descriptors import save_descriptor
+
+sa = StructureAnalyser("silica/", cutoff={"Si-O": 2.0})
+voids = sa.void_distribution(n_samples=20000, probe_radius=0.5, seed=42)
+oxygen = sa.oxygen_speciation(network_formers=["Si"])
+save_descriptor("voids", voids, "descriptors/", save_pdf=True)
+
+# Optional model-backed descriptors; install the matching backend extra.
+from amorphgen.utils import get_calculator
+
+calc = get_calculator(model="mace-mpa-0", device="cpu")
+elastic = sa.elastic_moduli(calculator=calc, strain=0.005, relax=False)
+vdos = sa.vibrational_dos(calculator=calc, displacement=0.01,
+                         sigma=0.1, npoints=800)
+print(elastic["ensemble"]["moduli"]["hill"])
+print(vdos["imaginary_modes"])
+```
+
+Both calculator-backed methods also accept live calculators attached to
+the input ASE objects when `calculator` is omitted.
 
 ## Full CLI flag reference
 
@@ -564,6 +1074,8 @@ amorphgen --analyse \
     [--pair-panels] [--total-cn SPEC] \
     [--tr] [--tr-qrange QMIN QMAX] [--tr-window {lorch,none}] [--tr-scan] \
     [--check-dimers] [--rings [PAIR]] [--voronoi [ELEMENT]] [--connectivity] \
+    [--bond-order] [--order-cutoff MODE_OR_NUMBER] \
+    [--qbar6-threshold FLOAT] [--order-min-neighbors INT] \
     [--dpi N] \
     [--show-title]
 ```
@@ -576,6 +1088,10 @@ amorphgen --analyse \
 | `--save-report FILE` | Write the full text report (densities, bond distances, coordination, angles) to a file. |
 | `--save-plot DIR` | Save available standard figures (RDF, CN, angles, density) plus CSV data into ``DIR``. |
 | `--save-pdf` | Also save vector PDF copies alongside the PNGs. |
+| `--convergence` | Report available descriptor names, uncertainty versus ensemble size, and declared tolerance status. |
+| `--tolerance NAME=VALUE` | Declare an absolute Student-t mean interval half-width in descriptor units; repeat for each descriptor. Enables convergence reporting. |
+| `--convergence-confidence FLOAT` | Confidence for convergence intervals and forecasts (default 0.95). |
+| `--convergence-max-structures INT` | Largest total ensemble size searched for the forecast (default 1000000). |
 | `--reference YAML` | Validate against the literature ranges in YAML, print a match/concern/fail table. |
 | `--smearing SIGMA` | Gaussian smearing of the RDF in Å (default 0.05, roughly thermal broadening; 0 for the raw histogram). |
 | `--total-rdf` | Overlay the total g(r) on the partial-RDF plot. |
@@ -594,6 +1110,18 @@ amorphgen --analyse \
 | `--rings [PAIR]` | Ring statistics (shortest ring per network edge). Nodes default to the least electronegative element; `--rings Ge-O` sets nodes–bridge explicitly. Added to the report; `analysis_rings.{csv,png}` under ``--save-plot``. |
 | `--voronoi [ELEMENT]` | Voronoi indices <n3 n4 n5 n6> for all atoms or one element. Added to the report; `analysis_voronoi.csv` under ``--save-plot``. |
 | `--connectivity` | Corner/edge/face sharing between cation-centred polyhedra (two cations sharing one anion = corner, two = edge, three or more = face) and the percentage of cations in at least one edge- or face-sharing pair, which is near zero in a corner-sharing network glass and tens of percent in a random packing. Added to the report; `analysis_connectivity.csv` under ``--save-plot``. |
+| `--bond-order` | Steinhardt $q_6$, Lechner–Dellago $\bar q_6$, ordered atom fraction and largest connected ordered cluster. |
+| `--order-cutoff MODE` | Neighbour cutoff for bond order and MQ melt-memory reports; accepts the same scalar, pair and automatic forms as `--cutoff`. Defaults to `--cutoff` and otherwise overrides it only for bond order. |
+| `--qbar6-threshold FLOAT` | Minimum $\bar q_6$ for classifying an atom as ordered (default 0.3; calibrate for the material and shell). Also applies to MQ melt-memory reports. |
+| `--order-min-neighbors INT` | Minimum neighbour count for an ordered atom (default 4). Also applies to MQ melt-memory reports. |
+| `--voids` | Periodic point-clearance distribution and accessible volume. |
+| `--void-samples INT`, `--void-bins INT` | Monte Carlo points per cell (default 10000) and histogram bins (50). |
+| `--void-probe-radius FLOAT`, `--void-seed INT` | Probe radius in Å (default 0) and sampling seed (0). |
+| `--oxygen-speciation`, `--network-formers Si,Al` | Oxygen connectivity classes; formers default to the Al/B/Ge/P/Si present. |
+| `--elastic`, `--elastic-strain FLOAT` | Stress-derived tensor and isotropic moduli; strain amplitude defaults to 0.005. |
+| `--elastic-relax` | Relax internal positions at each fixed cell, using `--fmax` and `--opt-steps`. |
+| `--vdos`, `--vdos-displacement FLOAT` | Harmonic cell modes; displacement defaults to 0.01 Å. |
+| `--vdos-sigma FLOAT`, `--vdos-npoints INT` | Gaussian width in THz (default 0.1) and frequency-grid points (400). |
 | `--dpi N` | PNG DPI (default 300). |
 | `--show-title` | Add titles to each plot (default off, captions usually clearer in figures). |
 
@@ -621,6 +1149,14 @@ listed flags.
 | `analysis_rings.png` / `.csv` | With ``--rings``: ring-size distribution (size, count, percent of edges). |
 | `analysis_voronoi.csv` | With ``--voronoi``: the ten most common Voronoi indices with counts and percentages. |
 | `analysis_connectivity.csv` | With ``--connectivity``: corner/edge/face link percentages and the edge-sharing cation fraction, overall and per structure. |
+| `analysis_bond_order.{json,csv,png,pdf}`, `analysis_bond_order_atoms.csv` | With `--bond-order`: per-structure ordered fraction and largest ordered cluster, a $\bar q_6$ histogram, and per-atom $q_6$, $\bar q_6$, neighbour counts and cluster labels in JSON and the atom CSV. PDF requires `--save-pdf`. |
+| `analysis_voids.{json,csv,png,pdf}` | With `--voids`: clearance density and volume fractions; JSON includes sampling uncertainties and per-structure statistics. PDF requires `--save-pdf`. |
+| `analysis_oxygen_speciation.{json,csv,png,pdf}` | Oxygen counts/fractions by class; JSON also contains each oxygen's former coordination. |
+| `analysis_elastic.{json,csv,png,pdf}`, `analysis_elastic_tensor.csv` | Modulus means/std/counts and mean stiffness heatmap; JSON includes raw/symmetrized tensors and diagnostics per structure. |
+| `analysis_vdos.{json,csv,png,pdf}` | Total and element-projected DOS; JSON includes individual mode frequencies and per-structure diagnostics. |
+| `analysis_convergence.{json,txt}` | With `--convergence` or `--tolerance`: declared bounds, observed uncertainty, planning curves and required-size forecasts with assumptions. |
+| `analysis_convergence_summary.csv`, `analysis_convergence_curves.csv` | One row per descriptor for decisions/counts/units; one row per descriptor, planned size and point for uncertainty curves. |
+| `analysis_convergence_DESCRIPTOR.png` / `.pdf` | One independent figure per descriptor with tolerance, observed endpoint and estimated required size. PDF requires `--save-pdf`. |
 
 ## Python API
 

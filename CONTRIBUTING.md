@@ -58,6 +58,29 @@ pytest test/ -m mace --run-mace
 pytest test/test_torchsim_gpu.py --run-mace
 ```
 
+The experimental benchmarks run on CPU without downloads or optional backends:
+
+```bash
+pytest test/test_experimental_*.py
+```
+
+They compare bundled amorphous silica descriptors and its first correlation
+peak with published diffraction measurements, retain the known silicon
+coordination discrepancy, check XRD positions against the NIST silicon powder
+standard, and compare EMT copper stiffness with experimental low-temperature
+extrapolations. These are bounded regression checks, not validation of every
+generation workflow. Sources, sample conditions, fixture provenance and the
+distinction between test tolerances and experimental uncertainties are recorded
+in [the benchmark notes](test/data/experimental/README.md). The small structure
+fixtures ship in the sdist so these checks also run in the package job.
+
+For additional experimental checks, cite a primary source and preserve its
+units, sample conditions and observable definition. State whether the reference
+is measured, extrapolated or derived from a measured quantity, and justify the
+test tolerance separately from the measurement uncertainty. Keep genuine model
+disagreements visible; never relabel simulated curves as measurements or repeat
+one structure to manufacture an ensemble confidence interval.
+
 Tests requiring an uninstalled optional backend are skipped. Real MACE tests,
 including those in the CUDA suite, require `--run-mace`; having a GPU alone
 does not opt in to model downloads. Unknown test markers and configuration

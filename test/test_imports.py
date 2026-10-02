@@ -95,10 +95,13 @@ class BlockMLImports(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, BlockMLImports())
 import amorphgen
 import amorphgen.utils
+import amorphgen.analysis
 for name in amorphgen.__all__:
     getattr(amorphgen, name)
 for name in amorphgen.utils.__all__:
     getattr(amorphgen.utils, name)
+for name in amorphgen.analysis.__all__:
+    getattr(amorphgen.analysis, name)
 """
     result = subprocess.run(
         [sys.executable, "-c", script], cwd=Path(__file__).resolve().parents[1],

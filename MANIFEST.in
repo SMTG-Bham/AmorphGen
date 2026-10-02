@@ -2,3 +2,5 @@
 # only test/test*.py from the suite, which leaves out conftest.py (the fixtures
 # and the --run-mace gate), so the tests of an unpacked sdist would fail.
 recursive-include test *.py
+# Offline experimental benchmarks must also run from an unpacked sdist.
+recursive-include test/data *.xyz *.md

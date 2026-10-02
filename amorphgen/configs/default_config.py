@@ -39,6 +39,22 @@ DEFAULT_CONFIG = {
     # (batched, optional extra amorphgen[torchsim]).
     "engine": "ase",
 
+    # Checks run before output and on every simulation/relaxation step.
+    # None disables an individual physical limit; finite checks always run.
+    "safety": {
+        "min_distance": 0.5,                  # Angstrom, periodic contacts
+        "max_energy_jump_per_atom": 10.0,     # eV/atom between checks
+        "max_temperature": 100000.0,          # K
+        "min_volume_ratio": 0.2,              # relative to stage start
+        "max_volume_ratio": 5.0,
+        "reference": None,                    # optional second calculator
+    },
+    "repulsive_core": {
+        "enabled": False,
+        "cutoff": 1.0,                        # Angstrom
+        "strength": 1.0,                      # eV
+    },
+
     # ── Stage 1 & 7: structure optimisation ───────────────────────────────────
     "opt": {
         "fmax":      0.01,   # eV/Å  force convergence

@@ -51,6 +51,71 @@ melt:
 
 Only the keys you want to override need to be present; anything you omit falls back to the default.
 
+## MLIP failure checks and optional stabilisation
+
+ASE MD, structure optimisation, random-generation relaxation, and torch-sim
+check the initial state and each step before writing simulation results.
+Failures raise `DivergenceError` with the stage/structure and step. Geometry,
+momenta, energy, forces, and available stress must remain finite. Physical
+limits also catch failures that still return finite numbers:
+
+```yaml
+safety:
+  min_distance: 0.5                  # Angstrom; includes periodic images
+  max_energy_jump_per_atom: 10.0     # eV/atom between consecutive checks
+  max_temperature: 100000.0         # K, instantaneous kinetic temperature
+  min_volume_ratio: 0.2              # relative to the start of this stage
+  max_volume_ratio: 5.0
+  reference: null                    # no second-model evaluation by default
+
+repulsive_core:
+  enabled: false
+  cutoff: 1.0                       # Angstrom
+  strength: 1.0                     # eV
+```
+
+These are conservative defaults, not material-specific accuracy criteria.
+Checks run independently of the trajectory output interval. Torch-sim currently
+inspects CPU copies of each state, which adds GPU synchronisation overhead.
+Set a physical limit to `null` to disable it; finite-state checks remain active.
+Volume and energy history restart at each stage or resumed segment. Energy
+jumps use potential energy per atom, in either direction, including during
+relaxation. Choose tighter limits for a validated protocol, or relax them for
+an intentional large structural change. Geometry-only random placement has
+its own minimum-separation rules; these model checks apply when it is relaxed.
+
+Enable `repulsive_core.enabled` to add
+`U(r) = strength * (cutoff / r - 1)^2` below the cutoff and zero above it.
+Both energy and force go smoothly to zero at the cutoff. The core includes
+periodic images and contributes forces and, when supported by the base model,
+stress. It changes the potential energy surface, so select its cutoff and
+strength for the chemistry. It cannot repair an exactly overlapping pair.
+
+Optional spot checks evaluate an independent second model on a copy of the
+same structure at the first check and then at the requested step interval:
+
+```yaml
+safety:
+  reference:
+    model: chgnet                    # or model_path: /path/to/reference.model
+    device: cpu
+    interval: 100
+    max_force_rmse: 1.0              # eV/Angstrom, Cartesian component RMSE
+    max_energy_difference_per_atom: null
+```
+
+The reference is loaded lazily through the normal ASE calculator factory,
+including when the primary engine is torch-sim. A disagreement beyond a limit
+stops the run. Energy comparison is disabled by default because different
+models can use different energy reference zeros; enable it only for compatible
+models. Comparisons exclude the optional repulsive core. Spot checks cost an
+extra model evaluation and do not establish accuracy where both models fail.
+
+In Python, pass these same top-level blocks through `cfg_override`. For
+`batch_random`, use the `safety=` and `repulsive_core=` arguments. A standalone
+`SafetyMonitor(safety, reference_calc=...)` accepts an independent ASE
+calculator directly for custom reference models.
+
 ## Example: full melt-quench pipeline
 
 ```yaml
@@ -244,7 +309,14 @@ pipe = MeltQuenchPipeline("POSCAR", cfg_override=cfg)
 pipe.run()
 ```
 
-`load_yaml_config()` checks known keys and types, prints warnings for unknown keys, and raises `ValueError` for detected validation errors. Unknown keys are retained, so a warning does not establish that a key is used by the selected mode.
+`load_yaml_config()` rejects unknown keys and invalid types with `ValueError`
+before running a workflow. Validation covers every block, including
+`final_opt`, `random_gen`, `analysis`, `classical_params`, and `convert`, and
+reports the full path to an invalid setting (for example,
+`classical_params.params.Si-O.rhoo`). Element and pair maps accept chemical
+symbols such as `Si` and pairs such as `Si-O`; their values are checked too.
+Only options read from YAML are accepted, so CLI-only or Python-only arguments
+cannot be added to a config file.
 
 ## Stage-1 vs stage-7 optimisation: the `final_opt` fallback
 
@@ -268,8 +340,8 @@ final_opt:
 
 Stage 7 inherits `opt:` and applies the individual keys in `final_opt:` on top.
 Partial overrides, including a CLI flag such as `--format`, preserve all other
-optimisation settings from `opt:`. In 1.0.0rc4, the YAML validator warns that
-`final_opt` is an unknown top-level key; the pipeline still applies this block.
+optimisation settings from `opt:`. Both blocks accept the same optimisation
+settings and are validated identically.
 
 ## Selecting an NPT integrator
 
@@ -344,6 +416,86 @@ analysis:
   voronoi: Ge             # or true for all atoms
   connectivity: true      # corner/edge/face sharing of cation polyhedra
 ```
+
+### Ensemble precision targets
+
+Declare absolute confidence half-width tolerances in each descriptor's units.
+The report includes order-independent planning curves and estimated additional
+structure counts; see {ref}`ensemble-convergence` for the statistical assumptions.
+
+```yaml
+analysis:
+  convergence: true
+  convergence_confidence: 0.95
+  convergence_max_structures: 1000000
+  tolerances:
+    density: 0.02              # g/cm³
+    coordination.Si-O: 0.05    # neighbours per Si
+    bond_angle.O-Si-O: 1.0     # degrees
+  save_report: convergence.txt
+  save_plot: convergence/
+```
+
+Each CLI `--tolerance NAME=VALUE` overrides only that descriptor's YAML
+tolerance. Nonempty tolerances enable convergence reporting automatically.
+
+### Optional material descriptors
+
+Add these keys inside `analysis:` to select descriptors and their settings.
+All four default to disabled. Geometry-only void and oxygen calculations
+do not load a model; `elastic` and `vdos` explicitly enable calculator work.
+
+```yaml
+# descriptors.yaml
+model: mace-mpa-0       # used only for elastic/vdos in analysis mode
+device: cpu
+default_dtype: float64
+
+opt:                   # used by elastic_relax; cells stay fixed
+  fmax: 0.01           # eV/A
+  max_steps: 200
+
+analysis:
+  cutoff: {Si-O: 2.0, Al-O: 2.3}  # illustrative; inspect your RDF first
+  save_plot: descriptors/
+  save_report: descriptors.txt
+  save_pdf: true
+
+  voids: true
+  void_samples: 10000    # independent uniform points per cell
+  void_probe_radius: 0.0 # A
+  void_bins: 50
+  void_seed: 42          # separate from the top-level simulation seed
+  # void_radii: {Si: 1.11, O: 0.66}  # optional A; other elements keep ASE covalent radii
+
+  oxygen_speciation: true
+  network_formers: [Si, Al]  # choose for your chemistry; exclude Na/Ca modifiers
+
+  elastic: false         # set true to evaluate calculator stresses
+  elastic_strain: 0.005
+  elastic_relax: false   # true = fixed-cell atomic relaxation at every strain
+
+  vdos: false            # set true for 6N force evaluations per structure
+  vdos_displacement: 0.01 # A
+  vdos_sigma: 0.1        # Gaussian standard deviation in THz
+  vdos_npoints: 400
+```
+
+```bash
+amorphgen --analyse --input-dir aluminosilicate/ --config descriptors.yaml
+# Enable the costly descriptors and override one setting for this run:
+amorphgen --analyse --input-dir relaxed_aluminosilicate/ \
+    --config descriptors.yaml --elastic --vdos --vdos-npoints 800
+```
+
+With `save_plot`, each enabled descriptor writes JSON with full per-structure
+results, a summary CSV and a PNG; `save_pdf` adds a PDF. Void radii describe
+local point clearance, not connected pore sizes. Oxygen formers default to
+the Al/B/Ge/P/Si present if omitted; mixed element sets must be analysed
+separately. Optimise reference structures before interpreting elastic or
+harmonic results: neither descriptor optimises the starting cell, and VDOS
+does not optimise atoms. See {doc}`analysis` for normalization, uncertainty,
+finite-pressure and Gamma-point limitations.
 
 ## Reproducibility: the `seed` key
 

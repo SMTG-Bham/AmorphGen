@@ -9,7 +9,10 @@
 # task i mod 3), so each slice mixes light and heavy systems and takes ~70 min.
 # Every slice is resumable: relaxed systems are skipped, so a slice cut off by
 # the walltime just needs `sbatch --array=<task> ...` again. Each slice rewrites
-# the summary table when it ends; the table is complete once all three are.
+# its own summary table when it ends. Build the complete summary in a separate
+# afterok job: python examples/collect_class_benchmark.py classes examples/class_benchmark_systems.txt
+#SBATCH --signal=B:USR1@120
+#SBATCH --requeue
 #SBATCH --job-name=cls_relax
 # Export AMORPHGEN_VENV=/path/to/venv before submitting (see docs/guides/hpc.md).
 # For repository files, AMORPHGEN_ROOT defaults to the submission directory.
@@ -23,18 +26,22 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=48G
 #SBATCH --output=logs/cls_relax_%A_%a.out
-set -uo pipefail
+set -euo pipefail
+PKG=${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
+if [[ ! -f "$PKG/amorphgen/slurm_runtime.sh" && -f "$PKG/../amorphgen/slurm_runtime.sh" ]]; then
+    PKG=$(cd "$PKG/.." && pwd)
+fi
+source "$PKG/amorphgen/slurm_runtime.sh"
+amorphgen_slurm_main "$0" "$@"
 export PYTHONUNBUFFERED=1
 mkdir -p logs
-module purge
-module load bear-apps/2024a/live
-module load Python/3.12.3-GCCcore-13.3.0
-source "${AMORPHGEN_VENV:?Set AMORPHGEN_VENV to your virtualenv directory}/bin/activate"
-PKG=${AMORPHGEN_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
+amorphgen_slurm_bluebear_environment "bear-apps/2024a/live" "Python/3.12.3-GCCcore-13.3.0"
 SLICE=${SLURM_ARRAY_TASK_ID:-0}; NSLICE=3
-i=-1
-grep -v "^#" "$PKG/examples/class_benchmark_systems.txt" | while read CLASS NAME COMP RHO KIND; do
-    i=$((i+1)); [ $((i % NSLICE)) -eq $SLICE ] || continue
+SYSTEMS=classes/systems_slice_${SLICE}.txt
+mkdir -p classes
+awk -v slice="$SLICE" -v count="$NSLICE" '!/^#/ && NF {if (i++ % count == slice) print}' \
+    "$PKG/examples/class_benchmark_systems.txt" > "$SYSTEMS"
+while read -r CLASS NAME COMP RHO KIND; do
     D=classes/$NAME
     [ -d $D/random_initial ] || { echo "== $NAME: no placements, skipped"; continue; }
     if [ -f $D/analysis/report.txt ] && [ "$(ls $D/random_opt/*_opt.xyz 2>/dev/null | wc -l)" -ge "$(ls $D/random_initial/*.xyz | wc -l)" ]; then
@@ -46,6 +53,6 @@ grep -v "^#" "$PKG/examples/class_benchmark_systems.txt" | while read CLASS NAME
         -C cubic -f 0.05 --opt-steps 1000 --resume
     amorphgen --analyse --input-dir $D/random_opt --check-dimers --connectivity \
         --save-report $D/analysis/report.txt --save-plot $D/analysis/ > $D/analysis.log 2>&1
-done
-python "$PKG/examples/collect_class_benchmark.py" classes "$PKG/examples/class_benchmark_systems.txt" 2>&1 | grep -v "Composition\]"
-echo "=== slice $SLICE done $(date). Table: classes/class_benchmark.tsv (complete when all three slices have run)"
+done < "$SYSTEMS"
+python "$PKG/examples/collect_class_benchmark.py" classes "$SYSTEMS" "classes/class_benchmark_slice_${SLICE}.tsv" 2>&1 | grep -v "Composition\]"
+echo "=== slice $SLICE done $(date). Table: classes/class_benchmark_slice_${SLICE}.tsv"

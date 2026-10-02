@@ -92,6 +92,58 @@ def _DC(section, key):
     return DEFAULT_CONFIG[section][key]
 
 
+def _parse_tolerance(value):
+    """Parse one absolute descriptor tolerance for argparse."""
+    import math
+
+    name, separator, raw_value = value.partition("=")
+    name = name.strip()
+    if not separator or not name:
+        raise argparse.ArgumentTypeError(
+            "tolerance must be NAME=VALUE, e.g. density=0.02")
+    try:
+        tolerance = float(raw_value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"tolerance for '{name}' must be a finite positive number") from exc
+    if not math.isfinite(tolerance) or tolerance <= 0:
+        raise argparse.ArgumentTypeError(
+            f"tolerance for '{name}' must be a finite positive number")
+    return name, tolerance
+
+
+def _convergence_options(args, config):
+    """Resolve convergence settings; each CLI tolerance overrides its YAML key."""
+    import math
+
+    tolerances = dict(config.get("tolerances", {}))
+    tolerances.update(args.tolerance or [])
+    confidence = args.convergence_confidence
+    if confidence is None:
+        confidence = config.get("convergence_confidence", 0.95)
+    if not math.isfinite(confidence) or not 0 < confidence < 1:
+        raise ValueError("convergence confidence must be finite and between 0 and 1")
+    max_structures = args.convergence_max_structures
+    if max_structures is None:
+        max_structures = config.get("convergence_max_structures", 1000000)
+    if max_structures < 2:
+        raise ValueError("convergence max structures must be at least 2")
+    enabled = bool(args.convergence or config.get("convergence", False) or tolerances)
+    return enabled, tolerances, confidence, max_structures
+
+
+def _collect_convergence_summaries(target, prefix, summaries):
+    """Flatten selected descriptor uncertainty trees to their public names."""
+    if not isinstance(summaries, dict):
+        return
+    if "per_structure" in summaries and "sem" in summaries:
+        target[prefix] = summaries
+        return
+    for key, value in summaries.items():
+        label = "-".join(map(str, key)) if isinstance(key, tuple) else str(key)
+        _collect_convergence_summaries(target, f"{prefix}.{label}", value)
+
+
 def _get_parser():
     """Build and return the argument parser (without parsing)."""
     p = argparse.ArgumentParser(
@@ -138,8 +190,8 @@ def _add_arguments(p):
     g_mode.add_argument("--rank-from-log", default=None, metavar="LOG",
                         help="Parse a random-gen log and rank by total energy.")
     g_mode.add_argument("--extract-snapshots", default=None, metavar="TRAJ",
-                        help="Extract N uniform snapshots from a trajectory "
-                             "file (use with --n-runs N --select {uniform,last}).")
+                        help="Extract N snapshots from a trajectory file "
+                             "(use with --n-runs N and --select).")
     g_mode.add_argument("--mq-ensemble", action="store_true",
                         help="Full MQ-ensemble workflow: stages 1-4 from a "
                              "crystalline input, extract N snapshots from "
@@ -237,7 +289,7 @@ def _add_arguments(p):
                         choices=["NVT", "NPT"], help="Stage 2 ensemble.")
     g_pipe.add_argument("--eq-premelt-T", type=int, default=300,
                         help="Stage 2 T (K).")
-    g_pipe.add_argument("--eq-premelt-steps", type=int, default=50000,
+    g_pipe.add_argument("--eq-premelt-steps", type=int, default=_DC("eq_premelt", "steps"),
                         help="Stage 2 MD steps.")
     # Stage 3
     g_pipe.add_argument("--melt-ensemble", default=_DC("melt", "ensemble"),
@@ -341,13 +393,19 @@ def _add_arguments(p):
                            "into N uniform snapshots.")
     g_bq.add_argument("--n-runs", type=int, default=20,
                       help="Number of quench runs.")
-    g_bq.add_argument("--select", default="uniform",
-                      choices=["uniform", "last"], help="Snapshot selection.")
-    g_bq.add_argument("--burn-in-frames", type=int, default=0, metavar="N",
+    g_bq.add_argument("--select", default=None,
+                      choices=["uniform", "last", "decorrelated"],
+                      help="Snapshot selection: decorrelated for --mq-ensemble, "
+                           "uniform otherwise. Decorrelated uses autocorrelation "
+                           "and species diffusion to choose minimum spacing.")
+    g_bq.add_argument("--burn-in-frames", type=int, default=None, metavar="N",
                       help="Discard the first N frames of the trajectory "
-                           "before sampling snapshots (useful for skipping "
-                           "the non-equilibrated portion of stage-4 MD; "
-                           "default: 0).")
+                           "before sampling snapshots (automatic for "
+                           "decorrelated selection, zero otherwise).")
+    g_bq.add_argument("--decorrelation-distance", type=float, default=None,
+                      metavar="ANGSTROM",
+                      help="Length scale for the species displacement correlation "
+                           "proxy; default: median nearest-neighbour distance.")
     g_bq.add_argument("--batch-stages", nargs="+", type=int,
                       default=[5, 6, 7], metavar="N",
                       help="Stages to run per snapshot.")
@@ -370,6 +428,23 @@ def _add_arguments(p):
 
     # ── Analysis ──────────────────────────────────────────────────────────────
     g_an = p.add_argument_group("analyse", "Used with --analyse.")
+    g_an.add_argument("--convergence", action="store_true",
+                      help="Report order-independent uncertainty versus ensemble "
+                           "size and estimates against declared tolerances.")
+    g_an.add_argument("--tolerance", action="append", type=_parse_tolerance,
+                      default=None, metavar="NAME=VALUE",
+                      help="Absolute uncertainty tolerance for a descriptor, e.g. "
+                           "density=0.02 or coordination.Si-O=0.1. Repeat for "
+                           "multiple descriptors; enables --convergence. "
+                           "CLI declarations override YAML per descriptor.")
+    g_an.add_argument("--convergence-confidence", type=float, default=None,
+                      metavar="LEVEL",
+                      help="Confidence level for convergence uncertainty "
+                           "(default 0.95).")
+    g_an.add_argument("--convergence-max-structures", type=int, default=None,
+                      metavar="N",
+                      help="Maximum ensemble size to consider when estimating "
+                           "additional structures (default 1000000).")
     g_an.add_argument("--cutoff", default="auto-rdf",
                       help="Bond cutoff. 'auto-rdf' (default): first minimum "
                            "of each partial g(r), so every pair gets its own "
@@ -384,6 +459,8 @@ def _add_arguments(p):
                            "and S(q->inf)=1. Saved as PNG+CSV under "
                            "--save-plot. Note: the FSDP region needs a large "
                            "box (q_min = 2*pi/L; ~450+ atoms recommended).")
+    from .scattering_cli import add_scattering_arguments
+    add_scattering_arguments(g_an)
     g_an.add_argument("--sq-weighting", default="xray",
                       choices=["xray", "neutron", "unweighted"],
                       help="Scattering-factor weighting for --sq. Use 'xray' "
@@ -458,6 +535,48 @@ def _add_arguments(p):
                            "of cations in edge-sharing pairs. Printed, appended "
                            "to --save-report, analysis_connectivity.csv under "
                            "--save-plot.")
+    g_an.add_argument("--voids", action="store_true",
+                      help="Sample periodic free-space clearance and accessible volume.")
+    g_an.add_argument("--bond-order", action="store_true",
+                      help="Steinhardt q6, Lechner-Dellago averaged qbar6, ordered "
+                           "fraction and largest ordered cluster (uses "
+                           "--order-cutoff or --cutoff).")
+    g_an.add_argument("--order-cutoff", default=None, metavar="SPEC",
+                      help="Independent neighbor cutoff for bond order and MQ melt "
+                           "memory, in A (number or pair overrides; default: --cutoff).")
+    g_an.add_argument("--qbar6-threshold", type=float, default=None,
+                      help="Minimum qbar6 for crystal-like order (default 0.3; "
+                           "calibrate for the material). Also used by --mq-ensemble.")
+    g_an.add_argument("--order-min-neighbors", type=int, default=None,
+                      help="Minimum shell neighbors for crystal-like order "
+                           "(default 4). Also used by --mq-ensemble.")
+    g_an.add_argument("--void-samples", type=int, default=None,
+                      help="Random points per cell for --voids (default 10000).")
+    g_an.add_argument("--void-probe-radius", type=float, default=None,
+                      help="Probe radius in A for --voids (default 0).")
+    g_an.add_argument("--void-bins", type=int, default=None,
+                      help="Clearance histogram bins (default 50).")
+    g_an.add_argument("--void-seed", type=int, default=None,
+                      help="Reproducible void sampling seed (default 0).")
+    g_an.add_argument("--oxygen-speciation", action="store_true",
+                      help="Oxygen speciation by network-former coordination.")
+    g_an.add_argument("--network-formers", default=None, metavar="Si,Al",
+                      help="Comma-separated network formers for oxygen speciation; "
+                           "defaults to the Al/B/Ge/P/Si present.")
+    g_an.add_argument("--elastic", action="store_true",
+                      help="Elastic tensor and Voigt/Reuss/Hill moduli from calculator stresses.")
+    g_an.add_argument("--elastic-strain", type=float, default=None,
+                      help="Central finite strain amplitude (default 0.005).")
+    g_an.add_argument("--elastic-relax", action="store_true",
+                      help="Relax internal positions at each fixed cell for --elastic.")
+    g_an.add_argument("--vdos", action="store_true",
+                      help="Harmonic vibrational DOS from calculator forces (6N evaluations/cell).")
+    g_an.add_argument("--vdos-displacement", type=float, default=None,
+                      help="Finite displacement in A (default 0.01).")
+    g_an.add_argument("--vdos-sigma", type=float, default=None,
+                      help="Gaussian DOS width in THz (default 0.1).")
+    g_an.add_argument("--vdos-npoints", type=int, default=None,
+                      help="Frequency grid points (default 400).")
     g_an.add_argument("--total-cn", action="append", default=None, metavar="SPEC",
                       help="Total first-shell coordination of one element over "
                            "several partner types, repeatable. 'O' counts every "
@@ -906,20 +1025,66 @@ def _run_convert(args, yaml_cfg: dict | None = None) -> None:
 # Ensemble workflow helpers (--mq-ensemble, --hybrid-ensemble)
 # ═════════════════════════════════════════════════════════════════════════════
 
-def _run_mq_ensemble(args, override: dict) -> None:
+def _has_quench_outputs(work_dir, cfg, stages):
+    """Recognise completed or interrupted downstream runs before reselection."""
+    from pathlib import Path
+
+    root = Path(work_dir)
+    directories = [root] + [path for path in root.glob("run_*") if path.is_dir()]
+    patterns = [f"stage{stage}*" for stage in stages] + ["final_amorphous.*"]
+    if any(path.is_file() for directory in directories
+           for pattern in patterns
+           for path in directory.glob(pattern)):
+        return True
+    sections = {4: "eq_high", 5: "quench", 6: "eq_low", 7: "final_opt"}
+    names = [section[key] for stage in stages if stage in sections
+             for section in [cfg.get(sections[stage], {})]
+             for key in ("traj_file", "log_file", "output_xyz") if section.get(key)]
+    return any((directory / name).is_file() for directory in directories for name in names)
+
+
+def _snapshot_sampling_kwargs(args, override, *, mq=False, report_path=None,
+                              quench_dir=None):
+    """Use the actual stage-4 timestep for automatic and manual extraction."""
+    from .configs import DEFAULT_CONFIG
+    from .utils import merge_config
+    from .utils.common import TRAJ_LOG_INTERVAL
+
+    cfg = merge_config(DEFAULT_CONFIG, override)
+    select = args.select or ("decorrelated" if mq else "uniform")
+    burn_in = args.burn_in_frames
+    if burn_in is None and select != "decorrelated":
+        burn_in = 0
+    return {
+        "select": select, "burn_in_frames": burn_in,
+        "timestep_fs": cfg["eq_high"]["timestep"],
+        "frame_stride": TRAJ_LOG_INTERVAL,
+        "decorrelation_distance": args.decorrelation_distance,
+        "report_path": (report_path if mq or select == "decorrelated"
+                        or (report_path is not None and os.path.isfile(report_path)) else None),
+        "resume": bool(args.resume and quench_dir is not None
+                       and _has_quench_outputs(
+                           quench_dir, cfg, (5, 6, 7) if mq else args.batch_stages)),
+    }
+
+
+def _run_mq_ensemble(args, override: dict, analysis_config=None) -> None:
     """Full melt-quench ensemble: stages 1-4 once + N independent quenches.
 
     Output layout under args.work_dir:
         shared/      stages 1-4 outputs (incl. stage4_eq_traj.xyz trajectory)
-        snapshots/   N uniform snapshots extracted from stage 4 trajectory
+        snapshots/   up to N decorrelated snapshots from stage 4 trajectory
         quench_runs/ per-snapshot stages 5-6-7 outputs (run_0000, run_0001, ...)
         final/       collected final amorphous structures (mq_NNNN.<fmt>)
+        melt_memory.{json,csv,txt}  original-crystal order retention at melt endpoints
+        snapshot_sampling.{json,txt}  spacing and effective independent sample count
     """
-    import glob as _glob
     from .pipeline.run_pipeline import MeltQuenchPipeline
     from .pipeline import batch_quench
     from .utils import get_calculator, extract_snapshots
     from .pipeline.random_gen import _FORMAT_MAP
+    from .analysis.descriptors import bond_order_options
+    from .analysis.melt_memory import prepare_melt_memory, report_melt_memory
 
     work_dir   = args.work_dir or "mq_ensemble"
     shared_dir = os.path.join(work_dir, "shared")
@@ -927,6 +1092,11 @@ def _run_mq_ensemble(args, override: dict) -> None:
     quench_dir = os.path.join(work_dir, "quench_runs")
     final_dir  = os.path.join(work_dir, "final")
     os.makedirs(work_dir, exist_ok=True)
+    if analysis_config is None:
+        analysis_config = override.get("analysis", {})
+    order_options = bond_order_options(args, analysis_config)
+    # Validate and resolve the original-crystal order definition before MD.
+    memory_reference = prepare_melt_memory(args.input_file, **order_options)
 
     bar = "=" * 70
     print(f"\n{bar}")
@@ -942,27 +1112,47 @@ def _run_mq_ensemble(args, override: dict) -> None:
     pipe.run(stages=[1, 2, 3, 4], resume=args.resume)
 
     # ── Phase 2: extract N snapshots from stage 4 trajectory ─────────────────
-    traj = os.path.join(shared_dir, "stage4_eq_traj.xyz")
+    traj = os.path.join(shared_dir, override.get("eq_high", {}).get(
+        "traj_file", "stage4_eq_traj.xyz"))
     if not os.path.isfile(traj):
         # Backwards-compat: older runs wrote stage4_eq.xyz as the trajectory
         legacy = os.path.join(shared_dir, "stage4_eq.xyz")
         if os.path.isfile(legacy):
             traj = legacy
         else:
+            report_melt_memory(
+                args.input_file, shared_dir, [], work_dir,
+                cfg_override=override, prepared=memory_reference)
             print(f"Error: stage 4 trajectory not found "
                   f"({traj} or {legacy})")
             sys.exit(1)
     print(f"\n[Phase 2/3] Extracting {args.n_structures} snapshots from {traj}")
-    extract_snapshots(traj, n_snapshots=args.n_structures,
-                      select=args.select, output_dir=snap_dir,
-                      burn_in_frames=args.burn_in_frames)
+    try:
+        snap_files = extract_snapshots(traj, n_snapshots=args.n_structures,
+                                       output_dir=snap_dir,
+                                       **_snapshot_sampling_kwargs(
+                                           args, override, mq=True,
+                                           report_path=os.path.join(work_dir, "snapshot_sampling.json"),
+                                           quench_dir=quench_dir))
+    except Exception:
+        # Preserve diagnostics from completed MD even if a trajectory cannot
+        # be read or the requested sampling range is invalid.
+        try:
+            report_melt_memory(
+                args.input_file, shared_dir, [], work_dir,
+                cfg_override=override, prepared=memory_reference)
+        except Exception as report_error:
+            print(f"Warning: could not save melt-memory report: {report_error}")
+        raise  # Keep the original snapshot-extraction failure.
+
+    # Save melt diagnostics before any expensive or interrupted quench run.
+    # Use the exact extracted files, excluding stale snapshots on resume.
+    report_melt_memory(
+        args.input_file, shared_dir, snap_files, work_dir,
+        cfg_override=override, prepared=memory_reference)
 
     # ── Phase 3: stages 5-6-7 per snapshot (with resume) ─────────────────────
     print(f"\n[Phase 3/3] Stages 5-6-7 (per snapshot) -> {quench_dir}/")
-    snap_files = sorted(
-        _glob.glob(os.path.join(snap_dir, "*.xyz"))
-        + _glob.glob(os.path.join(snap_dir, "*.extxyz"))
-    )
     calc = get_calculator(
         **_classical_kwargs(override),
         model=override.get("model", args.model),
@@ -1148,17 +1338,21 @@ def _collect_ensemble_final(quench_dir: str, final_dir: str, output_format: str,
     print(f"  Collected {n_collected} final structures -> {final_dir}/")
 
 
-def _requires_calculator(args) -> bool:
+def _requires_calculator(args, analysis_config=None) -> bool:
     """Will this invocation construct a calculator?
 
     Gates the fail-fast backend check. Modes that only read, transform, or
-    analyse structures never need a backend and must keep working on a
-    torch-free install.
+    analyse geometry never need a backend and must keep working on a
+    torch-free install. Elastic and harmonic vibrational descriptors do.
     """
     # Calculator-free modes (checked first — they may combine with input_file)
     if (args.list_models or args.rank_from_log or args.convert
-            or args.extract_snapshots or args.analyse):
+            or args.extract_snapshots):
         return False
+    if args.analyse:
+        cfg = analysis_config or {}
+        return bool(getattr(args, "elastic", False) or getattr(args, "vdos", False)
+                    or cfg.get("elastic", False) or cfg.get("vdos", False))
     # Random generation only builds a calculator when relaxing
     if args.random_gen:
         return bool(args.relax)
@@ -1171,6 +1365,26 @@ def _requires_calculator(args) -> bool:
 
 
 def main():
+    from .utils.preemption import (checkpoint_signals, stop_if_requested,
+                                   PreemptionRequested)
+    with checkpoint_signals():
+        try:
+            try:
+                result = _main()
+            except SystemExit as exc:
+                if exc.code in (None, 0):
+                    stop_if_requested()
+                raise
+            # A signal during a short stage or non-simulation command must
+            # still prevent successful Slurm dependencies from starting.
+            stop_if_requested()
+            return result
+        except PreemptionRequested as exc:
+            print(f"[Preemption] {exc}", file=sys.stderr)
+            raise SystemExit(exc.code) from None
+
+
+def _main():
     args = parse_args()
 
     # ── Smart default for --work-dir based on mode ───────────────────────────
@@ -1253,7 +1467,7 @@ def main():
     # The same gate refuses a precision the model can't run (CHGNet + float64),
     # which --mq-ensemble would otherwise only hit in phase 3, after stages
     # 1-4 of MD.
-    if _requires_calculator(args):
+    if _requires_calculator(args, override.get("analysis", {})):
         from .utils.calculators import (require_backend, require_dtype,
                                         BackendNotInstalledError)
         model = override.get("model", args.model) or "mace-mpa-0"
@@ -1296,10 +1510,11 @@ def main():
         extract_snapshots(
             args.extract_snapshots,
             n_snapshots=n_snap,
-            select=args.select,
             output_dir=out_dir,
-            burn_in_frames=args.burn_in_frames,
             output_format=args.format,
+            **_snapshot_sampling_kwargs(
+                args, override,
+                report_path=os.path.join(out_dir, "snapshot_sampling.json")),
         )
         return
 
@@ -1311,7 +1526,7 @@ def main():
         if args.input_file is None:
             print("Error: input_file (crystal structure) is required for --mq-ensemble.")
             sys.exit(1)
-        _run_mq_ensemble(args, override)
+        _run_mq_ensemble(args, override, analysis_config=override.get("analysis", {}))
         return
 
     # ── Hybrid-ensemble mode ──────────────────────────────────────────────────
@@ -1336,6 +1551,13 @@ def main():
 
         # Read analysis block from YAML config (if present)
         an_cfg = override.get("analysis", {})
+        try:
+            convergence_enabled, tolerances, convergence_confidence, convergence_max = (
+                _convergence_options(args, an_cfg))
+        except ValueError as exc:
+            print(f"Error: convergence analysis: {exc}")
+            sys.exit(1)
+        convergence_descriptors = {}
 
         # Parse cutoff: CLI > YAML > default "auto"
         cutoff = args.cutoff
@@ -1363,7 +1585,22 @@ def main():
         # dimer section too; the concatenated text feeds --save-report.
         if args.check_dimers or an_cfg.get("check_dimers", False):
             from .analysis.structure import format_dimer_report
-            dimer_text = format_dimer_report(sa.dimer_report())
+            dimers = sa.dimer_report()
+            dimer_text = format_dimer_report(dimers)
+            if convergence_enabled:
+                for name, summary in (
+                        ("count", dimers.get("uncertainty")),
+                        ("fraction_of_sites", dimers.get("site_fraction_uncertainty")),
+                        ("fraction_of_structures", dimers.get("structure_fraction_uncertainty"))):
+                    _collect_convergence_summaries(
+                        convergence_descriptors, f"dimers.{name}", summary)
+                for pair, data in dimers.get("pairs", {}).items():
+                    _collect_convergence_summaries(
+                        convergence_descriptors, f"dimers.count.{pair}",
+                        data.get("uncertainty"))
+                    _collect_convergence_summaries(
+                        convergence_descriptors, f"dimers.min_distance.{pair}",
+                        data.get("min_distance_uncertainty"))
             print(dimer_text)
             text += "\n" + dimer_text
 
@@ -1429,15 +1666,28 @@ def main():
             sa.plot(output_dir=plot_dir, **plot_kwargs)
 
         # S(q): CLI flag > YAML (direct method, Faber-Ziman normalised)
-        if args.sq or an_cfg.get("sq", False):
+        sq_result = None
+        tr = None
+        if (args.sq or an_cfg.get("sq", False)
+                or args.experiment_sq or an_cfg.get("experiment_sq")):
             sq_weighting = args.sq_weighting
             if (not _typed("--sq-weighting") and "sq_weighting" in an_cfg):
                 sq_weighting = an_cfg["sq_weighting"]
             L_min = min(min(a.cell.lengths()) for a in sa.atoms_list)
             q_min = 2 * 3.141592653589793 / L_min
             sq_method = args.sq_method
-            if sq_method == "direct" and "sq_method" in an_cfg:
+            if not _typed("--sq-method") and "sq_method" in an_cfg:
                 sq_method = an_cfg["sq_method"]
+            sq_qmax = (args.sq_qmax if _typed("--sq-qmax") else
+                       an_cfg.get("sq_qmax", args.sq_qmax))
+            sq_nq = (args.sq_nq if _typed("--sq-nq") else
+                     an_cfg.get("sq_nq", args.sq_nq))
+            import math
+            if (not math.isfinite(sq_qmax) or sq_qmax <= 0.1
+                    or isinstance(sq_nq, bool) or not isinstance(sq_nq, int)
+                    or sq_nq < 2):
+                print("Error: --sq-qmax must exceed 0.1 and --sq-nq must be at least 2.")
+                sys.exit(1)
             print(f"\n  S(q): {sq_method} method, {sq_weighting} weighting "
                   f"(q_min = 2pi/L = {q_min:.2f} A^-1)")
             if sq_method == "ft":
@@ -1455,12 +1705,14 @@ def main():
                 sq_smooth = float(an_cfg.get("sq_smooth", DEFAULT_SQ_SMOOTH))
             sq_partials = bool(args.sq_partials or an_cfg.get("sq_partials", False))
             if sq_method == "ft":
-                sq_result = sa.structure_factor(weighting=sq_weighting)
+                sq_result = sa.structure_factor(weighting=sq_weighting,
+                                                qmax=sq_qmax, nq=sq_nq)
                 if sq_partials:
                     print("  Note: --sq-partials needs the direct method; "
                           "partials skipped for --sq-method ft.")
             else:
                 sq_result = sa.structure_factor_direct(weighting=sq_weighting,
+                                                       qmax=sq_qmax, nq=sq_nq,
                                                        sigma_q=sq_smooth,
                                                        partials=sq_partials)
                 if sq_smooth > 0:
@@ -1477,6 +1729,20 @@ def main():
                             k = _np.argmax(_np.where(m, s_ab, -_np.inf))
                             print(f"    {pair:<8s} q = {_q[k]:.2f} A^-1, "
                                   f"S = {s_ab[k]:.2f}")
+            sq_result["calculation"] = {
+                "method": sq_method, "weighting": sq_weighting,
+                "qmax": sq_qmax, "nq": sq_nq,
+                "sigma_q": sq_smooth if sq_method == "direct" else 0.0,
+                "normalization": "Faber-Ziman",
+            }
+            if sq_method == "ft":
+                from .analysis.rdf import _shared_rmax
+                sq_result["calculation"]["rmax"] = _shared_rmax(sa.atoms_list, None)
+            if convergence_enabled:
+                _collect_convergence_summaries(
+                    convergence_descriptors, "sq.total", sq_result.get("uncertainty"))
+                _collect_convergence_summaries(
+                    convergence_descriptors, "sq", sq_result.get("partials_uncertainty"))
             if plot_dir:
                 from .analysis.plotting import plot_sq
                 plot_sq(sq_result, output_dir=plot_dir,
@@ -1489,7 +1755,8 @@ def main():
                 print("  (pass --save-plot DIR to write the S(q) PNG + CSV)")
 
         # T(r): CLI flag > YAML key, weighted like --sq
-        if args.tr or an_cfg.get("tr", False):
+        if (args.tr or an_cfg.get("tr", False)
+                or args.experiment_tr or an_cfg.get("experiment_tr")):
             tr_w = args.sq_weighting
             if not _typed("--sq-weighting") and "sq_weighting" in an_cfg:
                 tr_w = an_cfg["sq_weighting"]
@@ -1504,6 +1771,15 @@ def main():
             except ValueError as exc:
                 print(f"  T(r) skipped: {exc}")
             else:
+                tr["calculation"] = {
+                    "method": "direct", "weighting": tr_w,
+                    "qmin": qlo, "qmax": qhi, "window": win,
+                    "nq": 400, "nr": 600, "rmax": 10.0, "sigma_q": 0.05,
+                    "normalization": "T(r) = 4*pi*r*rho*g(r)",
+                }
+                if convergence_enabled:
+                    _collect_convergence_summaries(
+                        convergence_descriptors, "tr", tr.get("curve_uncertainty"))
                 from .analysis.rdf import coordination_from_Tr, first_Tr_peak
                 pk, r_lo, r_hi = first_Tr_peak(tr)
                 if pk is None:
@@ -1539,6 +1815,17 @@ def main():
                 else:
                     print("  (pass --save-plot DIR to write the T(r) PNG + CSV)")
 
+        from .scattering_cli import run_scattering_comparisons
+        try:
+            run_scattering_comparisons(
+                sa, args, an_cfg, _typed, sq=sq_result, tr=tr,
+                plot_dir=plot_dir, report_path=report_path,
+                dpi=plot_kwargs.get("dpi", 300),
+                save_pdf=plot_kwargs.get("save_pdf", False))
+        except (ValueError, OSError, KeyError) as exc:
+            print(f"Error: scattering comparison: {exc}")
+            sys.exit(1)
+
         # Ring statistics and Voronoi indices: CLI flag > YAML key.
         # (YAML: rings: true | "Ge-O"; voronoi: true | "Ge"; the older
         # ring_bond_pair / voronoi_element keys are still honoured.)
@@ -1554,6 +1841,9 @@ def main():
         if rings_opt:
             pair = None if rings_opt == "auto" else tuple(rings_opt.split("-"))
             rings = sa.ring_statistics(bond_pair=pair)
+            if convergence_enabled:
+                _collect_convergence_summaries(
+                    convergence_descriptors, "rings", rings.get("uncertainty"))
             label = f"{pair[0]}-{pair[1]}" if pair else "auto"
             lines = [f"\n  Ring statistics (nodes-bridge: {label}, shortest ring per edge):"]
             for sz, c, f in zip(rings["ring_sizes"], rings["counts"], rings["fractions"]):
@@ -1579,6 +1869,21 @@ def main():
         if args.connectivity or an_cfg.get("connectivity", False):
             from .analysis.structure import format_connectivity_report
             conn = sa.polyhedral_connectivity()
+            if convergence_enabled:
+                _collect_convergence_summaries(
+                    convergence_descriptors, "connectivity.edge_or_face_percent",
+                    conn.get("uncertainty"))
+                for name, key in (("link_percent", "link_percent_uncertainty"),
+                                  ("n_links", "n_links_uncertainty"),
+                                  ("fraction_of_sites", "site_fraction_uncertainty"),
+                                  ("fraction_of_structures", "structure_fraction_uncertainty"),
+                                  ("face_percent", "face_percent_uncertainty")):
+                    _collect_convergence_summaries(
+                        convergence_descriptors, f"connectivity.{name}", conn.get(key))
+                for element, data in conn.get("per_species", {}).items():
+                    _collect_convergence_summaries(
+                        convergence_descriptors, f"connectivity.{element}",
+                        data.get("uncertainty"))
             conn_text = format_connectivity_report(conn)
             print(conn_text)
             if report_path:
@@ -1605,6 +1910,9 @@ def main():
         if vor_opt:
             elem = None if vor_opt == "all" else vor_opt
             vor = sa.voronoi(element=elem)
+            if convergence_enabled:
+                _collect_convergence_summaries(
+                    convergence_descriptors, "voronoi", vor.get("uncertainty"))
             lines = [f"\n  Voronoi indices <n3 n4 n5 n6> ({elem or 'all atoms'}): "
                      f"{vor['total_atoms']} atoms, mean faces = {vor['mean_faces']:.2f}"]
             for idx, count, pct in vor["top_10"]:
@@ -1622,6 +1930,90 @@ def main():
                         fh.write(f"\"{idx}\",{count},{pct:.4f}\n")
                 print(f"  Saved: {os.path.join(plot_dir, 'analysis_voronoi.csv')}")
 
+        # Optional structural, mechanical and vibrational descriptors.
+        from .analysis.descriptors import run_descriptor_analysis
+        try:
+            descriptor_results = run_descriptor_analysis(
+                sa, args, an_cfg, override, plot_dir=plot_dir,
+                report_path=report_path, plot_kwargs=plot_kwargs)
+        except (ValueError, RuntimeError, NotImplementedError) as exc:
+            print(f"Error: descriptor analysis: {exc}")
+            sys.exit(1)
+
+        if an_cfg.get("energy_ranking", False):
+            er = sa.energy_ranking()
+            if convergence_enabled:
+                summaries = er.get("uncertainty", {})
+                _collect_convergence_summaries(
+                    convergence_descriptors, "energy.total", summaries.get("energy"))
+                _collect_convergence_summaries(
+                    convergence_descriptors, "energy.per_atom", summaries.get("energy_per_atom"))
+            if er.get("best_energy") is not None:
+                print(f"\n  Energy ranking:")
+                print(f"    Best: {er['best_energy']:.4f} eV/atom")
+                print(f"    Worst: {er['worst_energy']:.4f} eV/atom")
+                print(f"    Spread: {er['spread']:.4f} eV/atom")
+            elif er.get("warning") or er.get("error"):
+                print(f"\n  Energy ranking: {er.get('warning') or er.get('error')}")
+
+        if convergence_enabled:
+            from ase.data import atomic_numbers
+            from .analysis.convergence_output import (
+                format_convergence_report, save_convergence_report)
+
+            for name, result in (descriptor_results or {}).items():
+                _collect_convergence_summaries(
+                    convergence_descriptors, name, result.get("uncertainty"))
+            rdf_names = {name for name in tolerances if name.startswith("rdf.")}
+            rdf_names.update(f"rdf.{pair}" for pair in (an_cfg.get("rdf_pairs") or []))
+            if args.total_rdf or an_cfg.get("total_rdf", False):
+                rdf_names.add("rdf.total")
+            angle_names = {name for name in tolerances
+                           if name.startswith("angle_distribution.")}
+            angle_names.update(f"angle_distribution.{triplet}"
+                               for triplet in (an_cfg.get("angle_triplets") or []))
+            try:
+                for name in sorted(rdf_names):
+                    pair = name.removeprefix("rdf.")
+                    symbols = pair.split("-")
+                    if pair != "total" and (len(symbols) != 2 or any(
+                            symbol not in atomic_numbers for symbol in symbols)):
+                        raise ValueError(
+                            f"Unknown RDF descriptor '{name}'; expected rdf.total "
+                            "or rdf.Element-Element")
+                    result = sa.rdf(
+                        pair=None if pair == "total" else pair,
+                        rmax=an_cfg.get("rmax"), sigma=float(smearing),
+                        confidence=convergence_confidence, n_bootstrap=0)
+                    convergence_descriptors[name] = result["uncertainty"]
+                for name in sorted(angle_names):
+                    triplet = name.removeprefix("angle_distribution.")
+                    symbols = triplet.split("-")
+                    if len(symbols) != 3 or any(
+                            symbol not in atomic_numbers for symbol in symbols):
+                        raise ValueError(
+                            f"Unknown angle descriptor '{name}'; expected "
+                            "angle_distribution.Element-Element-Element")
+                    distributions = sa.angle_distribution(
+                        triplet, confidence=convergence_confidence, n_bootstrap=0)
+                    if triplet in distributions:
+                        convergence_descriptors[name] = distributions[triplet]["uncertainty"]
+                convergence = sa.convergence_report(
+                    tolerances, descriptors=convergence_descriptors,
+                    confidence=convergence_confidence, max_structures=convergence_max)
+            except (ValueError, TypeError) as exc:
+                print(f"Error: convergence analysis: {exc}")
+                sys.exit(1)
+            convergence_text = format_convergence_report(convergence)
+            print(convergence_text)
+            if report_path:
+                with open(report_path, "a") as handle:
+                    handle.write("\n" + convergence_text + "\n")
+            if plot_dir:
+                save_convergence_report(
+                    convergence, plot_dir, dpi=plot_kwargs.get("dpi", 300),
+                    save_pdf=plot_kwargs.get("save_pdf", False))
+
         # Validation against literature reference YAML
         ref_path = args.reference or an_cfg.get("reference")
         if ref_path:
@@ -1637,19 +2029,12 @@ def main():
                 with open(report_path, "a") as rf:
                     rf.write("\n" + v_text + "\n")
 
-        if an_cfg.get("energy_ranking", False):
-            er = sa.energy_ranking()
-            if "error" not in er:
-                print(f"\n  Energy ranking:")
-                print(f"    Best: {er['best_energy']:.4f} eV/atom")
-                print(f"    Worst: {er['worst_energy']:.4f} eV/atom")
-                print(f"    Spread: {er['spread']:.4f} eV/atom")
-
         return
 
     # ── Random generation mode ────────────────────────────────────────────────
     if args.random_gen:
-        from .pipeline.random_gen import batch_random
+        from .pipeline.random_gen import _batch_random_unlocked
+        from .utils.run_lock import run_lock
         from .utils import get_calculator
 
         # Read random_gen block from YAML config (if present)
@@ -1750,55 +2135,83 @@ def main():
         if not do_relax and "relax" in rg_cfg:
             do_relax = rg_cfg["relax"]
 
+        # The merged opt block already gives explicit CLI flags precedence
+        # over YAML. Resolve once so both relaxation engines use the same
+        # settings, retaining the random-gen defaults for omitted values.
+        opt_cfg = override.get("opt", {}) or {}
+        fmax = opt_cfg.get("fmax", 0.05)
+        max_relax_steps = opt_cfg.get("max_steps", args.opt_steps)
+        optimizer = opt_cfg.get("optimizer", args.optimizer)
+
         use_torchsim = do_relax and override.get("engine", "ase") == "torchsim"
-        calc = None
-        if do_relax and not use_torchsim:
-            calc = get_calculator(
-                **_classical_kwargs(override),
-                model=override.get("model", args.model),
-                device=override.get("device", args.device),
-                model_path=override.get("model_path", args.model_path),
-                default_dtype=override.get("default_dtype", args.default_dtype),
+        relax_settings = None
+        if do_relax:
+            relax_settings = {
+                "model": override.get("model", args.model),
+                "model_path": override.get("model_path", args.model_path),
+                "device": override.get("device", args.device),
+                "default_dtype": override.get("default_dtype", args.default_dtype),
+                "classical_params": override.get("classical_params"),
+                "engine": "torchsim" if use_torchsim else "ase",
+            }
+            if use_torchsim:
+                relax_settings["torchsim"] = {
+                    "pressure_tol_gpa": opt_cfg.get("pressure_tol_gpa", 0.02),
+                    "output_format": opt_cfg.get("output_format", "xyz"),
+                    "batch_size": args.batch_size or opt_cfg.get("batch_size") or "auto",
+                }
 
+        # Placement and the optional separate torch-sim phase share ownership
+        # of the whole output tree, including resume metadata validation.
+        with run_lock(args.work_dir):
+            calc = None
+            if do_relax and not use_torchsim:
+                calc = get_calculator(
+                    **_classical_kwargs(override),
+                    model=override.get("model", args.model),
+                    device=override.get("device", args.device),
+                    model_path=override.get("model_path", args.model_path),
+                    default_dtype=override.get("default_dtype", args.default_dtype),
+                )
+
+            files = _batch_random_unlocked(
+                composition=composition,
+                n_structures=n_structures,
+                output_dir=args.work_dir,
+                output_format=output_format,
+                relax=do_relax and not use_torchsim,
+                calc=calc,
+                resume_settings=relax_settings,
+                safety=override.get("safety"),
+                repulsive_core=override.get("repulsive_core"),
+                fmax=fmax,
+                max_relax_steps=max_relax_steps,
+                optimizer=optimizer,
+                cell_filter=cell_filter,
+                target_density=target_density,
+                density_scale=density_scale,
+                minsep=minsep,
+                max_attempts_per_atom=args.max_attempts,
+                target_cn=target_cn,
+                dmax=dmax_dict,
+                cn_tolerance=cn_tolerance,
+                dmax_factor=args.dmax_factor,
+                repair_iters=args.repair_iters,
+                retry_mode=args.retry_mode,
+                indices=args.indices,
+                seed=(args.seed if args.seed is not None
+                      else rg_cfg.get("seed", override.get("seed"))),
+                resume=args.resume,
             )
-
-        files = batch_random(
-            composition=composition,
-            n_structures=n_structures,
-            output_dir=args.work_dir,
-            output_format=output_format,
-            relax=do_relax and not use_torchsim,
-            calc=calc,
-            fmax=(args.fmax if _typed("-f", "--fmax")
-                  else (override.get("opt", {}) or {}).get("fmax", 0.05)),
-            max_relax_steps=args.opt_steps,
-            optimizer=args.optimizer,
-            cell_filter=cell_filter,
-            target_density=target_density,
-            density_scale=density_scale,
-            minsep=minsep,
-            max_attempts_per_atom=args.max_attempts,
-            target_cn=target_cn,
-            dmax=dmax_dict,
-            cn_tolerance=cn_tolerance,
-            dmax_factor=args.dmax_factor,
-            repair_iters=args.repair_iters,
-            retry_mode=args.retry_mode,
-            indices=args.indices,
-            seed=(args.seed if args.seed is not None
-                  else rg_cfg.get("seed", override.get("seed"))),
-            resume=args.resume,
-        )
-        if use_torchsim:
-            from .pipeline.opt_cell import batch_optimize
-            batch_optimize(input_dir=os.path.join(args.work_dir, "random_initial"),
-                           output_dir=os.path.join(args.work_dir, "random_opt"),
-                           cfg_override=override, calc=None, engine="torchsim",
-                           fmax=(args.fmax if _typed("-f", "--fmax")
-                                 else (override.get("opt", {}) or {}).get("fmax", 0.05)),
-                           max_steps=args.opt_steps, cell_filter=cell_filter,
-                           optimizer=args.optimizer, resume=args.resume,
-                           batch_size=(int(args.batch_size) if args.batch_size and str(args.batch_size).isdigit() else args.batch_size), indices=args.indices)
+            if use_torchsim:
+                from .pipeline.opt_cell import batch_optimize
+                batch_optimize(input_dir=os.path.join(args.work_dir, "random_initial"),
+                               output_dir=os.path.join(args.work_dir, "random_opt"),
+                               cfg_override=override, calc=None, engine="torchsim",
+                               fmax=fmax,
+                               max_steps=max_relax_steps, cell_filter=cell_filter,
+                               optimizer=optimizer, resume=args.resume,
+                               batch_size=(int(args.batch_size) if args.batch_size and str(args.batch_size).isdigit() else args.batch_size), indices=args.indices)
         return
 
     # ── Batch optimisation mode ──────────────────────────────────────────────
@@ -1853,30 +2266,37 @@ def main():
 
         # Polymorphic input: if --snapshot-dir is a single trajectory file
         # (e.g. shared/stage4_eq.xyz from a Stage 4 run), extract --n-runs
-        # uniformly-spaced frames into a 'snapshots_extracted/' subdir of
+        # selected frames into a 'snapshots_extracted/' subdir of
         # the work directory and use that as the snapshot source.
         # Putting the extracted dir inside work_dir avoids race conditions
         # when several array tasks point at files in the same source dir.
+        extracted_files = None
         if os.path.isfile(snap_source):
             from .utils import extract_snapshots
             os.makedirs(args.work_dir, exist_ok=True)
             extracted_dir = os.path.join(args.work_dir, "snapshots_extracted")
             print(f"[batch-quench] '{snap_source}' is a file — extracting "
-                  f"{args.n_runs} uniform snapshots to {extracted_dir}/")
-            extract_snapshots(snap_source, n_snapshots=args.n_runs,
-                              select=args.select, output_dir=extracted_dir,
-                              burn_in_frames=args.burn_in_frames)
+                  f"up to {args.n_runs} snapshots to {extracted_dir}/")
+            extracted_files = extract_snapshots(
+                snap_source, n_snapshots=args.n_runs, output_dir=extracted_dir,
+                **_snapshot_sampling_kwargs(
+                    args, override,
+                    report_path=os.path.join(args.work_dir, "snapshot_sampling.json"),
+                    quench_dir=args.work_dir))
             snap_source = extracted_dir
+        elif args.select == "decorrelated":
+            raise ValueError("--select decorrelated requires a trajectory file as --snapshot-dir.")
 
         # Accept any ASE-readable structure format. extxyz/xyz are the
         # original use case (snapshots from MD trajectory); vasp/cif/POSCAR
         # let users feed in pre-relaxed structures from --random-gen or DFT.
-        snap_files: list = []
-        for pattern in ("*.xyz", "*.extxyz", "*.vasp", "*.cif", "POSCAR*"):
-            snap_files = sorted(glob.glob(
-                os.path.join(snap_source, pattern)))
-            if snap_files:
-                break
+        snap_files: list = extracted_files or []
+        if extracted_files is None:
+            for pattern in ("*.xyz", "*.extxyz", "*.vasp", "*.cif", "POSCAR*"):
+                snap_files = sorted(glob.glob(
+                    os.path.join(snap_source, pattern)))
+                if snap_files:
+                    break
         if not snap_files:
             from .pipeline.random_gen import random_gen_dir_hint
             print(f"Error: no snapshot files found in {snap_source}/ "
@@ -1898,7 +2318,7 @@ def main():
         batch_quench.run(
             snapshot_files=snap_files,
             n_runs=args.n_runs,
-            select=args.select,
+            select="uniform" if extracted_files is not None else (args.select or "uniform"),
             cfg_override=override,
             work_dir=args.work_dir,
             stages=args.batch_stages,

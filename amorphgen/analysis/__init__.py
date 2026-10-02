@@ -42,8 +42,19 @@ Usage
 """
 
 from .analyser import StructureAnalyser
+from .convergence import convergence_report
+from .convergence_output import format_convergence_report, save_convergence_report
 from .energy import rank_from_log, format_log_ranking
+from .oxygen import compute_oxygen_speciation
+from .bond_order import compute_bond_order
+from .melt_memory import compute_melt_memory, format_melt_memory
+from .voids import compute_void_distribution
+from .elasticity import compute_elastic_moduli
+from .vibrations import compute_vibrational_dos
 from .validate import validate_against_reference, format_validation_report
+from .experiment import load_experiment, compare_experiment, format_experiment_report
+from .xrd import compute_xrd_pattern
+from .scattering_output import save_experiment_comparison, save_xrd_pattern
 from .comparison_plots import (
     EnsembleSpec,
     compare_ensembles,
@@ -55,10 +66,26 @@ from .comparison_plots import (
 
 __all__ = [
     "StructureAnalyser",
+    "convergence_report",
+    "format_convergence_report",
+    "save_convergence_report",
+    "compute_oxygen_speciation",
+    "compute_bond_order",
+    "compute_melt_memory",
+    "format_melt_memory",
+    "compute_void_distribution",
+    "compute_elastic_moduli",
+    "compute_vibrational_dos",
     "rank_from_log",
     "format_log_ranking",
     "validate_against_reference",
     "format_validation_report",
+    "load_experiment",
+    "compare_experiment",
+    "format_experiment_report",
+    "save_experiment_comparison",
+    "compute_xrd_pattern",
+    "save_xrd_pattern",
     "EnsembleSpec",
     "compare_ensembles",
     "plot_partial_rdf",

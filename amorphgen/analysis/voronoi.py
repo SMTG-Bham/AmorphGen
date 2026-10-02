@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 from collections import Counter
+from .uncertainty import summarize_structures
 
 
 def compute_voronoi(atoms_list, element=None):
@@ -15,8 +16,12 @@ def compute_voronoi(atoms_list, element=None):
     from scipy.spatial import Voronoi as SciVoronoi
 
     all_indices = []
+    per_structure = []
 
     for atoms in atoms_list:
+        frame_indices = []
+        per_structure.append({"indices": frame_indices, "mean_faces": None,
+                              "tessellation_succeeded": False})
         syms = atoms.get_chemical_symbols()
         n = len(atoms)
         pos = atoms.get_positions()
@@ -41,6 +46,7 @@ def compute_voronoi(atoms_list, element=None):
 
         central_start = 13 * n
         central_end = 14 * n
+        per_structure[-1]["tessellation_succeeded"] = True
 
         for atom_idx in range(central_start, central_end):
             real_idx = atom_idx - central_start
@@ -64,6 +70,9 @@ def compute_voronoi(atoms_list, element=None):
 
             idx_tuple = (n_faces[3], n_faces[4], n_faces[5], n_faces[6])
             all_indices.append(idx_tuple)
+            frame_indices.append(idx_tuple)
+        if frame_indices:
+            per_structure[-1]["mean_faces"] = float(np.mean([sum(i) for i in frame_indices]))
 
     distribution = Counter(all_indices)
     total = len(all_indices)
@@ -72,10 +81,24 @@ def compute_voronoi(atoms_list, element=None):
     top = distribution.most_common(10)
     top_formatted = [(idx, count, count / total * 100) for idx, count in top]
 
+    prevalence = {idx: summarize_structures([
+        float(idx in frame["indices"]) if frame["tessellation_succeeded"] else None
+        for frame in per_structure]) for idx in distribution}
     return {
         "indices": all_indices,
         "distribution": dict(distribution),
         "top_10": top_formatted,
         "mean_faces": float(mean_faces),
         "total_atoms": total,
+        "per_structure": per_structure,
+        "fraction_of_sites": {idx: count / total for idx, count in distribution.items()},
+        "fraction_of_structures": {idx: summary["mean"] for idx, summary in prevalence.items()},
+        "fraction_of_structures_definition": "successfully tessellated structures with at least one such Voronoi site",
+        "uncertainty": {
+            "mean_faces": summarize_structures([frame["mean_faces"] for frame in per_structure]),
+            "fraction_of_sites": {idx: summarize_structures([
+                frame["indices"].count(idx) / len(frame["indices"]) if frame["indices"] else None
+                for frame in per_structure]) for idx in distribution},
+            "fraction_of_structures": prevalence,
+        },
     }

@@ -1,0 +1,44 @@
+# Portable placement -> per-task relaxation -> aggregate analysis workflow.
+# amorphgen-slurm examples/slurm_workflow.yaml --output-dir jobs
+# bash jobs/submit.sh --account=your-project
+version: 1
+profile: generic  # Use --profile bluebear for the bundled module/QoS defaults.
+root: ..         # Paths are relative to this YAML file; here, the repository.
+resources:
+  time: '02:00:00'
+  cpus-per-task: 4
+  mem: 16G
+# Activate your installed environment before generating/submitting, or set:
+# environment:
+#   venv: /path/to/amorphgen-venv
+#   modules: [Python/3.12]
+checkpoint:
+  signal_seconds: 120
+  requeue: false  # Set true only if your site allows user scontrol requeue.
+jobs:
+  - name: generate
+    array: '0-3%2'
+    work_dir: 'slurm_results/task_{task_id}'
+    commands:
+      - [amorphgen, --random-gen, --composition, 'SiO2*16', -n, '5',
+         --seed, '{task_id}', -o, '{work_dir}/gen', --resume]
+  - name: relax
+    array: '0-3%2'
+    needs: [generate]
+    dependency: aftercorr
+    work_dir: 'slurm_results/task_{task_id}'
+    resources:
+      gres: 'gpu:1'
+      mem: 32G
+    commands:
+      - [amorphgen, --batch-opt, --input-dir, '{work_dir}/gen/random_initial',
+         -o, '{work_dir}/opt', --model, mace-mpa-0, --device, cuda, --resume]
+  - name: analyse
+    needs: [relax]  # afterok waits for every task in the upstream array.
+    work_dir: slurm_results/analysis
+    commands:
+      # Prefix each copied filename with its task directory to avoid collisions.
+      - [python, -c, "from pathlib import Path; import shutil,sys; root=Path(sys.argv[1]); dest=Path(sys.argv[2]); dest.mkdir(parents=True,exist_ok=True); [shutil.copy2(p,dest / (p.parent.parent.name + '_' + p.name)) for p in sorted(root.glob('task_*/opt/*_opt.xyz'))]",
+         '{root}/slurm_results', '{work_dir}/final']
+      - [amorphgen, --analyse, --input-dir, '{work_dir}/final',
+         --save-report, '{work_dir}/report.txt']

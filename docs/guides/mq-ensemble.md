@@ -1,14 +1,14 @@
 # MQ-ensemble workflow
 
-Generate **N amorphous structures from a single crystalline input** with one CLI command. This mode shares the initial melt preparation, then quenches selected snapshots separately.
+Generate **up to N amorphous structures from a single crystalline input** with one CLI command. This mode shares the initial melt preparation, then quenches selected snapshots separately.
 
 ## Concept
 
 ```text
-Crystalline supercell  →  shared stages 1-4  →  extract N snapshots  →  N × stages 5-7  →  N amorphous structures
+Crystalline supercell  →  shared stages 1-4  →  select up to N snapshots  →  separate stages 5-7  →  amorphous ensemble
 ```
 
-The key efficiency win: **stages 1-4 (opt + premelt + heat + high-T equilibration) run only once** on the shared trajectory. Snapshots are selected from the stage-4 trajectory and quenched separately. Uniform spacing does not guarantee statistical independence: discard unequilibrated frames with `--burn-in-frames` and choose spacing using the liquid's decorrelation time.
+The key efficiency win: **stages 1-4 (opt + premelt + heat + high-T equilibration) run only once** on the shared trajectory. By default, snapshot selection discards an initial burn-in and chooses spacing from scalar autocorrelation and atomic diffusion in the stage-4 trajectory. The sampling report estimates the effective number of independent snapshots; this remains a diagnostic, not proof of liquid equilibration or independence of the final glasses.
 
 ## Single-command CLI: `--mq-ensemble`
 
@@ -21,16 +21,19 @@ amorphgen GaO.xyz --mq-ensemble --n-structures 20 \
 That's the entire workflow. Internally:
 
 1. **Stages 1-4** run once on `GaO.xyz`, writing `ga2o3_mq/shared/` (incl. `stage4_eq_traj.xyz`).
-2. **Up to N=20** uniformly spaced snapshots are extracted from the stage-4 trajectory into `ga2o3_mq/snapshots/`.
+2. **Up to N=20** snapshots are extracted from the stage-4 trajectory into `ga2o3_mq/snapshots/`, using the default `--select decorrelated` and adaptive burn-in. A short or slowly diffusing trajectory can yield fewer snapshots.
+   The initial crystal, melt endpoints and snapshots are compared in the automatic `melt_memory` report before quenching.
 3. **Stages 5-6-7** run independently on each snapshot, output to `ga2o3_mq/quench_runs/run_NNNN/`.
 4. **Final amorphous structures** are collected to `ga2o3_mq/final/mq_NNNN.<format>`.
 
-`--resume` skips completed simulation work and resumes interrupted MD from saved frames. Snapshot extraction and final collection are repeated. Keep the inputs, protocol and snapshot selection unchanged when resuming; use a new output directory for a different ensemble.
+`--resume` skips completed simulation work and resumes interrupted MD from saved frames. Snapshot extraction and final collection are repeated after checking that selection is compatible with any existing quench outputs. Keep the inputs, protocol and snapshot selection unchanged when resuming; use a new output directory for a different ensemble.
 
 ## Output layout
 
 ```text
 ga2o3_mq/
+├── snapshot_sampling.{json,txt} # burn-in, spacing, selected indices and effective sample count
+├── melt_memory.{json,csv,txt}     # initial crystal order retained at melt endpoints/snapshots
 ├── shared/
 │   ├── stage1_opt.xyz
 │   ├── stage2_eq.xyz
@@ -66,7 +69,150 @@ For a single input, the ASE engine writes the stage outputs directly inside
 `--mq-ensemble` uses the ASE engine; batched torch-sim MD is available in
 `--hybrid-ensemble`.
 
-### HPC job-array tip
+## Burn-in, spacing and effective snapshot count
+
+`--mq-ensemble` defaults to `--select decorrelated`. The requested
+`--n-structures` is an upper bound, not a target that forces more closely
+spaced frames into the ensemble. Selection uses the saved stage-4 frames:
+
+1. **Burn-in.** If `--burn-in-frames` is omitted, discard at least the first
+   10% of frames (at least one when multiple frames exist), then compare
+   candidate burn-in points through the first half of the trajectory. Choose
+   the retained region with the largest conservative effective sample count
+   from potential energy per atom and fluctuating volume. An explicit count,
+   including `--burn-in-frames 0`, overrides this choice.
+2. **Scalar correlations.** Estimate autocorrelation decay and statistical
+   inefficiency from the available energy and volume series after burn-in.
+   Integrate the initial positive autocorrelation sequence to obtain $g$.
+   Require $|C(t)|\leq0.1$ for at least $\max(3,\lceil g/2\rceil)$ saved
+   lags, and a spacing of at least $\lceil g\rceil$ frames. A negative
+   autocorrelation lobe alone does not establish decay.
+3. **Diffusion.** Compute mean-squared displacements (MSD), averaged over
+   time origins, separately for each element. Unwrap periodic motion between
+   saved frames and remove whole-system drift and affine cell strain. The
+   positional correlation proxy is
+   $C_s(t)=\exp[-\mathrm{MSD}_s(t)/d^2]$. Require this proxy to fall to 0.1
+   or less for every species, so a mobile species cannot hide a slow one.
+   The distance $d$ defaults to the median nearest-neighbour distance in the
+   final frame; set `--decorrelation-distance` to override it in Å.
+4. **Selection.** Use spacing that satisfies both the scalar and diffusion
+   criteria. If decorrelation is unresolved within the available history,
+   retain only the final frame and report the unresolved diagnostics.
+
+`snapshot_sampling.json` and `snapshot_sampling.txt` record the selected
+trajectory indices, burn-in, frame interval and chosen spacing, scalar
+autocorrelation diagnostics, per-species MSD and diffusion estimates, and
+the estimated effective independent snapshot count. The latter uses the
+slowest scalar or diffusion correlation proxy and never exceeds the number
+of selected snapshots. Missing observables and unresolved estimates produce
+warnings rather than evidence of independence. Diffusion coefficients are
+late-lag linear-fit diagnostics; spacing uses the measured MSD without
+extrapolating a diffusion coefficient beyond the available trajectory.
+Time-based quantities depend
+on knowing the saved-frame interval. The CLI assumes one saved frame per
+100 MD steps and uses `eq_high.timestep` from the supplied configuration
+(0.5 fs by default). When extracting separately, pass the same `--config`
+used to create the trajectory. For external trajectories with another save
+cadence, the Python sampling API accepts `frame_stride` and `timestep_fs`;
+otherwise reported times and diffusion coefficients will have the wrong scale.
+
+For the actual selected indices $t_i$, each available correlation gives
+$N_{\mathrm{eff}}=N^2/[N+2\sum_{i<j}C(|t_i-t_j|)]$; the report takes the
+smallest count across observables and species. Scalar negative correlations
+are set to zero, but later positive peaks are retained. MSD and scalar
+correlations use lags up to half the retained trajectory; beyond this window,
+the last measured correlation is held constant rather than extrapolating
+unobserved relaxation. An unresolved adaptive selection retains one frame
+and reports an effective count of one, with its unresolved status.
+
+This is an operational sampling heuristic. The burn-in and statistical
+inefficiency approach follows the general effective-sample-count idea
+described in the [PyMBAR timeseries documentation](https://pymbar.readthedocs.io/en/latest/timeseries.html),
+but does not call or exactly reproduce its algorithm. Periodic unwrapping,
+drift correction and the relation between MSD and diffusion are discussed in
+the [LAMMPS MSD documentation](https://docs.lammps.org/latest/compute_msd.html).
+Neither scalar decorrelation nor the displacement proxy tests every relevant
+structural mode. Save frames frequently enough to resolve periodic crossings;
+unwrapping cannot reconstruct multiple unseen crossings between saved frames.
+
+The default stage-4 hold remains **10 ps** (20000 steps at 0.5 fs), and is not
+extended automatically. Inspect the sampling and melt-memory reports, and
+increase `eq_high.steps` when the available liquid trajectory does not support
+the desired ensemble size. Use a new output directory when changing the
+protocol or selection of an existing ensemble.
+
+To reproduce evenly spaced extraction, explicitly use `--select uniform`;
+`--select last` takes the last available frames. These choices default to
+zero burn-in unless `--burn-in-frames` is supplied. They remain the available
+legacy selection modes; uniform is still the default for standalone
+`--extract-snapshots` and `--batch-quench`, where `--select decorrelated`
+opts into the trajectory-based method.
+
+## How much starting crystal survives the melt?
+
+Every `--mq-ensemble` run writes `melt_memory.txt`, `melt_memory.csv` and
+`melt_memory.json` in its work directory, before the per-snapshot quenches.
+The report compares the original input with the end of stage 3
+(`shared/stage3_melted.xyz`), the end of stage 4 (`shared/stage4_eq.xyz`),
+and every extracted high-temperature snapshot. Resume runs regenerate this
+report from the input and available checkpoints.
+
+The order criterion is the same Lechner–Dellago $\bar q_6$ descriptor used by
+`--analyse --bond-order`: an atom must meet the `--qbar6-threshold` (default
+0.3) and `--order-min-neighbors` (default 4). The `--order-cutoff` (falling
+back to `--cutoff` when omitted) is resolved
+once on the **original input**, then kept fixed for all comparisons while
+using each frame's cell and periodic boundaries. Choose `--order-cutoff` and the
+order threshold against crystalline and liquid references for your material;
+the defaults are not a validated GeTe classifier.
+
+The report contains the total ordered fraction, largest ordered cluster and
+the surviving fraction of the initially ordered atoms. If $O_0$ denotes the
+ordered atom indices in the original input and $O_t$ those at a checkpoint,
+the survival diagnostic is
+
+$$f_{\mathrm{surviving}}(t)=\frac{|O_0\cap O_t|}{|O_0|}.$$
+
+Its denominator is the **initially ordered population**, not all atoms.
+For example, if 80 of 100 input atoms meet the criterion and 20 of those
+remain ordered at the end of heating, survival is 25%, even if additional
+atoms become ordered. Cluster sizes count unique atoms in the cell and
+include connections through periodic boundaries.
+
+This measures order at the sampled endpoints. It cannot distinguish
+continuous survival from melting followed by recrystallisation, establish
+retention of a specific lattice, or prove liquid equilibration. High retained
+order is a reason to inspect the melt before treating its quenches as
+independent amorphous samples. Check final structures separately for ordering
+that appears during quenching.
+
+Atom identities follow the input's atom indices. The report checks atom
+count and the full element sequence; missing checkpoints, incompatible
+structures or an input with no ordered atoms yield an explicit unavailable
+survival value (`null` in JSON), rather than zero survival. The pipeline
+preserves atom order; rearranging same-species indices outside the pipeline
+cannot be detected from the element sequence alone. JSON includes the
+criterion, resolved cutoffs and per-checkpoint data: `initial_ordered_count`,
+`retained_ordered_count`, `survival_fraction`, `lost_initial_order_count` and
+`newly_ordered_count`. Missing checkpoint files are recorded as unavailable;
+a trajectory is not silently substituted for an absent endpoint.
+
+The options can also be supplied in an `analysis:` block in the MQ YAML:
+
+```yaml
+analysis:
+  cutoff: auto-rdf
+  order_cutoff: 3.5   # illustrative ideal-rocksalt GeTe shell; calibrate for your system
+  qbar6_threshold: 0.3
+  order_min_neighbors: 4
+```
+
+The report is automatic for `--mq-ensemble`; `analysis.bond_order: true` is
+only needed when requesting the descriptor in a separate `--analyse` run.
+See {doc}`analysis` for the equations, output conventions and calibration
+guidance.
+
+## HPC job-array tip
 
 When splitting the per-snapshot quenches across SLURM array tasks, give **each
 task its own output directory**. A single-input `--batch-quench` writes directly
@@ -183,11 +329,11 @@ amorphgen GaO.xyz --config mq.yaml --stages 1 2 3 4 --resume -o shared/
 
 # Step 2: extract N snapshots and quench each
 amorphgen --batch-quench --snapshot-dir shared/stage4_eq_traj.xyz \
-    --n-runs 20 --batch-stages 5 6 7 \
+    --n-runs 20 --select decorrelated --batch-stages 5 6 7 \
     --config mq.yaml --resume -o quench_runs/
 ```
 
-`--batch-quench` accepts a trajectory file directly (polymorphic `--snapshot-dir`), internally extracts N snapshots, then runs the per-snapshot stages. It produces the same per-run stage outputs, but does not collect a separate `final/` directory; that collection is part of `--mq-ensemble`.
+`--batch-quench` accepts a trajectory file directly (polymorphic `--snapshot-dir`), internally extracts up to N snapshots, then runs the per-snapshot stages. Set `--select decorrelated` to match the MQ-ensemble selection default. It produces the same per-run stage outputs, but does not collect a separate `final/` directory; that collection is part of `--mq-ensemble`.
 
 ## HPC / Slurm split (best for parallelism)
 
@@ -196,20 +342,28 @@ For a cluster with multiple GPUs, run the two halves as separate slurm jobs so t
 ```bash
 # Job 1: stages 1-4 (one shared trajectory)
 sbatch shared.slurm
-# Note the JOBID
 
-# Job 2: array of 20 quench tasks (concurrency depends on allocation)
-sbatch --dependency=afterok:<JOBID> quench_array.slurm
+# After job 1 completes: one array task per extracted snapshot.
+# Example if eight snapshots were selected:
+sbatch --array=0-7 quench_array.slurm
 ```
 
 `shared.slurm` and `quench_array.slurm` are your own job scripts; {doc}`hpc` has a SLURM header to start from. Job 1 runs step 1 of the two-step workflow above, then extracts the snapshots:
 
 ```bash
 amorphgen GaO.xyz --config mq.yaml --stages 1 2 3 4 --resume -o shared/
-amorphgen --extract-snapshots shared/stage4_eq_traj.xyz -n 20 -o snapshots/
+amorphgen --extract-snapshots shared/stage4_eq_traj.xyz \
+    --config mq.yaml -n 20 --select decorrelated -o snapshots/
 ```
 
-Job 2 is an array (`#SBATCH --array=0-19`) whose tasks each set `TASK=$(printf "%04d" $SLURM_ARRAY_TASK_ID)` and run the per-task command from the job-array tip above. This is the same dispatch as `--mq-ensemble`, split for HPC parallelism; `examples/run_quench_array_bluebear.slurm` is a complete job 2 for one cluster.
+Size job 2's array from the **actual number of extracted snapshots**, which
+may be less than 20. For example, `#SBATCH --array=0-7` runs eight snapshots.
+Each task sets `TASK=$(printf "%04d" $SLURM_ARRAY_TASK_ID)` and runs the
+per-task command from the job-array tip above. To automate submission,
+arrange for job 1 to submit the correctly sized array after extraction.
+This is the same dispatch as `--mq-ensemble`, split for HPC
+parallelism; `examples/run_quench_array_bluebear.slurm` is a job-2 template
+for one cluster; adjust its array range to the extracted count.
 
 | Pattern | Execution | Best for |
 |---------|-----------|----------|
@@ -227,6 +381,13 @@ Measure one representative run to estimate wall time; system size, model, protoc
 | Mid quench-runs | Skips completed runs (looks for `final_amorphous.xyz`), resumes interrupted MD from saved trajectory frames, and restarts final optimisation. |
 | After all done | Skips completed simulation work and rebuilds the snapshot and final collections. |
 
+When quench outputs already exist, the saved sampling report protects the
+mapping between each run and its source snapshot: incompatible selection
+changes are rejected. A legacy run without a sampling report cannot safely
+resume with adaptive selection. Use its original explicit `--select uniform`
+or `--select last` settings, or start a new output directory for decorrelated
+sampling.
+
 ## When to use `--mq-ensemble` vs the alternatives
 
 | Use case | Recommended mode |
@@ -242,9 +403,14 @@ To compare structural metrics with reference ranges, pair `--mq-ensemble` with a
 
 ```bash
 amorphgen --analyse --input-dir ga2o3_mq/final/ \
-    --cutoff auto-rdf --per-structure \
+    --cutoff auto-rdf --per-structure --bond-order \
     --reference reference_a_Ga2O3.yaml \
     --save-report mq_report.txt --save-plot mq_plots/ --save-pdf
 ```
 
-This writes structural analysis (RDF, CN, bond angles) and a table comparing available metrics with the supplied ranges. Check the provenance of each range and use additional validation appropriate to the intended application. See {doc}`yaml-config` for the reference YAML format.
+This writes structural analysis (RDF, CN, bond angles, $q_6$/$\bar q_6$ and
+ordered clusters) and a table comparing available reference-supported metrics
+with the supplied ranges. Bond order is a separate diagnostic and is not
+scored by the reference YAML. Check the provenance of each range and use
+additional validation appropriate to the intended application. See
+{doc}`yaml-config` for the reference YAML format.

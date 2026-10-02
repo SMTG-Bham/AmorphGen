@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Added
+
+- Declared per-descriptor precision tolerances and ensemble convergence
+  reports via `--convergence`, repeatable `--tolerance NAME=VALUE`, YAML and
+  Python. Order-independent Student-t half-width planning curves, per-descriptor
+  and overall additional-structure estimates, and text/JSON/CSV/PNG/PDF exports
+  retain missing-data counts and forecast assumptions. Seeded void sampling
+  now assigns draws in a canonical geometry order so shuffled input structures
+  also preserve its convergence observations. Automatic neighbour cutoffs
+  likewise use a canonical order while per-structure output retains input order.
+- `--mq-ensemble` now defaults to adaptive burn-in and snapshot spacing based
+  on energy/volume autocorrelation and the slowest species' diffusion.
+  `snapshot_sampling.{json,txt}` reports the selected frames and estimated
+  effective independent count; short holds can produce fewer snapshots than
+  requested. Resume checks preserve the snapshot-to-quench mapping. Explicit
+  `--select uniform` / `last` retain legacy selection; standalone extraction
+  and batch trajectories can opt in with `--select decorrelated`.
+- Opt-in void distributions, bridging/non-bridging oxygen speciation,
+  stress-derived elastic tensors and Voigt/Reuss/Hill moduli, and harmonic
+  vibrational DOS through Python, CLI and YAML. Each supports per-structure
+  JSON, CSV and figure exports. Elasticity and VDOS use the selected live
+  ASE/MLIP calculator; geometric descriptors remain calculator-free.
+
 ### Fixed
 
 - Stage 3 preserves the input cell and bond lengths before heating. Cubic
@@ -18,9 +41,13 @@
   symlink and hardlink aliases, before writing any converted files.
 - Torch-sim rejects an invalid explicit `--model-path` instead of falling back
   to a foundation model.
-- Random generation resume refuses changes to recorded composition, output
-  format or relaxation mode, validates saved atom counts and elements, and
-  reports invalid metadata instead of silently accepting incompatible results.
+- Pipeline and random generation resume refuse changed settings before
+  modifying saved outputs, including seeds, density/placement parameters,
+  stage protocols, and model identities. Pipeline resume also checks input
+  contents, stage completion records and readable checkpoints. Old outputs
+  without complete settings provenance require a fresh directory. Exclusive
+  `.amorphgen.lock` files prevent concurrent writers and release ownership
+  automatically on exit or process termination.
 
 ## v1.0.0rc4 (2026-09-24)
 

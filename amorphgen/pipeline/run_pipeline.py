@@ -37,6 +37,9 @@ Resuming from a checkpoint
 import os
 import time
 import platform
+import sys
+import hashlib
+from copy import deepcopy
 from datetime import datetime
 
 from ase.io import read
@@ -44,6 +47,41 @@ from ase.io import read
 from . import opt_cell, melt_cell, equilibrate, quench, final_opt
 from ..utils import get_calculator, merge_config
 from ..configs import DEFAULT_CONFIG
+from .manifest import RunManifest, _json_value
+from ..utils.run_lock import run_lock
+
+
+def _calculator_parameters(calc, seen=None):
+    """Capture known calculator and wrapper parameters without runtime state."""
+    seen = set() if seen is None else seen
+    if id(calc) in seen:
+        return None
+    seen.add(id(calc))
+    parameters = {
+        key: _json_value(getattr(calc, key, None))
+        for key in ("parameters", "pair_params", "charges", "cutoff",
+                    "coulomb_method", "alpha", "coulomb", "repulsive_core_config")
+    }
+    base = getattr(calc, "base_calculator", None)
+    if base is not None:
+        parameters["base_calculator"] = _calculator_parameters(base, seen)
+    return parameters
+
+
+def _resume_config_value(value):
+    """Include identities of live reference calculators in nested settings."""
+    from ase.calculators.calculator import Calculator
+    from ..utils.run_provenance import calculator_provenance
+
+    if isinstance(value, dict):
+        return {str(k): _resume_config_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_resume_config_value(v) for v in value]
+    if isinstance(value, Calculator):
+        model = calculator_provenance({}, value, injected=True)["model"]
+        model.pop("hash_unavailable_reason", None)
+        return {"model": model, "parameters": _calculator_parameters(value)}
+    return _json_value(value)
 
 
 class MeltQuenchPipeline:
@@ -88,7 +126,7 @@ class MeltQuenchPipeline:
         7: "Final optimisation (amorphous)",
     }
 
-    # Checkpoint files written by each stage (checked in reverse order for resume)
+    # Default checkpoint files written by each stage.
     STAGE_CHECKPOINTS = {
         1: "stage1_opt.xyz",
         2: "stage2_eq.xyz",
@@ -117,7 +155,8 @@ class MeltQuenchPipeline:
         # filter guards where a stress tensor is required.
         self._injected_calc = calc
         self._calc      = calc
-        self._orig_dir  = os.getcwd()
+        self._calc_provenance = None
+        self._calc_config = None
         os.makedirs(work_dir, exist_ok=True)
 
         # Handle legacy "mace_model" key → "model"
@@ -134,7 +173,8 @@ class MeltQuenchPipeline:
         """
         if self._injected_calc is not None:
             return self._injected_calc
-        if self._calc is None or not self.share_calc:
+        calculator_config = self._calculator_config()
+        if self._calc is None or not self.share_calc or self._calc_config != calculator_config:
             from ..utils.common import resolve_device
             device = resolve_device(self.cfg.get("device", "cuda"))
 
@@ -148,11 +188,21 @@ class MeltQuenchPipeline:
                 default_dtype=self.cfg.get("default_dtype", "auto"),
                 **calc_kwargs,
             )
+            from ..utils.run_provenance import calculator_provenance
+            # Keep the identity of the weights actually loaded, even if the
+            # checkpoint file is replaced before this calculator is reused.
+            self._calc_provenance = calculator_provenance(self.cfg, self._calc)
+            self._calc_config = calculator_config
         return self._calc
+
+    def _calculator_config(self):
+        return _json_value({key: self.cfg.get(key) for key in (
+            "model", "model_path", "device", "default_dtype", "classical_params",
+        )})
 
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _find_resume_point(self, stages: list[int]) -> tuple[list[int], str]:
+    def _find_resume_point(self, stages: list[int], previous_stages=None) -> tuple[list[int], str]:
         """
         Scan work_dir for completed stage checkpoints and return the
         remaining stages and the input file to resume from.
@@ -172,20 +222,108 @@ class MeltQuenchPipeline:
         """
         resume_input = self.input_file
         remaining_stages = list(stages)
+        checkpoints = self._stage_checkpoints()
 
         # Walk stages in order; if a checkpoint exists, advance past it
         for s in stages:
-            checkpoint = self.STAGE_CHECKPOINTS.get(s)
+            if previous_stages is not None and previous_stages.get(s) not in ("completed", "skipped"):
+                break
+            checkpoint = checkpoints.get(s)
             if checkpoint is None:
                 break
             checkpoint_path = os.path.join(self.work_dir, checkpoint)
             if os.path.isfile(checkpoint_path):
+                # A truncated output is not a completed checkpoint.
+                try:
+                    read(checkpoint_path)
+                except Exception:
+                    break
                 resume_input = checkpoint_path
                 remaining_stages.remove(s)
             else:
                 break  # first missing checkpoint → start here
 
         return remaining_stages, resume_input
+
+    def _stage_checkpoints(self):
+        sections = {1: "opt", 2: "eq_premelt", 3: "melt", 4: "eq_high",
+                    5: "quench", 6: "eq_low", 7: "final_opt"}
+        checkpoints = {}
+        for stage, section in sections.items():
+            cfg = dict(self.cfg.get("opt", {})) if stage == 7 else {}
+            cfg.update(self.cfg.get(section, {}))
+            checkpoints[stage] = cfg.get("output_xyz", self.STAGE_CHECKPOINTS[stage])
+        return checkpoints
+
+    def _clear_stale_trajectory(self, stage):
+        """Reset fresh-stage frame files before recording the stage as started.
+
+        Stage setup can fail before its output writer truncates a trajectory.
+        Clearing here prevents that failure from adopting an earlier run's frames.
+        """
+        defaults = {2: ("eq_premelt", "stage2_eq_traj.xyz"),
+                    3: ("melt", "stage3_melt_traj.xyz"),
+                    4: ("eq_high", "stage4_eq_traj.xyz"),
+                    5: ("quench", "stage5_quench_traj.xyz"),
+                    6: ("eq_low", "stage6_eq_traj.xyz")}
+        if stage not in defaults:
+            return
+        section, default = defaults[stage]
+        paths = {self.cfg[section].get("traj_file", default)}
+        if stage in (3, 5):
+            paths.add("stage3_melt.xyz" if stage == 3 else "stage5_quench.xyz")
+        for path in paths:
+            if os.path.isfile(path):
+                os.unlink(path)
+
+    def _resume_settings(self, stages, input_file):
+        """Snapshot the requested protocol before any output can be reused."""
+        from ..utils.common import run_index_for
+        from ..utils.run_provenance import calculator_provenance
+
+        input_path = os.path.abspath(input_file)
+        digest = None
+        if os.path.isfile(input_path):
+            hasher = hashlib.sha256()
+            with open(input_path, "rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    hasher.update(chunk)
+            digest = hasher.hexdigest()
+        provenance = calculator_provenance(
+            self.cfg, self._injected_calc, injected=self._injected_calc is not None,
+        )
+        model = provenance["model"]
+        identity = {key: model[key] for key in (
+            "name", "path", "sha256", "hash_source", "calculator_class",
+        )}
+        # A shared calculator may still hold older weights after its file
+        # was replaced. Keep requested and loaded file identities separate.
+        requested_model = dict(identity)
+        if (self._injected_calc is None and self.share_calc
+                and self._calc_config == self._calculator_config()
+                and self._calc_provenance is not None):
+            loaded = self._calc_provenance["model"]
+            if loaded["hash_source"] == "file":
+                for key in ("name", "path", "sha256", "hash_source"):
+                    identity[key] = loaded[key]
+        if self._injected_calc is not None:
+            # ASE parameters cover classical/custom calculators that do not
+            # expose model weights. AmorphGen pair potentials keep their
+            # parameters as attributes rather than ASE's parameters dict.
+            identity["parameters"] = _calculator_parameters(self._injected_calc)
+        orig_dir = os.getcwd()
+        try:
+            os.chdir(self.work_dir)
+            seed_index = run_index_for(self.cfg)
+        finally:
+            os.chdir(orig_dir)
+        return {
+            "version": 1, "config": _resume_config_value(self.cfg),
+            "stages": list(stages), "seed_index": seed_index,
+            "input": {"path": input_path, "sha256": digest},
+            "calculator": identity,
+            "requested_model": requested_model,
+        }
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -204,8 +342,8 @@ class MeltQuenchPipeline:
             Override the input structure file (useful for resuming from a
             mid-pipeline checkpoint).
         resume : bool
-            If True, scan work_dir for completed stage checkpoints and
-            skip stages that already have output files.  Automatically
+            If True, verify the saved input and settings, then scan work_dir
+            for valid checkpoints of stages recorded as completed. Automatically
             determines which stage to resume from and which input file
             to use.
 
@@ -213,32 +351,85 @@ class MeltQuenchPipeline:
         -------
         ase.Atoms
             The final optimised amorphous structure.
+
+        Notes
+        -----
+        ``run_manifest.json`` records configuration, calculator provenance,
+        and stage outcomes before and during execution. Each accepted invocation adds
+        an attempt, retaining earlier attempts when resuming or rerunning.
         """
+        with run_lock(self.work_dir):
+            return self._run_locked(stages, input_file, resume)
+
+    def _run_locked(self, stages, input_file, resume):
+        from ..utils.run_provenance import calculator_provenance
+
         if stages is None:
             stages = [1, 2, 3, 4, 5, 6, 7]
+        stages = list(stages)
         if input_file is None:
             input_file = self.input_file
 
+        settings = self._resume_settings(stages, input_file)
+        manifest = RunManifest(self.work_dir, input_file, self.cfg,
+                               stages, self.STAGE_NAMES, resume, settings)
+        try:
+            manifest.attempt.update(calculator_provenance(
+                self.cfg, self._injected_calc,
+                injected=self._injected_calc is not None,
+            ))
+            manifest.attempt["seed_index"] = settings["seed_index"]
+            manifest.save()
+            atoms = self._run(stages, input_file, resume, manifest)
+        except BaseException as exc:
+            status = "interrupted" if isinstance(exc, (KeyboardInterrupt, SystemExit)) else "failed"
+            try:
+                manifest.finish(status, exc)
+            except Exception as write_error:
+                # Preserve the simulation failure if disk writes also fail.
+                print(f"Could not update {manifest.path}: {write_error}", file=sys.stderr)
+            raise
+        else:
+            manifest.finish("completed")
+            return atoms
+
+    def _run(self, stages, input_file, resume, manifest):
+        from ..utils.run_provenance import calculator_provenance
+
         if resume:
-            remaining, resume_input = self._find_resume_point(stages)
-            if not remaining:
+            remaining, resume_input = self._find_resume_point(stages, manifest.previous_stages)
+            skipped = [s for s in stages if s not in remaining]
+            checkpoints = self._stage_checkpoints()
+            manifest.skip_stages(skipped, checkpoints)
+            if not remaining and stages:
                 print(f"  All stages already completed in {self.work_dir}/")
                 final_checkpoint = os.path.join(
                     self.work_dir,
-                    self.STAGE_CHECKPOINTS[stages[-1]],
+                    checkpoints[stages[-1]],
                 )
+                manifest.attempt["input_file"] = os.path.abspath(final_checkpoint)
+                manifest.save()
                 return read(final_checkpoint)
             if remaining != stages:
-                skipped = [s for s in stages if s not in remaining]
                 print(f"  Resuming: skipping completed stages {skipped}")
                 print(f"  Starting from stage {remaining[0]} "
                       f"(input: {os.path.basename(resume_input)})")
                 input_file = resume_input
             stages = remaining
 
+        manifest.attempt["input_file"] = os.path.abspath(input_file)
+        manifest.save()
         atoms = read(input_file)
         calc = self._get_calc()
         atoms.calc = calc
+        if self._injected_calc is None:
+            provenance = deepcopy(self._calc_provenance)
+            if provenance is None:
+                provenance = calculator_provenance(self.cfg, calc)
+            provenance["precision"]["requested"] = self.cfg.get("default_dtype", "auto")
+            provenance["device"]["requested"] = self.cfg.get("device", "auto")
+            manifest.attempt.update(provenance)
+        manifest.save()
 
         model_name = self.cfg.get("model", "mace-mpa-0")
         model_path = self.cfg.get("model_path")
@@ -262,18 +453,25 @@ class MeltQuenchPipeline:
         print(f"  Output: {self.work_dir}/")
         print(f"{bar}\n")
 
+        orig_dir = os.getcwd()
         os.chdir(self.work_dir)
         t0 = time.time()
         stage_timings = []
 
         try:
             for s in stages:
+                from ..utils.preemption import stop_if_requested
+                stop_if_requested()
                 name = self.STAGE_NAMES.get(s, f"Stage {s}")
                 print(f"\n{'-' * 65}")
                 print(f"  Stage {s}: {name}")
                 print(f"{'-' * 65}\n")
 
                 t_stage = time.time()
+                stage_resume = resume and s == stages[0] and s in manifest.previous_stages
+                if not stage_resume:
+                    self._clear_stale_trajectory(s)
+                manifest.start_stage(s)
 
                 # MD stages get the resume flag for FRAME-level resume: an
                 # interrupted stage picks up from the last frame of its
@@ -284,31 +482,33 @@ class MeltQuenchPipeline:
                     atoms = opt_cell.run(atoms, self.cfg, calc)
                 elif s == 2:
                     atoms = equilibrate.run(atoms, self.cfg, calc,
-                                            stage="premelt", resume=resume)
+                                            stage="premelt", resume=stage_resume)
                 elif s == 3:
-                    atoms = melt_cell.run(atoms, self.cfg, calc, resume=resume)
+                    atoms = melt_cell.run(atoms, self.cfg, calc, resume=stage_resume)
                 elif s == 4:
                     atoms = equilibrate.run(atoms, self.cfg, calc,
-                                            stage="high", resume=resume)
+                                            stage="high", resume=stage_resume)
                 elif s == 5:
-                    atoms = quench.run(atoms, self.cfg, calc, resume=resume)
+                    atoms = quench.run(atoms, self.cfg, calc, resume=stage_resume)
                 elif s == 6:
                     atoms = equilibrate.run(atoms, self.cfg, calc,
-                                            stage="low", resume=resume)
+                                            stage="low", resume=stage_resume)
                 elif s == 7:
                     atoms = final_opt.run(atoms, self.cfg, calc)
                 else:
                     print(f"  WARNING: Unknown stage {s} - skipping.")
+                    manifest.finish_stage("skipped")
                     continue
 
                 dt = time.time() - t_stage
                 stage_timings.append((s, name, dt))
+                manifest.finish_stage()
                 d = compute_density_gcm3(atoms)
                 print(f"  [Stage {s} completed in {dt:.1f} s ({dt/60:.1f} min) "
                       f"| density={d:.2f} g/cm3]")
 
         finally:
-            os.chdir(self._orig_dir)
+            os.chdir(orig_dir)
 
         elapsed = time.time() - t0
 

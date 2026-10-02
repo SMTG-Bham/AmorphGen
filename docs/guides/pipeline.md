@@ -89,3 +89,60 @@ The input must be appropriate for the first requested stage; selecting stages 5â
 ## Customising parameters
 
 See the {doc}`/api/config` page for all available configuration keys.
+
+## Run manifest
+
+`MeltQuenchPipeline.run()` writes `run_manifest.json` in its output directory,
+including when invoked through the CLI's melt-and-quench pipeline. This is the
+machine-readable record alongside the existing `pipeline_summary.log`.
+It is created before parsing the input or loading the calculator, and updated
+atomically before and after each stage.
+
+The JSON has `schema_version: 1` and an `attempts` list. Each invocation appends
+an attempt, including a compatible resume that skips every stage. Earlier
+attempts keep their configuration, timings, and errors. Before appending an
+attempt, resume checks the merged configuration, stage selection, seed index,
+input path and contents, and calculator identity against saved `resume_settings`.
+Local model files are checked by their SHA-256 digest. Changed settings are
+reported by name, and the manifest and outputs are left unchanged. Use a new
+work directory for a different protocol. Older outputs without these saved
+settings cannot be resumed automatically. Later stages can be appended to the
+original stage sequence with the same configuration; existing stages cannot
+be removed or reordered during resume.
+
+Only readable checkpoints from stages recorded as completed in the current
+run are skipped; configured `output_xyz` filenames are honoured. The work
+directory is locked for the entire invocation using `.amorphgen.lock`.
+Another writer fails immediately. The OS releases ownership when the process
+exits, including after a crash; the empty lock file remains and should not be
+deleted. Its presence alone does not mean a run is active.
+
+Each attempt records:
+
+- `package_version`, Python version, platform, UTC start/end times, and elapsed seconds.
+- The merged `config`, base `seed`, and effective `seed_index`. MD streams are
+  derived from `(seed, stage, seed_index)`; a null seed means unseeded noise.
+- The actual `engine` (`ase` for this pipeline), plus requested and resolved
+  calculator `precision` and `device` where available.
+- `model` name, calculator class, local checkpoint path where applicable,
+  SHA-256 digest, and hash source.
+- Requested stages, original and selected input paths, the resume flag, and
+  each stage's status and timing. Checkpoint skips are recorded separately
+  from stages executed in the current attempt.
+- Attempt status (`running`, `completed`, `failed`, or `interrupted`) and the
+  exception type/message on failure. An unstarted stage remains `pending`.
+
+For local model files, `model.hash_source` is `file` and `model.sha256` hashes
+the checkpoint bytes. For foundation or injected models exposing loaded
+weights, `state_dict-v1` hashes sorted tensor names, shapes, dtypes, and bytes;
+this digest depends on the loaded precision and is not a checkpoint-file hash.
+When a hash cannot be obtained, it is null with a `hash_unavailable_reason`.
+Injected calculators are identified independently of the configured default
+model. Python objects in configuration, such as reference calculators, are
+represented by their qualified class name, not serialised object state.
+
+Caught exceptions and keyboard interruptions are saved before being re-raised.
+A forced process kill or power loss leaves the last saved attempt/stage
+`running`; the next invocation retains that record. The manifest records
+provenance and progress, not the full thermostat or random-generator state
+needed for a bit-identical restart. Use one pipeline writer per output directory.

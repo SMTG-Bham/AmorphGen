@@ -112,26 +112,19 @@ class TestRandomGenResume:
         assert {p: p.read_bytes() for p in (tmp_path / "structures").rglob("*")
                 if p.is_file()} == before
 
-    @pytest.mark.parametrize("metadata", ["missing", "matching"])
     @pytest.mark.parametrize("composition", [{"Ge": 4, "O": 8}, {"Si": 5, "O": 7}])
-    def test_resume_checks_saved_composition(self, tmp_path, metadata, composition):
+    def test_resume_checks_saved_composition(self, tmp_path, composition):
         """A readable checkpoint needs the correct elements and counts."""
-        import json
         from ase import Atoms
 
+        batch_random(composition, n_structures=0, output_dir=str(tmp_path))
         initial = tmp_path / "random_initial"
-        initial.mkdir()
         path = initial / "random_0000.xyz"
         write(path, Atoms("Si4O8", cell=[8, 8, 8], pbc=True))
-        if metadata == "matching":
-            (tmp_path / "run_metadata.json").write_text(json.dumps({
-                "composition": composition, "output_format": "xyz", "relax": False,
-            }))
-        before = path.read_bytes()
+        before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
         with pytest.raises(ValueError, match="Cannot resume: composition of"):
             batch_random(composition, output_dir=str(tmp_path), resume=True)
-        assert path.read_bytes() == before
-        assert not (tmp_path / "random_gen.log").exists()
+        assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
 
     def test_cli_resume_rejects_incompatible_formula(self, tmp_path):
         import subprocess
@@ -188,6 +181,7 @@ class TestSeedReproducibility:
         assert _derive_structure_seed(42, 3, 0) != _derive_structure_seed(42, 3, 1)
 
     def test_resume_reproduces_fresh_structures(self, tmp_path):
+        import shutil
         comp = {"Si": 8, "O": 16}
         fresh = str(tmp_path / "fresh")
         resumed = str(tmp_path / "resumed")
@@ -201,6 +195,8 @@ class TestSeedReproducibility:
         for i in (0, 1):
             src = os.path.join(fresh, "random_initial", f"random_{i:04d}.xyz")
             write(os.path.join(init, f"random_{i:04d}.xyz"), read(src))
+        shutil.copyfile(os.path.join(fresh, "run_metadata.json"),
+                        os.path.join(resumed, "run_metadata.json"))
         batch_random(comp, n_structures=4, output_dir=resumed, seed=123,
                      resume=True)
 
@@ -211,6 +207,222 @@ class TestSeedReproducibility:
             assert a.get_chemical_symbols() == b.get_chemical_symbols()
             np.testing.assert_array_equal(a.get_positions(), b.get_positions())
             np.testing.assert_array_equal(a.cell, b.cell)
+
+
+@pytest.mark.parametrize("changed, setting", [
+    ({"seed": 43}, "generation.seed"),
+    ({"target_density": 2.1}, "generation.target_density"),
+    ({"density_scale": 0.9}, "generation.density_scale"),
+    ({"cell_length_ang": 12.0}, "generation.cell_length_ang"),
+    ({"minsep": {"Si-Si": 1.0}}, "generation.minsep"),
+    ({"minsep_scale": 0.8}, "generation.minsep_scale"),
+    ({"target_cn": {}}, "generation.target_cn"),
+    ({"dmax": {"Si-O": 2.2}}, "generation.dmax"),
+    ({"dmax_factor": 1.4}, "generation.dmax_factor"),
+    ({"cn_tolerance": 2}, "generation.cn_tolerance"),
+    ({"max_attempts_per_atom": 10}, "generation.max_attempts_per_atom"),
+    ({"pbc": False}, "generation.pbc"),
+    ({"repair_iters": 1}, "generation.repair_iters"),
+    ({"min_cn": 1}, "generation.min_cn"),
+    ({"repair_floor": False}, "generation.repair_floor"),
+    ({"retry_mode": "none"}, "generation.retry_mode"),
+    ({"max_retries": 3}, "max_retries"),
+    ({"fmax": 0.01}, "relaxation.fmax"),
+    ({"max_relax_steps": 10}, "relaxation.max_steps"),
+    ({"optimizer": "BFGS"}, "relaxation.optimizer"),
+    ({"cell_filter": "none"}, "relaxation.cell_filter"),
+    ({"safety": {"min_distance": 0.7}}, "relaxation.safety.min_distance"),
+    ({"repulsive_core": {"enabled": True}}, "relaxation.repulsive_core.enabled"),
+])
+def test_resume_refuses_changed_settings_before_writing(tmp_path, changed, setting):
+    options = {"seed": 42, "n_structures": 0, "output_dir": str(tmp_path)}
+    batch_random({"Si": 4, "O": 8}, **options)
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    with pytest.raises(ValueError, match=f"Cannot resume: {setting}.*changed"):
+        batch_random({"Si": 4, "O": 8}, **{**options, **changed}, resume=True)
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+
+
+@pytest.mark.parametrize("metadata", ["missing", "legacy", "incomplete"])
+def test_resume_refuses_unverifiable_settings(tmp_path, metadata):
+    import json
+
+    batch_random({"Si": 4, "O": 8}, output_dir=str(tmp_path), seed=42)
+    path = tmp_path / "run_metadata.json"
+    if metadata == "missing":
+        path.unlink()
+    else:
+        saved = json.loads(path.read_text())
+        if metadata == "legacy":
+            saved.pop("settings")
+        else:
+            saved["settings"]["generation"].pop("seed")
+        path.write_text(json.dumps(saved))
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    with pytest.raises(ValueError, match="Cannot resume:"):
+        batch_random({"Si": 4, "O": 8}, output_dir=str(tmp_path), seed=42, resume=True)
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+
+
+def test_resume_normalizes_defaults_and_extxyz_alias(tmp_path):
+    from amorphgen.pipeline.random_gen import _GENERATION_DEFAULTS
+    from amorphgen.utils.safety import DEFAULT_SAFETY_CONFIG
+
+    batch_random({"Si": 4, "O": 8}, output_dir=str(tmp_path), seed=42)
+    paths = batch_random(
+        {"Si": 4, "O": 8}, output_dir=str(tmp_path), resume=True,
+        output_format="extxyz", safety=DEFAULT_SAFETY_CONFIG,
+        repulsive_core={"enabled": False, "cutoff": 1.0, "strength": 1.0},
+        **{**_GENERATION_DEFAULTS, "seed": 42},
+    )
+    assert len(paths) == 1
+
+
+def test_resume_allows_extending_count_and_indices(tmp_path):
+    options = {"seed": 42, "output_dir": str(tmp_path), "n_structures": 2}
+    batch_random({"Si": 4, "O": 8}, **options, indices="0")
+    first = tmp_path / "random_initial" / "random_0000.xyz"
+    before = first.read_bytes()
+    paths = batch_random({"Si": 4, "O": 8}, **{**options, "n_structures": 3},
+                         indices="1-2", resume=True)
+    assert len(paths) == 3
+    assert first.read_bytes() == before
+
+
+def test_fresh_partial_run_cannot_relabel_old_outputs(tmp_path):
+    batch_random({"Si": 4, "O": 8}, output_dir=str(tmp_path),
+                 n_structures=2, seed=42)
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    with pytest.raises(ValueError, match="Cannot reuse output directory: generation.seed"):
+        batch_random({"Si": 4, "O": 8}, output_dir=str(tmp_path),
+                     n_structures=2, seed=43, indices="0")
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+
+
+@pytest.mark.parametrize("change", ["parameters", "class", "weights", "model", "checkpoint",
+                                    "head", "named_model"])
+def test_resume_refuses_changed_calculator(tmp_path, change):
+    from ase.calculators.emt import EMT
+    from ase.calculators.lj import LennardJones
+
+    calc = LennardJones(epsilon=1.0)
+    if change in ("head", "named_model"):
+        setattr(calc, "head" if change == "head" else "model", "original")
+    config = {"model": "test-model"}
+    checkpoint = tmp_path / "test.model"
+    if change == "checkpoint":
+        checkpoint.write_bytes(b"original weights")
+        config["model_path"] = str(checkpoint)
+    if change == "weights":
+        class Model:
+            def __init__(self, value):
+                self.value = value
+
+            def state_dict(self):
+                return {"weights": np.array([self.value])}
+
+        calc.models = [Model(1.0)]
+    options = {"output_dir": str(tmp_path / "run"), "n_structures": 0,
+               "relax": True, "calc": calc, "resume_settings": config}
+    batch_random({"Cu": 4}, **options)
+    if change == "parameters":
+        options["calc"] = LennardJones(epsilon=2.0)
+    elif change == "class":
+        options["calc"] = EMT()
+    elif change == "weights":
+        calc.models = [Model(2.0)]
+    elif change == "model":
+        options["resume_settings"] = {"model": "another-model"}
+    elif change in ("head", "named_model"):
+        setattr(calc, "head" if change == "head" else "model", "changed")
+    else:
+        checkpoint.write_bytes(b"replacement weights")
+    before = {p: p.read_bytes() for p in (tmp_path / "run").rglob("*") if p.is_file()}
+    with pytest.raises(ValueError, match="Cannot resume: relaxation.*changed"):
+        batch_random({"Cu": 4}, **options, resume=True)
+    assert {p: p.read_bytes() for p in (tmp_path / "run").rglob("*") if p.is_file()} == before
+
+
+@pytest.mark.parametrize("change", ["pair_params", "cutoff", "wrapper", "wrapped_parameters"])
+def test_resume_checks_classical_and_wrapped_calculators(tmp_path, change):
+    from amorphgen.utils.classical import LennardJonesCalculator
+    from amorphgen.utils.repulsion import with_repulsive_core
+
+    calc = LennardJonesCalculator({("Cu", "Cu"): {"epsilon": 1.0, "sigma": 2.0}})
+    if change in ("wrapper", "wrapped_parameters"):
+        calc = with_repulsive_core(calc, {"enabled": True, "cutoff": 1.0})
+    options = {"calc": calc, "relax": True, "n_structures": 0,
+               "output_dir": str(tmp_path)}
+    batch_random({"Cu": 4}, **options)
+    if change == "pair_params":
+        calc.pair_params[("Cu", "Cu")]["epsilon"] = 2.0
+    elif change == "cutoff":
+        calc.cutoff = 11.0
+    elif change == "wrapper":
+        calc.repulsive_core_config["cutoff"] = 1.2
+    else:
+        calc.base_calculator.cutoff = 11.0
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    with pytest.raises(ValueError, match="Cannot resume: relaxation.calculator.*changed"):
+        batch_random({"Cu": 4}, **options, resume=True)
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+
+
+def test_batch_refuses_locked_directory_without_writing(tmp_path):
+    from amorphgen.utils.run_lock import run_lock
+
+    batch_random({"Si": 4, "O": 8}, output_dir=str(tmp_path), n_structures=0)
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    with run_lock(tmp_path):
+        with pytest.raises(RuntimeError, match="locked|another|active"):
+            batch_random({"Si": 4, "O": 8}, output_dir=str(tmp_path), resume=True)
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+
+
+def test_cli_torchsim_keeps_lock_and_refuses_changed_model(tmp_path, monkeypatch):
+    import sys
+    from amorphgen.cli import main
+    from amorphgen.utils.run_lock import run_lock
+
+    optimized = []
+
+    def optimize(**kwargs):
+        with pytest.raises(RuntimeError, match="Another run"):
+            with run_lock(tmp_path):
+                pytest.fail("The random-generation lock must cover relaxation")
+        optimized.append(kwargs)
+        return []
+
+    monkeypatch.setattr("amorphgen.pipeline.opt_cell.batch_optimize", optimize)
+    args = ["amorphgen", "--random-gen", "--relax", "--engine", "torchsim",
+            "--composition", "Cu=4", "--model", "lj", "--seed", "42",
+            "-n", "1", "-o", str(tmp_path)]
+    monkeypatch.setattr(sys, "argv", args)
+    main()
+    assert len(optimized) == 1
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    args[args.index("lj")] = "buckingham"
+    monkeypatch.setattr(sys, "argv", [*args, "--resume"])
+    with pytest.raises(ValueError, match="Cannot resume: relaxation.*changed"):
+        main()
+    assert len(optimized) == 1
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+
+
+def test_cli_refuses_changed_seed(tmp_path, monkeypatch):
+    import sys
+    from amorphgen.cli import main
+
+    args = ["amorphgen", "--random-gen", "--composition", "Si=4",
+            "--seed", "42", "-n", "1", "-o", str(tmp_path)]
+    monkeypatch.setattr(sys, "argv", args)
+    main()
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    args[args.index("42")] = "43"
+    monkeypatch.setattr(sys, "argv", [*args, "--resume"])
+    with pytest.raises(ValueError, match="Cannot resume: generation.seed changed"):
+        main()
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
 
 
 def test_batch_path_keeps_auto_cn_and_tolerance(tmp_path, monkeypatch):

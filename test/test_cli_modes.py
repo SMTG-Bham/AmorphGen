@@ -83,6 +83,85 @@ class TestRandomGenMode:
             assert len(atoms) == 8
             assert atoms.get_chemical_formula() == "Si8"
 
+    @pytest.mark.parametrize("engine", ["ase", "torchsim"])
+    @pytest.mark.parametrize("opt_yaml, cli_args, expected", [
+        ("opt:\n  fmax: 0.123\n  max_steps: 7\n  optimizer: FIRE\n",
+         [], (0.123, 7, "FIRE")),
+        ("opt:\n  fmax: 0.123\n  max_steps: 7\n  optimizer: FIRE\n",
+         ["--fmax", "0.02", "--opt-steps", "3", "--optimizer", "BFGS"],
+         (0.02, 3, "BFGS")),
+        ("opt:\n  fmax: 0.123\n  max_steps: 7\n  optimizer: FIRE\n",
+         ["-f", "0.01", "--opt-steps", "1000", "-O", "LBFGS"],
+         (0.01, 1000, "LBFGS")),
+        ("opt:\n  fmax: 0.123\n  max_steps: 7\n  optimizer: FIRE\n",
+         ["--fmax=0.01", "--opt-steps=1000", "--optimizer=LBFGS"],
+         (0.01, 1000, "LBFGS")),
+        ("opt:\n  max_steps: 7\n", [], (0.05, 7, "LBFGS")),
+        ("model: lj\n", [], (0.05, 1000, "LBFGS")),
+        (None, [], (0.05, 1000, "LBFGS")),
+    ], ids=["yaml", "cli", "cli-defaults", "cli-equals-defaults",
+            "partial-opt", "no-opt", "no-config"])
+    def test_relax_settings_precedence(self, tmp_path, monkeypatch, engine,
+                                       opt_yaml, cli_args, expected):
+        """Both engines receive CLI > YAML > random-gen defaults."""
+        from unittest.mock import Mock
+
+        generate = Mock(return_value=[])
+        optimize = Mock(return_value=[])
+        calculator = Mock(return_value=object())
+        monkeypatch.setattr("amorphgen.pipeline.random_gen._batch_random_unlocked", generate)
+        monkeypatch.setattr("amorphgen.pipeline.opt_cell.batch_optimize", optimize)
+        monkeypatch.setattr("amorphgen.utils.get_calculator", calculator)
+        config_args = []
+        if opt_yaml is not None:
+            config_path = tmp_path / "settings.yaml"
+            config_path.write_text(opt_yaml)
+            config_args = ["--config", str(config_path)]
+
+        _run_cli([
+            "--random-gen", "--relax", "--composition", "Cu=4",
+            "--model", "lj", "--engine", engine, "-o", str(tmp_path / "run"),
+            *config_args, *cli_args,
+        ], monkeypatch)
+
+        generate.assert_called_once()
+        generation = generate.call_args.kwargs
+        assert generation["relax"] is (engine == "ase")
+        assert (generation["fmax"], generation["max_relax_steps"],
+                generation["optimizer"]) == expected
+        if engine == "torchsim":
+            calculator.assert_not_called()
+            optimize.assert_called_once()
+            relaxation = optimize.call_args.kwargs
+            assert relaxation["engine"] == "torchsim"
+            assert (relaxation["fmax"], relaxation["max_steps"],
+                    relaxation["optimizer"]) == expected
+        else:
+            calculator.assert_called_once()
+            optimize.assert_not_called()
+
+    def test_relax_uses_yaml_optimizer_and_step_limit(self, tmp_path, monkeypatch):
+        from ase.calculators.emt import EMT
+
+        config_path = tmp_path / "settings.yaml"
+        config_path.write_text(
+            "model: lj\n"
+            "opt:\n  optimizer: FIRE\n  fmax: 1.0e-12\n"
+            "  max_steps: 2\n  cell_filter: none\n"
+        )
+        monkeypatch.setattr("amorphgen.utils.get_calculator", lambda **kw: EMT())
+        out_dir = tmp_path / "run"
+        _run_cli([
+            "--random-gen", "--relax", "--composition", "Cu=4", "--no-sc",
+            "--seed", "0", "-n", "1", "--config", str(config_path),
+            "-o", str(out_dir),
+        ], monkeypatch)
+
+        log = (out_dir / "random_gen.log").read_text()
+        assert "Optimizer: FIRE  fmax=1e-12  max_steps=2" in log
+        assert "WARNING: did not converge in 2 steps." in log
+        assert (out_dir / "random_opt" / "random_0000_opt.xyz").is_file()
+
 
 # ─── --extract-snapshots ──────────────────────────────────────────────────
 

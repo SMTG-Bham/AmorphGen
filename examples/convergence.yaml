@@ -1,0 +1,13 @@
+# Absolute confidence half-width targets for an independently prepared silica
+# ensemble. Choose tolerances for the intended scientific question.
+# amorphgen --analyse --input-dir silica/final/ --config examples/convergence.yaml
+analysis:
+  convergence: true
+  convergence_confidence: 0.95
+  convergence_max_structures: 1000000
+  tolerances:
+    density: 0.02                 # g/cm^3; only meaningful when density can vary
+    coordination.Si-O: 0.05       # neighbours per Si
+    bond_angle.O-Si-O: 1.0        # degrees
+  save_report: convergence.txt
+  save_plot: convergence/

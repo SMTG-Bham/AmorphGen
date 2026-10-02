@@ -3,6 +3,7 @@
 from copy import deepcopy
 import importlib
 import sys
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -16,6 +17,7 @@ from amorphgen.cli import _build_override, _get_parser, main
 from amorphgen.pipeline import final_opt, melt_cell
 from amorphgen.pipeline.run_pipeline import MeltQuenchPipeline
 from amorphgen.utils import merge_config
+from amorphgen.utils.calculators import get_calculator
 
 
 @pytest.mark.parametrize("shape", ["quartz", "orthorhombic"])
@@ -127,6 +129,33 @@ def test_pipeline_forwards_cli_dtype_to_calculator(tmp_path, monkeypatch,
     pipe._get_calc()
     assert len(calls) == (1 if share_calc else 2)
     assert all(call["default_dtype"] == dtype for call in calls)
+
+
+@pytest.mark.parametrize("cuda, mps, expected", [
+    (True, True, "cuda"),
+    (False, True, "mps"),
+    (False, False, "cpu"),
+])
+def test_pipeline_and_direct_calculator_resolve_auto_consistently(
+        tmp_path, monkeypatch, cuda, mps, expected):
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(
+        cuda=SimpleNamespace(is_available=lambda: cuda),
+        backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda: mps)),
+    ))
+    devices = []
+
+    def loader(device, **kwargs):
+        devices.append(device)
+        return EMT()
+
+    monkeypatch.setattr("amorphgen.utils.calculators._load_chgnet", loader)
+    get_calculator("chgnet", device="auto")
+    pipe = MeltQuenchPipeline(
+        "input.xyz", work_dir=str(tmp_path),
+        cfg_override={"model": "chgnet", "device": "auto"},
+    )
+    pipe._get_calc()
+    assert devices == [expected, expected]
 
 
 @pytest.mark.parametrize("stage", ["opt_cell", "melt_cell", "equilibrate",
