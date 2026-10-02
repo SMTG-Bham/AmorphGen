@@ -14,6 +14,7 @@ import numpy as np
 from ase.data import atomic_numbers, covalent_radii
 from ase.geometry import find_mic
 
+from .uncertainty import summarize_structures
 
 # ASE's general MIC routine checks neighbouring reduced-cell images. Keep
 # its intermediate pair/image arrays bounded even for very large structures.
@@ -90,8 +91,10 @@ def compute_void_distribution(atoms_list, n_samples=10000, probe_radius=0.0,
 
     ``n_samples`` independent points are drawn per frame with a local NumPy
     random generator. ``seed=None`` requests nondeterministic sampling.
-    Standard errors quantify Monte Carlo sampling only, not differences
-    between structures. The per-frame Wilson intervals remain informative
+    Existing ``*_stderr`` fields quantify Monte Carlo sampling only.
+    ``uncertainty`` separately estimates standard errors and intervals of
+    equal-weight structure means; their observed spread includes Monte Carlo
+    noise and between-structure variation. The per-frame Wilson intervals remain informative
     when no accessible/occupied points were sampled. Sample maxima are lower
     bounds on the true maximum clearance; no maximal-cavity search is done.
 
@@ -201,6 +204,15 @@ def compute_void_distribution(atoms_list, n_samples=10000, probe_radius=0.0,
     mean = (float(sum(weight * sample.sum() / n_samples
                       for weight, sample in zip(weights, samples)) / fraction)
             if fraction > 0 else None)
+    for frame, bin_fraction in zip(per_structure, per_frame_fractions):
+        frame["bin_volume_fraction"] = bin_fraction.tolist()
+        frame["probability_density"] = (
+            bin_fraction / (frame["accessible_fraction"] * np.diff(edges))
+        ).tolist() if frame["accessible_fraction"] > 0 else [None] * nbins
+    uncertainty = {key: summarize_structures([frame[key] for frame in per_structure])
+                   for key in ("accessible_fraction", "accessible_volume",
+                               "mean_clearance", "max_clearance", "cell_volume",
+                               "bin_volume_fraction", "probability_density")}
     return {
         "radius": ((edges[:-1] + edges[1:]) / 2).tolist(),
         "bin_edges": edges.tolist(),
@@ -214,6 +226,7 @@ def compute_void_distribution(atoms_list, n_samples=10000, probe_radius=0.0,
         "mean_clearance": mean,
         "max_clearance": maximum,
         "per_structure": per_structure,
+        "uncertainty": uncertainty,
         "n_structures": len(atoms_list),
         "n_samples": n_samples,
         "probe_radius": probe_radius,

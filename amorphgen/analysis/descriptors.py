@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 
 
-def format_descriptor(name, result):
+def _format_descriptor(name, result):
     """Return a compact, unit-labelled report for a computed descriptor."""
     if name == "bond_order":
         params = result["parameters"]
@@ -64,6 +64,35 @@ def format_descriptor(name, result):
                 f"    Frequency: THz; Gaussian width: {result['sigma_thz']:.4f} THz\n"
                 "    Negative frequencies denote imaginary modes; DOS integrates to one.")
     raise ValueError(f"Unknown descriptor: {name}")
+
+
+def format_descriptor(name, result):
+    """Report pooled fractions separately from ensemble uncertainty."""
+    from .analyser import _format_uncertainty
+    text = _format_descriptor(name, result)
+    lines = [text]
+    for field, label in (("fraction_of_sites", "Fraction of sites"),
+                         ("fraction_of_structures", "Fraction of structures (any such site)")):
+        if field in result:
+            values = result[field]
+            if isinstance(values, dict):
+                lines.append("    " + label + ": " + ", ".join(
+                    f"{key}={100 * value:.2f}%" for key, value in values.items()
+                    if value is not None))
+            elif values is not None:
+                lines.append(f"    {label}: {100 * values:.2f}%")
+    summaries = result.get("uncertainty", {})
+    if summaries:
+        lines.append("    Ensemble uncertainty (equal weight per independent structure):")
+        for key, summary in summaries.items():
+            if not isinstance(summary, dict) or "sem" not in summary:
+                continue
+            if isinstance(summary["mean"], list):
+                lines.append(f"      {key}: per-point SEM, t CI and bootstrap bounds in JSON "
+                             f"(n={summary['n_structures']})")
+            else:
+                lines.append(f"      {key}: " + _format_uncertainty(summary))
+    return "\n".join(lines)
 
 
 def _json_default(value):
@@ -121,12 +150,14 @@ def save_descriptor(name, result, output_dir, *, dpi=300, save_pdf=False,
         ax.set(xlabel="Point clearance (Å)", ylabel="Accessible-space density (Å⁻¹)")
     elif name == "oxygen_speciation":
         labels = list(result["counts"])
-        write_csv(base.with_suffix(".csv"), ["species", "count", "fraction"],
-                  ((k, result["counts"][k], result["fractions"][k]) for k in labels))
+        write_csv(base.with_suffix(".csv"),
+                  ["species", "count", "fraction_of_sites", "fraction_of_structures"],
+                  ((k, result["counts"][k], result["fractions"][k],
+                    result["fraction_of_structures"][k]) for k in labels))
         ax.bar(range(len(labels)), [100 * result["fractions"][k] for k in labels],
                color=_PALETTE[0])
         ax.set_xticks(range(len(labels)), [k.replace("_", "\n") for k in labels])
-        ax.set_ylabel("Oxygen fraction (%)")
+        ax.set_ylabel("Fraction of oxygen sites (%)")
     elif name == "elastic":
         write_csv(base.with_suffix(".csv"),
                   ["average", "quantity", "mean", "std", "valid_structures"],

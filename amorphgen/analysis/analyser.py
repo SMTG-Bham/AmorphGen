@@ -15,7 +15,6 @@ from __future__ import annotations
 import os
 import glob
 import numpy as np
-from collections import defaultdict
 from ase.io import read
 
 from .cutoff import auto_cutoff_minsep, auto_cutoff_rdf
@@ -28,6 +27,7 @@ from .rings import compute_ring_statistics
 from .voronoi import compute_voronoi
 from .energy import compute_energy_ranking
 from .plotting import plot_analysis
+from .uncertainty import summarize_structures, summarize_site_groups
 
 
 class StructureAnalyser:
@@ -35,6 +35,12 @@ class StructureAnalyser:
     Analyse amorphous structures: density, coordination, distances,
     angles, RDF, S(q), rings, Voronoi, voids, oxygen speciation,
     crystal-like bond order, elastic moduli, vibrational DOS and energy ranking.
+
+    Results retain per-structure observations and ``uncertainty`` summaries
+    of equal-weight structure means (SEM, Student-t intervals and percentile
+    bootstrap bounds). Pooled site/bond/angle ``std`` fields describe spread,
+    not uncertainty. Curve bands are pointwise. Independent structures are
+    assumed; fewer than two contributing structures leave intervals undefined.
 
     Parameters
     ----------
@@ -186,36 +192,26 @@ class StructureAnalyser:
             ``partners`` set to In and Ga gives the count over the two larger
             cations only.
         """
-        from collections import Counter
-
-        from collections import Counter
         from .structure import is_bonding_pair
-        elements = Counter(self.atoms_list[0].get_chemical_symbols())
-
-        def bonded(a, b):
-            return is_bonding_pair(a, b, elements)
-
+        from collections import Counter
         wanted = set(partners) if partners is not None else None
 
-        def count(a, b):
-            return (b in wanted) if wanted is not None else bonded(a, b)
-
-        counts = {}
+        frames = []
         for atoms in self.atoms_list:
+            frame = {}
             nbr, syms = self._build_neighbour_dict(atoms)
+            elements = Counter(syms)
             for i, si in enumerate(syms):
                 if centre is not None and si != centre:
                     continue
-                cn = sum(1 for _, sj, _, _ in nbr[i] if count(si, sj))
-                counts.setdefault(si, []).append(cn)
+                cn = sum(1 for _, sj, _, _ in nbr[i]
+                         if (sj in wanted if wanted is not None
+                             else is_bonding_pair(si, sj, elements)))
+                frame.setdefault(si, []).append(cn)
+            frames.append(frame)
         out = {}
-        for s, cns in counts.items():
-            cns = np.asarray(cns)
-            dist = Counter(cns.tolist())
-            out[s] = {"mean": float(cns.mean()), "std": float(cns.std()),
-                      "min": int(cns.min()), "max": int(cns.max()),
-                      "distribution": {int(k): round(100.0 * v / len(cns), 1)
-                                       for k, v in sorted(dist.items())}}
+        for s in sorted({s for frame in frames for s in frame}):
+            out[s] = summarize_site_groups([frame.get(s, []) for frame in frames])
         return out
 
     # ── Core analysis methods ────────────────────────────────────────────
@@ -326,9 +322,52 @@ class StructureAnalyser:
         raw = self._compute_all_angles(triplet)
         return compute_bond_angle_stats(raw)
 
+    def angle_distribution(self, triplet=None, bins=90, *, normalise=True,
+                           confidence=0.95, n_bootstrap=1000, seed=0):
+        """Per-structure angle histograms and uncertainty of their mean.
+
+        Integer ``bins`` spans 0–180 degrees, including linear angles.
+        Explicit edges must cover that range. Each structure's histogram is
+        normalized independently before averaging; a structure without the
+        triplet is missing, not a zero-density sample. Bands are pointwise
+        percentile intervals from resampling complete structures.
+        """
+        if np.isscalar(bins):
+            if isinstance(bins, bool) or int(bins) != bins or bins < 1:
+                raise ValueError("bins must be a positive integer or bin edges")
+            edges = np.linspace(0.0, 180.0, int(bins) + 1)
+        else:
+            edges = np.asarray(bins, dtype=float)
+            if (edges.ndim != 1 or len(edges) < 2
+                    or not np.isfinite(edges).all() or np.any(np.diff(edges) <= 0)
+                    or edges[0] > 0 or edges[-1] < 180):
+                raise ValueError("angle bin edges must increase and cover 0–180 degrees")
+        raw = self._compute_all_angles(triplet)
+        out = {}
+        for key in sorted(raw):
+            values = []
+            for frame in raw.per_structure:
+                angles = frame.get(key, [])
+                if not angles:
+                    values.append([None] * (len(edges) - 1))
+                    continue
+                hist = np.histogram(angles, bins=edges)[0].astype(float)
+                if normalise:
+                    hist /= len(angles) * np.diff(edges)
+                values.append(hist.tolist())
+            uncertainty = summarize_structures(
+                values, confidence=confidence, n_bootstrap=n_bootstrap, seed=seed)
+            out[key] = {"angle": ((edges[:-1] + edges[1:]) / 2).tolist(),
+                        "bin_edges": edges.tolist(), "distribution": uncertainty["mean"],
+                        "normalization": "probability_density" if normalise else "count",
+                        "per_structure": uncertainty["per_structure"],
+                        "uncertainty": uncertainty}
+        return out
+
     # ── RDF and S(q) ────────────────────────────────────────────────────
 
-    def rdf(self, pair=None, rmax=None, nbins=200, sigma=DEFAULT_SMEARING):
+    def rdf(self, pair=None, rmax=None, nbins=200, sigma=DEFAULT_SMEARING, *,
+            confidence=0.95, n_bootstrap=1000, seed=0):
         """Compute the radial distribution function g(r).
 
         Parameters
@@ -349,10 +388,12 @@ class StructureAnalyser:
         dict
             {"r": list[float], "g_r": list[float]}
         """
-        return compute_rdf(self.atoms_list, pair, rmax, nbins, sigma=sigma)
+        return compute_rdf(self.atoms_list, pair, rmax, nbins, sigma=sigma,
+                           confidence=confidence, n_bootstrap=n_bootstrap, seed=seed)
 
     def structure_factor(self, pair=None, qmax=15.0, nq=300, rmax=None,
-                         weighting="unweighted"):
+                         weighting="unweighted", *, confidence=0.95,
+                         n_bootstrap=1000, seed=0):
         """Compute the structure factor S(q) from g(r) via Fourier transform.
 
         Parameters
@@ -380,11 +421,13 @@ class StructureAnalyser:
             ``{"q": list[float], "s_q": list[float]}``.
         """
         return compute_structure_factor(self.atoms_list, pair, qmax, nq,
-                                        rmax, weighting=weighting)
+                                        rmax, weighting=weighting, confidence=confidence,
+                                        n_bootstrap=n_bootstrap, seed=seed)
 
     def structure_factor_direct(self, qmax=15.0, nq=300,
                                 weighting="xray", sigma_q=0.0,
-                                partials=False):
+                                partials=False, *, confidence=0.95,
+                                n_bootstrap=1000, seed=0):
         """Compute Faber-Ziman S(q) from reciprocal-lattice scattering sums.
 
         Avoids the finite-rmax integral in :meth:`structure_factor`.
@@ -420,10 +463,12 @@ class StructureAnalyser:
         return compute_structure_factor_direct(self.atoms_list, qmax, nq,
                                                weighting=weighting,
                                                sigma_q=sigma_q,
-                                               partials=partials)
+                                               partials=partials, confidence=confidence,
+                                               n_bootstrap=n_bootstrap, seed=seed)
 
     def total_correlation(self, weighting="xray", qmin=0.3, qmax=20.0, nq=400,
-                          rmax=10.0, nr=600, window="lorch"):
+                          rmax=10.0, nr=600, window="lorch", *, confidence=0.95,
+                          n_bootstrap=1000, seed=0):
         """Total correlation function T(r) = 4 pi r rho g(r), the curve a
         diffraction paper plots beside S(Q).
 
@@ -439,9 +484,11 @@ class StructureAnalyser:
         from .rdf import compute_total_correlation
         return compute_total_correlation(self.atoms_list, weighting=weighting,
                                          qmin=qmin, qmax=qmax, nq=nq, rmax=rmax,
-                                         nr=nr, window=window)
+                                         nr=nr, window=window, confidence=confidence,
+                                         n_bootstrap=n_bootstrap, seed=seed)
 
-    def averaged_rdf(self, pair=None, rmax=None, nbins=200):
+    def averaged_rdf(self, pair=None, rmax=None, nbins=200, *, confidence=0.95,
+                     n_bootstrap=1000, seed=0):
         """Compute RDF per structure with mean and standard deviation.
 
         Parameters
@@ -458,7 +505,8 @@ class StructureAnalyser:
         dict
             {"r": list, "g_r_mean": list, "g_r_std": list, "n_structures": int}
         """
-        return compute_averaged_rdf(self.atoms_list, pair, rmax, nbins)
+        return compute_averaged_rdf(self.atoms_list, pair, rmax, nbins,
+                                    confidence=confidence, n_bootstrap=n_bootstrap, seed=seed)
 
     # ── Advanced analysis ───────────────────────────────────────────────
 
@@ -597,38 +645,16 @@ class StructureAnalyser:
             Keyed by pair string. Each value is a dict with
             "mean_per_structure", "overall_mean", "overall_std", "n_structures".
         """
-        cn_per_structure = defaultdict(list)
-
-        for atoms in self.atoms_list:
-            nbr_dict, syms = self._build_neighbour_dict(atoms)
-            unique = sorted(set(syms))
-            n = len(atoms)
-
-            for s1 in unique:
-                for s2 in unique:
-                    if pair is not None:
-                        p = pair.split("-")
-                        if not ((s1 == p[0] and s2 == p[1]) or
-                                (s1 == p[1] and s2 == p[0])):
-                            continue
-                    key = f"{s1}-{s2}"
-                    cns = []
-                    for a in range(n):
-                        if syms[a] != s1:
-                            continue
-                        cn = sum(1 for _, sj, _, _ in nbr_dict[a] if sj == s2)
-                        cns.append(cn)
-                    if cns:
-                        cn_per_structure[key].append(np.mean(cns))
-
         result = {}
-        for key, means in cn_per_structure.items():
-            means = np.array(means)
+        for key, data in self.coordination(pair).items():
+            uncertainty = data["uncertainty"]
+            means = [x for x in data["per_structure"] if x is not None]
             result[key] = {
-                "mean_per_structure": means.tolist(),
-                "overall_mean": float(np.mean(means)),
+                "mean_per_structure": data["per_structure"],
+                "overall_mean": uncertainty["mean"],
                 "overall_std": float(np.std(means)),
-                "n_structures": len(means),
+                "n_structures": uncertainty["n_structures"],
+                "uncertainty": uncertainty,
             }
         return result
 
@@ -654,11 +680,11 @@ class StructureAnalyser:
         lines.append(bar)
 
         d = self.density()
-        lines.append(f"\n  Density: {d['mean']:.2f} +/- {d['std']:.2f} g/cm3")
+        lines.append(f"\n  Density: {d['mean']:.2f} g/cm3; structure SD={d['std']:.2f}")
 
         bd = self.bond_distances()
         if bd:
-            lines.append(f"\n  Bond distances:")
+            lines.append("\n  Bond distances: pooled bonds; Std is spread")
             lines.append(f"  {'Pair':<10} {'Mean (A)':>10} {'Std':>8} "
                          f"{'Min':>8} {'Max':>8} {'Count':>8}")
             lines.append(f"  {'-'*54}")
@@ -684,13 +710,17 @@ class StructureAnalyser:
                     nonbonded_cn[pair] = data
 
             def _fmt(pair, data):
-                l1 = (f"  {pair}: mean={data['mean']:.1f} +/- "
+                l1 = (f"  {pair}: mean={data['mean']:.1f} (pooled); site SD="
                       f"{data['std']:.1f} [{data['min']},{data['max']}]")
                 parts = [f"CN={cn}: {pct:.1f}%"
                          for cn, pct in sorted(data["distribution"].items())
                          if pct >= 0.5]
-                l2 = "    Distribution: " + ", ".join(parts)
-                return [l1, l2]
+                l2 = "    Fraction of sites: " + ", ".join(parts)
+                prevalence = ", ".join(
+                    f"CN={cn}: {100 * fraction:.1f}%"
+                    for cn, fraction in data["fraction_of_structures"].items())
+                return [l1, l2, "    Fraction of structures (any such site): " + prevalence,
+                        "    " + _format_uncertainty(data["uncertainty"])]
 
             if bonding_cn:
                 lines.append(f"\n  Bonding coordination numbers:")
@@ -721,7 +751,7 @@ class StructureAnalyser:
         if show_angles:
             ba = self.bond_angles()
             if ba:
-                lines.append(f"\n  Bond angles:")
+                lines.append("\n  Bond angles: pooled angles; Std is spread")
                 lines.append(f"  {'Triplet':<12} {'Mean (deg)':>10} "
                              f"{'Std':>8} {'Count':>8}")
                 lines.append(f"  {'-'*42}")
@@ -730,6 +760,15 @@ class StructureAnalyser:
                         f"  {triplet:<12} {data['mean']:>10.1f} "
                         f"{data['std']:>7.1f} {data['count']:>8}")
 
+        lines.append("\n  Ensemble means (equal weight per independent structure):")
+        lines.append("    Density: " + _format_uncertainty(d["uncertainty"]))
+        for pair, data in bd.items():
+            lines.append(f"    Bond {pair}: " + _format_uncertainty(data["uncertainty"]))
+        if show_angles:
+            for triplet, data in ba.items():
+                lines.append(f"    Angle {triplet}: " + _format_uncertainty(data["uncertainty"]))
+        lines.append("    SD above describes spread; SEM and t intervals describe the mean.")
+        lines.append("    Intervals assume independent structures; n < 2 is unavailable.")
         lines.append(f"\n{bar}\n")
 
         text = "\n".join(lines)
@@ -824,6 +863,7 @@ class StructureAnalyser:
         all_densities = []
         all_energies = []
         all_cns = {p: [] for p in bonding_pairs[:3]}
+        ensemble_cn = self.coordination()
 
         # v1.0.0rc2: if the structure files were produced by --random-gen
         # (which writes per-step energies into random_gen.log) and the
@@ -864,12 +904,11 @@ class StructureAnalyser:
                         e_str = "N/A"
 
             # CN for bonding pairs
-            cn = sa_single.coordination()
             row = f"  {i:<5} {dens:>8.2f} {e_str:>10}"
             for p in bonding_pairs[:3]:
-                cn_val = cn.get(p, {}).get("mean", 0)
+                cn_val = ensemble_cn.get(p, {}).get("per_structure", [None] * len(self.atoms_list))[i]
                 all_cns[p].append(cn_val)
-                row += f" {cn_val:>10.1f}"
+                row += f" {cn_val:>10.1f}" if cn_val is not None else f" {'N/A':>10}"
 
             lines.append(row)
 
@@ -884,10 +923,15 @@ class StructureAnalyser:
             mean_row += f" {'N/A':>10}"
             std_row += f" {'N/A':>10}"
         for p in bonding_pairs[:3]:
-            mean_row += f" {np.mean(all_cns[p]):>10.1f}"
-            std_row += f" {np.std(all_cns[p]):>10.1f}"
+            values = [value for value in all_cns[p] if value is not None]
+            mean_row += f" {np.mean(values):>10.1f}" if values else f" {'N/A':>10}"
+            std_row += f" {np.std(values):>10.1f}" if values else f" {'N/A':>10}"
         lines.append(mean_row)
         lines.append(std_row)
+        lines.append("  Uncertainty of ensemble means:")
+        for name, values in [("Density", all_densities), ("E/atom", all_energies),
+                             *[(f"CN({p})", all_cns[p]) for p in bonding_pairs[:3]]]:
+            lines.append(f"    {name}: " + _format_uncertainty(summarize_structures(values)))
         lines.append(f"\n{bar}\n")
 
         text = "\n".join(lines)
@@ -956,9 +1000,23 @@ def format_total_cn(sa, specs):
             continue
         d = tot[centre]
         label = f"{centre}-({'+'.join(partners)})" if partners else f"{centre}-(all bonded)"
-        lines.append(f"  {label}: mean={d['mean']:.1f} +/- {d['std']:.1f} "
+        lines.append(f"  {label}: mean={d['mean']:.1f} (pooled); site SD={d['std']:.1f} "
                      f"[{d['min']},{d['max']}]")
         parts = [f"CN={cn}: {pct:.1f}%" for cn, pct in sorted(d["distribution"].items())
                  if pct >= 0.5]
-        lines.append("    Distribution: " + ", ".join(parts))
+        lines.append("    Fraction of sites: " + ", ".join(parts))
+        lines.append("    Fraction of structures (any such site): " + ", ".join(
+            f"CN={cn}: {100 * fraction:.1f}%"
+            for cn, fraction in d["fraction_of_structures"].items()))
+        lines.append("    " + _format_uncertainty(d["uncertainty"]))
     return "\n".join(lines)
+
+
+def _format_uncertainty(uncertainty):
+    """Concise scalar ensemble estimate, keeping unavailable errors explicit."""
+    u = uncertainty
+    mean = "n/a" if u["mean"] is None else f"{u['mean']:.4g}"
+    if u["sem"] is None:
+        return f"mean={mean}; SEM/t interval unavailable (n={u['n_structures']})"
+    return (f"mean={mean}; SEM={u['sem']:.3g}; {100 * u['confidence']:g}% t CI "
+            f"[{u['ci_low']:.4g}, {u['ci_high']:.4g}] (n={u['n_structures']})")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 from collections import Counter, defaultdict, deque
 from ase.neighborlist import neighbor_list
+from .uncertainty import summarize_structures
 
 
 def compute_ring_statistics(atoms_list, bond_pair=None, cutoff=None,
@@ -39,8 +40,10 @@ def compute_ring_statistics(atoms_list, bond_pair=None, cutoff=None,
             bond_pair = (min(unique, key=en), max(unique, key=en))
 
     ring_counts = Counter()
+    per_structure = []
 
     for atoms in atoms_list:
+        frame_counts = Counter()
         syms = atoms.get_chemical_symbols()
         n = len(atoms)
         p1, p2 = bond_pair
@@ -116,6 +119,9 @@ def compute_ring_statistics(atoms_list, bond_pair=None, cutoff=None,
 
                 if found and found <= max_ring:
                     ring_counts[found] += 1
+                    frame_counts[found] += 1
+        per_structure.append({"counts": dict(frame_counts),
+                              "total_rings": sum(frame_counts.values())})
 
     total = sum(ring_counts.values())
     sizes = sorted(ring_counts.keys())
@@ -128,4 +134,19 @@ def compute_ring_statistics(atoms_list, bond_pair=None, cutoff=None,
         "fractions": fractions,
         "bond_pair": bond_pair,
         "total_rings": total,
+        "per_structure": per_structure,
+        "uncertainty": {
+            "total_rings": summarize_structures([r["total_rings"] for r in per_structure]),
+            "counts": {size: summarize_structures([
+                r["counts"].get(size, 0) for r in per_structure]) for size in sizes},
+            "fractions": {size: summarize_structures([
+                r["counts"].get(size, 0) / r["total_rings"] if r["total_rings"] else None
+                for r in per_structure]) for size in sizes},
+            "fraction_of_structures": {size: summarize_structures([
+                float(r["counts"].get(size, 0) > 0) for r in per_structure]) for size in sizes},
+        },
+        "fraction_of_structures": {
+            size: sum(r["counts"].get(size, 0) > 0 for r in per_structure) / len(per_structure)
+            for size in sizes},
+        "fraction_of_structures_definition": "structures with at least one ring of this size",
     }

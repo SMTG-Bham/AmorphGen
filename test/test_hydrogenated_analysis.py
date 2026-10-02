@@ -104,6 +104,8 @@ def test_host_bonds_reach_report_total_angles_and_plot(host, tmp_path):
     report = analyser.summary()
     bonded, nonbonded = report.split("Bonding coordination numbers:", 1)[1].split(
         "Non-bonded contacts:", 1)
+    # Later sections also report bond/angle ensemble uncertainty.
+    nonbonded = nonbonded.split("Bond angles:", 1)[0]
     assert f"{host_pair}: mean=1.5" in bonded
     assert f"{host}-(" in bonded and "mean=2.0" in bonded
     assert "H-H: mean=1.0" in nonbonded

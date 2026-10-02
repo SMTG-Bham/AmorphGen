@@ -19,6 +19,95 @@ directory. Files with the same stem count once, in that format priority
 order. Each file contributes its last frame; to analyse a trajectory as an
 ensemble, first extract snapshots or pass a list of frames to the Python API.
 
+## Spread and uncertainty of the mean
+
+Each input structure is one independent sampling unit. Pooled site, bond and
+angle spreads remain available as the legacy `mean`/`std` fields and the
+explicit `pooled_mean`/`pooled_std` fields. They describe structural disorder;
+they are not errors on an ensemble mean. Density retains its population
+spread over structures in `std`.
+
+Scalar results include an `uncertainty` summary calculated from **one mean per
+structure**, giving every contributing structure equal weight. This matters
+when cell sizes, numbers of bonds or numbers of angles differ. Its fields are:
+
+| Field | Meaning |
+|---|---|
+| `per_structure` | Values in input order; `None` for missing descriptors |
+| `mean`, `std` | Equal-weight mean and sample SD between structures (`ddof=1`) |
+| `sem` | Standard error, sample SD divided by the square root of the number of contributing structures |
+| `ci_low`, `ci_high` | Student-t confidence interval with `n - 1` degrees of freedom; 95% by default |
+| `bootstrap_low`, `bootstrap_high` | Percentile interval of resampled structure means; 1,000 draws and seed 0 by default |
+| `n_structures`, `n_total_structures` | Contributing structures and all supplied structures |
+| `n_per_point` | Number contributing to each curve bin (scalar for a scalar descriptor) |
+
+With fewer than two contributing structures, SEM and interval bounds are
+`None` (blank in CSV). Missing descriptors are excluded, not replaced with
+zero. A present species with no neighbors has zero coordination; a missing
+central species has no coordination observation. Repeating sites within one
+structure does not increase the independent sample count.
+
+`rdf()`, `averaged_rdf()`, `structure_factor()`, `structure_factor_direct()`,
+`total_correlation()` and `angle_distribution()` return per-structure curves
+and pointwise uncertainty on common grids. Angle histograms are normalized
+within each structure before averaging. S(q) and T(r) transformations use each
+structure's own composition and density before averaging, preserving their
+covariance. Direct S(q) bins with no reciprocal vectors are missing; their
+`n_per_point` can be smaller than the ensemble size. The `n_per_bin` field
+counts reciprocal vectors, not independent samples.
+The weighted Fourier-transform S(q) needs at least two atoms of every species
+for its same-species RDF normalization; use `structure_factor_direct()` for
+singleton dopants. An unestimable partial is never silently treated as an
+observed zero curve.
+
+```python
+sa = StructureAnalyser("ensemble/")
+cn = sa.coordination("Si-O")["Si-O"]
+print(cn["pooled_std"], cn["uncertainty"]["sem"])
+rdf = sa.rdf(confidence=0.95, n_bootstrap=2000, seed=42)
+angles = sa.angle_distribution("O-Si-O", bins=90, seed=42)
+tr = sa.total_correlation(weighting="xray", seed=42)
+# T(r)'s primary uncertainty is for T_r; other curves have separate summaries.
+print(tr["curve_uncertainty"]["G_r"]["ci_low"])
+```
+
+Bootstrap resampling selects **whole structures**, retaining correlations
+between bins. The shaded bands are **pointwise**, not simultaneous confidence
+bands for the entire curve. Set `n_bootstrap=0` to skip bootstrap draws in the
+curve APIs. These intervals quantify sampling of independent configurations;
+they do not include force-field bias, finite-cell error, cutoff selection, or
+transform-parameter uncertainty. Correlated trajectory frames require
+independent sampling or a separate correlation/block analysis before using
+these intervals.
+
+RDF, angle, S(q), and T(r) exports include companion
+`*_uncertainty.csv`, `*_per_structure.csv`, and `*_uncertainty.json` files.
+The JSON records confidence level, seed, resampling count, and sampling unit;
+the CSV includes contributing counts, SEM, t bounds and bootstrap bounds.
+Raw angle CSV rows also carry the structure index. The density plot shows a
+t interval for the mean, alongside individual structures.
+`analysis_statistics.json` retains core scalar descriptors and their aligned
+per-structure observations; `analysis_statistics.csv` separates pooled spread
+from structure means, sample SD, SEM and t intervals.
+
+Coordination and oxygen-speciation outputs distinguish `fraction_of_sites`
+(pooled sites, between 0 and 1) from `fraction_of_structures` (the fraction of
+all input structures containing **at least one** site in that category).
+Structure prevalence is not a distribution: categories can overlap and need
+not sum to one. Crystal-like order and dimer/connectivity reports make the
+same distinction. Per-structure site-fraction summaries estimate the
+**equal-weight mean site fraction**, which can differ from the pooled fraction.
+Optional descriptors (rings, Voronoi, oxygen speciation, bond order, voids,
+elastic moduli, vibrational DOS and energy) also retain per-structure values
+and named uncertainty summaries. Existing void Monte Carlo errors remain
+separate from uncertainty across structures.
+
+Reference validation uses the structure-weighted mean and its t interval.
+A confidence interval admitting both in-range and out-of-range values is
+`inconclusive`, even when its mean is inside the reference range. A finite
+mean with no estimable interval is also `inconclusive`; an absent descriptor
+remains `n/a`. Reports include intervals and count inconclusive verdicts.
+
 ## Recipes
 
 Common cases:
@@ -539,7 +628,6 @@ weights and a q range appropriate to the reference data.
 
 ### Open issues / future work
 
-- Per-bin uncertainty estimates from independent configurations.
 - An `xrd_pattern()` convenience method with explicit intensity conventions
   and instrument settings.
 

@@ -6,20 +6,23 @@ import numpy as np
 from collections import Counter, defaultdict
 from ase.neighborlist import neighbor_list
 
+from .uncertainty import summarize_site_groups, summarize_structures
+
 
 def compute_density(atoms_list: list) -> dict:
     """Compute density for each structure."""
-    if not atoms_list:
-        return {"values": [], "mean": 0.0, "std": 0.0}
     densities = []
     for atoms in atoms_list:
         mass_g = sum(atoms.get_masses()) / 6.022e23
         vol_cm3 = atoms.get_volume() * 1e-24
         densities.append(mass_g / vol_cm3)
+    uncertainty = summarize_structures(densities)
     return {
         "values": densities,
-        "mean": float(np.mean(densities)),
-        "std": float(np.std(densities)),
+        "mean": float(np.mean(densities)) if densities else None,
+        "std": float(np.std(densities)) if densities else None,
+        "per_structure": densities,
+        "uncertainty": uncertainty,
     }
 
 
@@ -107,55 +110,45 @@ def is_bonding_pair(s1: str, s2: str, composition) -> bool:
 
 def compute_coordination(atoms_list, max_cutoff, get_cutoff_fn,
                          pair=None) -> dict:
-    """Compute coordination numbers with percentage distribution."""
+    """Compute pooled site coordination and uncertainty of structure means."""
     cn_data = {}
+    neighbour_species = sorted({s for atoms in atoms_list
+                                for s in atoms.get_chemical_symbols()})
 
-    for atoms in atoms_list:
+    for structure_index, atoms in enumerate(atoms_list):
         nbr_dict, syms = build_neighbour_dict(atoms, max_cutoff,
                                                get_cutoff_fn)
         unique = sorted(set(syms))
         n = len(atoms)
 
         for s1 in unique:
-            for s2 in unique:
+            for s2 in neighbour_species:
                 if pair is not None:
                     p1 = pair.split("-")
                     if not ((s1 == p1[0] and s2 == p1[1]) or
                             (s1 == p1[1] and s2 == p1[0])):
                         continue
                 key = f"{s1}-{s2}"
+                if key not in cn_data:
+                    cn_data[key] = [[] for _ in atoms_list]
                 for a in range(n):
                     if syms[a] != s1:
                         continue
                     cn = sum(1 for _, sj, _, _ in nbr_dict[a] if sj == s2)
-                    cn_data.setdefault(key, []).append(cn)
+                    cn_data[key][structure_index].append(cn)
 
     result = {}
-    for key, cns in sorted(cn_data.items()):
-        cns = np.array(cns)
-        counts = Counter(cns)
-        total = len(cns)
-        distribution = {
-            int(cn): round(100.0 * count / total, 1)
-            for cn, count in sorted(counts.items())
-        }
-        result[key] = {
-            "mean": float(np.mean(cns)),
-            "std": float(np.std(cns)),
-            "min": int(np.min(cns)),
-            "max": int(np.max(cns)),
-            "distribution": distribution,
-            "total_atoms": total,
-        }
+    for key, groups in sorted(cn_data.items()):
+        result[key] = summarize_site_groups(groups)
     return result
 
 
 def compute_bond_distances(atoms_list, max_cutoff, get_cutoff_fn,
                            pair=None) -> dict:
-    """Compute pair distance statistics."""
+    """Keep pooled bond spread and uncertainty of equal-weight structure means."""
     dist_data = {}
 
-    for atoms in atoms_list:
+    for structure_index, atoms in enumerate(atoms_list):
         nbr_dict, syms = build_neighbour_dict(atoms, max_cutoff,
                                                get_cutoff_fn)
         for a in range(len(atoms)):
@@ -168,14 +161,21 @@ def compute_bond_distances(atoms_list, max_cutoff, get_cutoff_fn,
                     p_rev = "-".join(pair.split("-")[::-1])
                     if key != p_rev:
                         continue
-                dist_data.setdefault(key, []).append(d)
+                if key not in dist_data:
+                    dist_data[key] = [[] for _ in atoms_list]
+                dist_data[key][structure_index].append(d)
 
     result = {}
-    for key, ds in sorted(dist_data.items()):
-        ds = np.array(ds)
+    for key, groups in sorted(dist_data.items()):
+        ds = np.array([d for group in groups for d in group])
+        per_structure = [float(np.mean(group)) if group else None for group in groups]
         result[key] = {
             "mean": float(np.mean(ds)),
             "std": float(np.std(ds)),
+            "pooled_mean": float(np.mean(ds)),
+            "pooled_std": float(np.std(ds)),
+            "per_structure": per_structure,
+            "uncertainty": summarize_structures(per_structure),
             "min": float(np.min(ds)),
             "max": float(np.max(ds)),
             "count": len(ds),
@@ -183,23 +183,28 @@ def compute_bond_distances(atoms_list, max_cutoff, get_cutoff_fn,
     return result
 
 
+class BondAngleData(dict):
+    """Legacy pooled angle dictionary retaining aligned per-structure samples."""
+
+    def __init__(self, n_structures=0):
+        super().__init__()
+        self.per_structure = [{} for _ in range(n_structures)]
+
+
 def compute_all_angles(atoms_list, max_cutoff, get_cutoff_fn,
                        triplet=None, bonding_only=True) -> dict:
     """Compute all bond angles."""
-    bonding_pairs = None
-    if bonding_only:
+    angle_data = BondAngleData(len(atoms_list))
 
-        from collections import Counter
-        unique = sorted(set(atoms_list[0].get_chemical_symbols()))
-        comp = Counter(atoms_list[0].get_chemical_symbols())
-        bonding_pairs = {(s1, s2) for s1 in unique for s2 in unique
-                         if is_bonding_pair(s1, s2, comp)}
-
-    angle_data = {}
-
-    for atoms in atoms_list:
+    for structure_index, atoms in enumerate(atoms_list):
         nbr_dict, syms = build_neighbour_dict(atoms, max_cutoff,
                                                get_cutoff_fn)
+        bonding_pairs = None
+        if bonding_only:
+            unique = sorted(set(syms))
+            comp = Counter(syms)
+            bonding_pairs = {(s1, s2) for s1 in unique for s2 in unique
+                             if is_bonding_pair(s1, s2, comp)}
         for a in range(len(atoms)):
             sym_a = syms[a]
             nbrs = nbr_dict[a]
@@ -229,20 +234,35 @@ def compute_all_angles(atoms_list, max_cutoff, get_cutoff_fn,
 
                     cos_a = np.dot(v1, v2) / (norm_v1 * norm_v2)
                     cos_a = np.clip(cos_a, -1, 1)
-                    angle_data.setdefault(key, []).append(
-                        np.degrees(np.arccos(cos_a)))
+                    angle = float(np.degrees(np.arccos(cos_a)))
+                    angle_data.setdefault(key, []).append(angle)
+                    angle_data.per_structure[structure_index].setdefault(
+                        key, []).append(angle)
 
     return angle_data
 
 
 def compute_bond_angle_stats(angle_data: dict) -> dict:
-    """Convert raw angle data to statistics."""
+    """Keep pooled angle spread and uncertainty of equal-weight structure means."""
     result = {}
     for key, angles in sorted(angle_data.items()):
         angles = np.array(angles)
+        if angles.size == 0:
+            continue
+        groups = getattr(angle_data, "per_structure", None)
+        # A plain dictionary has no structure identities.  Treat it as one
+        # pooled sample and leave uncertainty unavailable, never infer n from
+        # the number of angles.
+        per_structure = ([float(np.mean(group[key])) if group.get(key) else None
+                          for group in groups] if groups is not None
+                         else [float(np.mean(angles))])
         result[key] = {
             "mean": float(np.mean(angles)),
             "std": float(np.std(angles)),
+            "pooled_mean": float(np.mean(angles)),
+            "pooled_std": float(np.std(angles)),
+            "per_structure": per_structure,
+            "uncertainty": summarize_structures(per_structure),
             "min": float(np.min(angles)),
             "max": float(np.max(angles)),
             "count": len(angles),
@@ -303,14 +323,11 @@ def compute_dimers(atoms_list, threshold_frac: float = 0.85) -> dict:
         a_is_metal = a not in NONMETALS and a not in METALLOIDS
         if not a_is_metal or not has_anions:
             thresholds[pair] = threshold_frac * d
-    if not thresholds:
-        return {"pairs": {}, "per_structure": [0] * len(atoms_list),
-                "total": 0, "n_structures": len(atoms_list),
-                "threshold_frac": threshold_frac}
-
-    max_cut = max(thresholds.values())
+    max_cut = max(thresholds.values(), default=0.0)
     pair_stats = {}
     per_structure = []
+    per_structure_sites = []
+    per_structure_pairs = []
     for atoms in atoms_list:
         syms = np.array(atoms.get_chemical_symbols())
         i, j, d = neighbor_list("ijd", atoms, cutoff=max_cut)
@@ -325,22 +342,44 @@ def compute_dimers(atoms_list, threshold_frac: float = 0.85) -> dict:
             if idx not in pair_min or dd < pair_min[idx]:
                 pair_min[idx] = float(dd)
         n_here = 0
+        dimer_sites = set()
+        local_pairs = {}
         for (ii, jj), dd in pair_min.items():
             key = "-".join(sorted((syms[ii], syms[jj])))
             thr = thresholds.get(key)
             if thr is None or dd >= thr:
                 continue
             n_here += 1
+            dimer_sites.update((ii, jj))
+            local_pairs.setdefault(key, []).append(dd)
             st = pair_stats.setdefault(
                 key, {"count": 0, "min_distance": float("inf"),
                       "threshold": thr})
             st["count"] += 1
             st["min_distance"] = min(st["min_distance"], dd)
         per_structure.append(n_here)
+        per_structure_sites.append(len(dimer_sites))
+        per_structure_pairs.append(local_pairs)
 
+    site_fractions = [count / len(atoms) if len(atoms) else None
+                      for count, atoms in zip(per_structure_sites, atoms_list)]
+    for key, stats in pair_stats.items():
+        counts = [len(group.get(key, [])) for group in per_structure_pairs]
+        stats["per_structure"] = counts
+        stats["uncertainty"] = summarize_structures(counts)
+        stats["min_distance_uncertainty"] = summarize_structures([
+            min(group[key]) if key in group else None for group in per_structure_pairs])
+    total_sites = sum(len(atoms) for atoms in atoms_list)
+    presence = [float(count > 0) for count in per_structure]
     return {"pairs": pair_stats, "per_structure": per_structure,
             "total": sum(per_structure), "n_structures": len(atoms_list),
-            "threshold_frac": threshold_frac}
+            "threshold_frac": threshold_frac,
+            "uncertainty": summarize_structures(per_structure),
+            "fraction_of_sites": (sum(per_structure_sites) / total_sites
+                                  if total_sites else None),
+            "fraction_of_structures": float(np.mean(presence)) if presence else None,
+            "site_fraction_uncertainty": summarize_structures(site_fractions),
+            "structure_fraction_uncertainty": summarize_structures(presence)}
 
 
 def format_dimer_report(result: dict) -> str:
@@ -363,6 +402,11 @@ def format_dimer_report(result: dict) -> str:
                      f"{result['n_structures']} structure(s). Dimer-bearing "
                      f"structures usually rank higher in energy — consider "
                      f"discarding them from the ensemble.")
+    site_fraction = result.get("fraction_of_sites")
+    structure_fraction = result.get("fraction_of_structures")
+    if site_fraction is not None and structure_fraction is not None:
+        lines.append(f"  Fraction of sites in dimers: {100 * site_fraction:.1f}%; "
+                     f"fraction of structures with dimers: {100 * structure_fraction:.1f}%.")
     lines.append("=" * 65)
     return "\n".join(lines)
 
@@ -388,7 +432,9 @@ def compute_polyhedral_connectivity(atoms_list, max_cutoff, get_cutoff_fn,
         from ..utils.radii import PAULING_EN
     except ImportError:  # pragma: no cover
         from amorphgen.utils.radii import PAULING_EN
-    syms0 = sorted(set(atoms_list[0].get_chemical_symbols()))
+    if not atoms_list:
+        return {"error": "no structures"}
+    syms0 = sorted({s for atoms in atoms_list for s in atoms.get_chemical_symbols()})
     if anion is None:
         anion = max(syms0, key=lambda s: PAULING_EN.get(s, 2.0))
     cations = [cation] if cation else [s for s in syms0 if s != anion]
@@ -400,6 +446,9 @@ def compute_polyhedral_connectivity(atoms_list, max_cutoff, get_cutoff_fn,
                        "corner_links": 0, "edge_links": 0, "face_links": 0}
                    for c in cations}
     per_structure_edge = []
+    per_structure_face = []
+    per_structure_links = []
+    per_structure_species = {c: [] for c in cations}
     n_cat_total = 0; n_ef_total = 0
 
     for atoms in atoms_list:
@@ -416,21 +465,38 @@ def compute_polyhedral_connectivity(atoms_list, max_cutoff, get_cutoff_fn,
                     if sj in cations and j > i:
                         shared[(i, j)] += 1
         ef = set(); face = set(); links_of = defaultdict(lambda: Counter())
+        local_links = Counter()
         for (i, j), n in shared.items():
             kind = "corner" if n == 1 else ("edge" if n == 2 else "face")
             link[kind] += 1
+            local_links[kind] += 1
             links_of[i][kind] += 1; links_of[j][kind] += 1
             if n >= 2:
                 ef.update((i, j))
             if n >= 3:
                 face.update((i, j))
         n_cat = len(an_of); n_cat_total += n_cat; n_ef_total += len(ef)
-        per_structure_edge.append(100.0 * len(ef) / n_cat if n_cat else 0.0)
+        per_structure_edge.append(100.0 * len(ef) / n_cat if n_cat else None)
+        per_structure_face.append(100.0 * len(face) / n_cat if n_cat else None)
+        per_structure_links.append(local_links)
         for i in an_of:
             ps = per_species[syms[i]]
             ps["n"] += 1; ps["edge_or_face"] += (i in ef); ps["face"] += (i in face)
             for kind in ("corner", "edge", "face"):
                 ps[f"{kind}_links"] += links_of[i][kind]
+        for c in cations:
+            sites = [i for i in an_of if syms[i] == c]
+            count = len(sites)
+            per_structure_species[c].append({
+                "n_atoms": count,
+                "edge_or_face_percent": (100.0 * sum(i in ef for i in sites) / count
+                                         if count else None),
+                "face_percent": (100.0 * sum(i in face for i in sites) / count
+                                 if count else None),
+                **{f"mean_{kind}_links": (sum(links_of[i][kind] for i in sites) / count
+                                          if count else None)
+                   for kind in ("corner", "edge", "face")},
+            })
 
     total_links = sum(link.values())
     out = {
@@ -441,6 +507,23 @@ def compute_polyhedral_connectivity(atoms_list, max_cutoff, get_cutoff_fn,
         "cation_edge_or_face_percent": (100.0 * n_ef_total / n_cat_total
                                         if n_cat_total else 0.0),
         "per_structure_edge_percent": per_structure_edge,
+        "uncertainty": summarize_structures(per_structure_edge),
+        "link_percent_uncertainty": {
+            kind: summarize_structures([
+                100.0 * links[kind] / sum(links.values()) if links else None
+                for links in per_structure_links])
+            for kind in ("corner", "edge", "face")},
+        "n_links_uncertainty": summarize_structures([
+            sum(links.values()) for links in per_structure_links]),
+        "fraction_of_sites": (n_ef_total / n_cat_total if n_cat_total else None),
+        "fraction_of_structures": float(np.mean([
+            value is not None and value > 0 for value in per_structure_edge])),
+        "site_fraction_uncertainty": summarize_structures([
+            value / 100 if value is not None else None for value in per_structure_edge]),
+        "structure_fraction_uncertainty": summarize_structures([
+            float(value is not None and value > 0) for value in per_structure_edge]),
+        "fraction_definition": "cation sites / structures with any edge- or face-sharing cation",
+        "face_percent_uncertainty": summarize_structures(per_structure_face),
         "per_species": {},
     }
     for c, ps in per_species.items():
@@ -452,6 +535,10 @@ def compute_polyhedral_connectivity(atoms_list, max_cutoff, get_cutoff_fn,
             "mean_corner_links": ps["corner_links"] / n,
             "mean_edge_links": ps["edge_links"] / n,
             "mean_face_links": ps["face_links"] / n,
+            "per_structure": per_structure_species[c],
+            "uncertainty": {
+                field: summarize_structures([row[field] for row in per_structure_species[c]])
+                for field in per_structure_species[c][0]},
         }
     return out
 
@@ -470,8 +557,22 @@ def format_connectivity_report(r: dict) -> str:
         lines.append(f"    {c}: {ps['n_atoms']} atoms, edge/face-sharing {ps['edge_or_face_percent']:.1f}%, "
                      f"links per atom corner {ps['mean_corner_links']:.2f} / edge "
                      f"{ps['mean_edge_links']:.2f} / face {ps['mean_face_links']:.2f}")
+    if r.get("fraction_of_sites") is not None:
+        lines.append(f"    Fraction of cation sites in edge/face links: "
+                     f"{100 * r['fraction_of_sites']:.1f}%; fraction of structures "
+                     f"with such sites: {100 * r['fraction_of_structures']:.1f}%")
     if len(r["per_structure_edge_percent"]) > 1:
-        v = np.array(r["per_structure_edge_percent"])
+        v = np.array([value for value in r["per_structure_edge_percent"] if value is not None])
+        if not len(v):
+            return "\n".join(lines)
         lines.append(f"    per-structure edge/face-sharing cations: "
-                     f"{v.mean():.1f} +/- {v.std():.1f}% (min {v.min():.1f}, max {v.max():.1f})")
+                     f"{v.mean():.1f}%, structure SD {v.std():.1f}% "
+                     f"(min {v.min():.1f}, max {v.max():.1f})")
+    uncertainty = r.get("uncertainty")
+    if uncertainty and uncertainty["sem"] is not None:
+        lines.append(f"    Edge/face site-percent mean: SEM={uncertainty['sem']:.2f}%; "
+                     f"{100 * uncertainty['confidence']:g}% t CI "
+                     f"[{uncertainty['ci_low']:.2f}, {uncertainty['ci_high']:.2f}]%")
+    elif uncertainty:
+        lines.append("    SEM/t interval unavailable: fewer than two structures with cation sites.")
     return "\n".join(lines)

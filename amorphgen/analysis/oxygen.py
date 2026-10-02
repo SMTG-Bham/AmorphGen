@@ -9,6 +9,7 @@ from ase.data import atomic_numbers
 from ase.neighborlist import neighbor_list
 
 from .cutoff import parse_cutoff_spec, resolve_cutoffs
+from .uncertainty import summarize_structures
 
 
 DEFAULT_NETWORK_FORMERS = ("Al", "B", "Ge", "P", "Si")
@@ -21,7 +22,10 @@ def compute_oxygen_speciation(atoms_list, network_formers=None, cutoff="auto-rdf
 
     Zero, one, two, three and four-or-more neighbours are labelled ``free``,
     ``non_bridging``, ``bridging``, ``tricluster`` and ``higher_coordinated``.
-    Fractions are in [0, 1] and pooled by oxygen count across frames.
+    Legacy ``fractions`` and ``fraction_of_sites`` are in [0, 1] and pooled
+    by oxygen count. ``fraction_of_structures`` counts structures containing
+    any oxygen of each species. Uncertainty uses equal-weight per-structure
+    site fractions; oxygen-free structures have missing site fractions.
     Periodic images are distinct neighbours, including in small unit cells.
 
     ``network_formers`` is an iterable of element symbols (or a comma/plus
@@ -105,7 +109,28 @@ def compute_oxygen_speciation(atoms_list, network_formers=None, cutoff="auto-rdf
                               "oxygen_indices": oxygen_indices.tolist(),
                               "network_former_coordination": counts})
         all_counts.extend(counts)
-    return {**summarise(all_counts), "n_structures": len(atoms_list),
+    pooled = summarise(all_counts)
+    fraction_of_structures = {
+        species: sum(frame["counts"][species] > 0 for frame in per_structure)
+        / len(per_structure) for species in OXYGEN_SPECIES}
+    uncertainty = {}
+    for species in OXYGEN_SPECIES:
+        uncertainty[f"counts.{species}"] = summarize_structures([
+            frame["counts"][species] for frame in per_structure])
+        uncertainty[f"fraction_of_sites.{species}"] = summarize_structures([
+            frame["fractions"][species] if frame["total_oxygen"] else None
+            for frame in per_structure])
+        uncertainty[f"fraction_of_structures.{species}"] = summarize_structures([
+            float(frame["counts"][species] > 0) for frame in per_structure])
+    uncertainty["network_former_coordination"] = summarize_structures([
+        float(np.mean(frame["network_former_coordination"]))
+        if frame["total_oxygen"] else None for frame in per_structure])
+    return {**pooled, "n_structures": len(atoms_list),
+            "fraction_of_sites": dict(pooled["fractions"]),
+            "fraction_of_structures": fraction_of_structures,
+            "fraction_of_structures_definition":
+                "fraction of all input structures containing at least one oxygen of this species",
+            "uncertainty": uncertainty,
             "network_formers": formers, "network_formers_inferred": inferred,
             "cutoffs": {f"O-{s}": c for (_, s), c in pair_cutoffs.items()},
             "per_structure": per_structure}

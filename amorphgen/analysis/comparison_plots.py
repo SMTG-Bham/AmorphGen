@@ -57,7 +57,8 @@ from ase.units import _Nav
 # not pull matplotlib — keeps doc builds and lightweight scripts fast.
 
 from .analyser import StructureAnalyser
-from .plotting import _figure
+from .plotting import _figure, _draw_uncertainty, _save_curve_uncertainty
+from .uncertainty import summarize_structures
 
 
 # ─── Okabe-Ito colour-blind-safe palette ──────────────────────────────────
@@ -212,6 +213,11 @@ def plot_partial_rdf(ensembles: list[EnsembleSpec],
     _assign_colours(ensembles)
     fig, ax = _figure(figsize=(5.0, 4.0))
     csv_rows = [["ensemble", "pair", "r_A", "g_r"]]
+    summaries = {}
+    # Comparisons and their exported bands share one safe radial grid.
+    if rmax is None and ensembles:
+        from .rdf import _shared_rmax
+        rmax = _shared_rmax([a for e in ensembles for a in e.analyser().atoms_list], None)
 
     auto_rmax = None
     for ens in ensembles:
@@ -223,6 +229,9 @@ def plot_partial_rdf(ensembles: list[EnsembleSpec],
                 continue
             ax.plot(rdf["r"], rdf["g_r"], color=ens.color, lw=1.4,
                     ls=ls, alpha=0.9)
+            summary = rdf.get("uncertainty")
+            summaries[f"{ens.label}: {pair}"] = summary
+            _draw_uncertainty(ax, rdf["r"], summary, ens.color)
             if auto_rmax is None and len(rdf["r"]):
                 auto_rmax = float(rdf["r"][-1])
             for r, g in zip(rdf["r"], rdf["g_r"]):
@@ -238,6 +247,7 @@ def plot_partial_rdf(ensembles: list[EnsembleSpec],
            for e in ensembles]
     leg += [Line2D([0], [0], color="0.3", lw=1.4, ls=ls, label=pair)
             for pair, ls in pairs]
+    leg += ax.get_legend_handles_labels()[0]
     ax.legend(handles=leg, frameon=False, fontsize=8,
               loc="upper right", handlelength=2.0, labelspacing=0.2)
     ax.text(0.03, 0.97, "(a)", transform=ax.transAxes, fontsize=12,
@@ -246,6 +256,9 @@ def plot_partial_rdf(ensembles: list[EnsembleSpec],
 
     _save(fig, output_dir, prefix, "rdf", save_pdf=save_pdf)
     _write_csv(output_dir, prefix, "rdf", csv_rows)
+    if summaries:
+        base = os.path.join(output_dir, f"{prefix}_rdf" if prefix else "rdf")
+        _save_curve_uncertainty(base, rdf["r"], summaries)
 
 
 # ─── Panel (b): coordination distributions ────────────────────────────────
@@ -265,11 +278,12 @@ def plot_coordination(ensembles: list[EnsembleSpec],
     from matplotlib.ticker import FuncFormatter
     _assign_colours(ensembles)
     fig, ax = _figure(figsize=(5.0, 4.0))
-    csv_rows = [["ensemble", "site", "CN", "fraction_percent"]]
+    csv_rows = [["ensemble", "site", "CN", "fraction_of_sites_percent", "fraction_of_structures_percent"]]
 
-    cn_tops = [(e, e.analyser().coordination()[top_key]["distribution"])
+    coordination = {id(e): e.analyser().coordination() for e in ensembles}
+    cn_tops = [(e, coordination[id(e)][top_key]["distribution"])
                for e in ensembles]
-    cn_bots = [(e, e.analyser().coordination()[bot_key]["distribution"]
+    cn_bots = [(e, coordination[id(e)][bot_key]["distribution"]
                 if bot_key else {}) for e in ensembles]
     all_cn = sorted({c for _, d in cn_tops for c in d}
                     | {c for _, d in cn_bots for c in d})
@@ -282,7 +296,8 @@ def plot_coordination(ensembles: list[EnsembleSpec],
         ax.bar(x + offset, [dist.get(c, 0) for c in all_cn], width,
                color=ens.color, edgecolor="black", lw=0.4, label=ens.label)
         for c in all_cn:
-            csv_rows.append([ens.label, top_key, c, dist.get(c, 0.0)])
+            csv_rows.append([ens.label, top_key, c, dist.get(c, 0.0),
+                             100 * coordination[id(ens)][top_key]["fraction_of_structures"].get(c, 0)])
 
     if bot_key:
         for i, (ens, dist) in enumerate(cn_bots):
@@ -290,7 +305,8 @@ def plot_coordination(ensembles: list[EnsembleSpec],
             ax.bar(x + offset, [-dist.get(c, 0) for c in all_cn], width,
                    color=ens.color, edgecolor="black", lw=0.4, alpha=0.55)
             for c in all_cn:
-                csv_rows.append([ens.label, bot_key, c, dist.get(c, 0.0)])
+                csv_rows.append([ens.label, bot_key, c, dist.get(c, 0.0),
+                                 100 * coordination[id(ens)][bot_key]["fraction_of_structures"].get(c, 0)])
         ax.axhline(0, color="black", lw=0.9, zorder=4)
         ax.yaxis.set_major_formatter(
             FuncFormatter(lambda v, p: f"{abs(v):.0f}"))
@@ -310,7 +326,7 @@ def plot_coordination(ensembles: list[EnsembleSpec],
                 ha="right", va="top", fontsize=9, fontweight="bold", color="0.25")
 
     ax.set_xlabel("Coordination number")
-    ax.set_ylabel("Fraction (%)")
+    ax.set_ylabel("Fraction of sites (%)")
     ax.set_xticks(all_cn)
     ax.legend(frameon=False, fontsize=8, loc="upper left",
               bbox_to_anchor=(0.10, 0.98), labelspacing=0.25)
@@ -340,19 +356,30 @@ def plot_bond_angles(ensembles: list[EnsembleSpec],
     _assign_colours(ensembles)
     if bins is None:
         bins = np.arange(40, 181, 2)        # last edge 180: linear triplets count
-    centres = 0.5 * (bins[:-1] + bins[1:])
+    bins = np.asarray(bins, dtype=float)
+    if (bins.ndim != 1 or len(bins) < 2 or not np.isfinite(bins).all()
+            or np.any(np.diff(bins) <= 0) or bins[0] < 0 or bins[-1] > 180):
+        raise ValueError("angle bins must increase within 0–180 degrees")
+    # Normalize over all angles even when the displayed range is narrower.
+    full_bins = np.unique(np.r_[0.0, bins, 180.0])
+    full_centres = 0.5 * (full_bins[:-1] + full_bins[1:])
+    shown = (full_centres >= bins[0]) & (full_centres <= bins[-1])
     fig, ax = _figure(figsize=(5.0, 4.0))
     csv_rows = [["ensemble", "triplet", "angle_deg", "probability_density"]]
+    summaries = {}
 
     for ens in ensembles:
-        angles_dict = ens.analyser()._compute_all_angles()
+        distributions = ens.analyser().angle_distribution(bins=full_bins)
         for key, ls in angle_keys:
-            angles = angles_dict.get(key, [])
-            if len(angles):
-                h, _ = np.histogram(angles, bins=bins, density=True)
-                ax.plot(centres, h, color=ens.color, lw=1.5, ls=ls, alpha=0.9)
-                for c, v in zip(centres, h):
-                    csv_rows.append([ens.label, key, float(c), float(v)])
+            if key not in distributions:
+                continue
+            result = distributions[key]
+            h = np.asarray(result["distribution"], dtype=float)
+            ax.plot(full_centres, h, color=ens.color, lw=1.5, ls=ls, alpha=0.9)
+            summaries[f"{ens.label}: {key}"] = result["uncertainty"]
+            _draw_uncertainty(ax, full_centres, result["uncertainty"], ens.color)
+            for c, v in zip(full_centres[shown], h[shown]):
+                csv_rows.append([ens.label, key, float(c), float(v)])
 
     ax.set_xlim(float(bins[0]), float(bins[-1]))
     ax.set_xlabel("Angle (°)")
@@ -362,6 +389,7 @@ def plot_bond_angles(ensembles: list[EnsembleSpec],
            for e in ensembles]
     leg += [Line2D([0], [0], color="0.3", lw=1.4, ls=ls, label=k)
             for k, ls in angle_keys]
+    leg += ax.get_legend_handles_labels()[0]
     ax.legend(handles=leg, frameon=False, fontsize=8,
               loc="upper right", handlelength=2.0, labelspacing=0.2)
     ax.text(0.03, 0.97, "(c)", transform=ax.transAxes, fontsize=12,
@@ -370,6 +398,8 @@ def plot_bond_angles(ensembles: list[EnsembleSpec],
 
     _save(fig, output_dir, prefix, "angles", save_pdf=save_pdf)
     _write_csv(output_dir, prefix, "angles", csv_rows)
+    base = os.path.join(output_dir, f"{prefix}_angles" if prefix else "angles")
+    _save_curve_uncertainty(base, full_centres, summaries)
 
 
 # ─── Panel (d): per-structure density vs experimental reference ───────────
@@ -408,7 +438,12 @@ def plot_density(ensembles: list[EnsembleSpec],
         csv_rows.append([exp_label, "exp_lo", exp_lo])
         csv_rows.append([exp_label, "exp_hi", exp_hi])
 
-    rho_data = [_per_structure_density(e.resolve_files()) for e in ensembles]
+    rho_data = [np.asarray(e.analyser().density()["values"], dtype=float)
+                for e in ensembles]
+    # A one-point curve uses the same export schema as the other descriptors.
+    summaries = {e.label: summarize_structures(values[:, None])
+                 for e, values in zip(ensembles, rho_data)}
+    interval_extents = []
     start = (x_exp + 1) if has_exp else 1
     positions = list(range(start, start + len(ensembles)))
 
@@ -425,13 +460,21 @@ def plot_density(ensembles: list[EnsembleSpec],
         jx = x0 + 0.06 * rng.standard_normal(len(vals))
         ax.scatter(jx, vals, color=ens.color, s=22, alpha=0.9,
                    edgecolor="black", lw=0.4, zorder=3)
-        m, s = vals.mean(), vals.std()
+        m = vals.mean()
+        summary = summaries[ens.label]
+        lo, hi = summary["ci_low"][0], summary["ci_high"][0]
         ax.hlines(m, x0 - 0.22, x0 + 0.22, color="black", lw=1.6, zorder=4)
-        ax.errorbar(x0, m, yerr=s, color="black", lw=1.0, capsize=4,
-                    fmt="none", zorder=4)
-        ax.text(x0, vals.max() + 0.03 * (vals.max() - vals.min() + 0.1) + 0.02,
-                f"{m:.2f}±{s:.2f}", ha="center", va="bottom",
-                fontsize=9, color=ens.color, fontweight="bold")
+        if lo is not None and hi is not None:
+            ax.errorbar(x0, m, yerr=[[m - lo], [hi - m]], color="black",
+                        lw=1.0, capsize=4, fmt="none", zorder=4)
+            interval_extents.extend([lo, hi])
+            annotation = f"{m:.2f}\n95% t CI [{lo:.2f}, {hi:.2f}]"
+        else:
+            annotation = f"{m:.2f}\nCI unavailable (n < 2)"
+        top = max(vals.max(), hi if hi is not None else vals.max())
+        ax.text(x0, top + 0.03 * (vals.max() - vals.min() + 0.1) + 0.02,
+                annotation, ha="center", va="bottom", fontsize=8,
+                color=ens.color, fontweight="bold")
         for i, v in enumerate(vals):
             csv_rows.append([ens.label, i, float(v)])
 
@@ -441,8 +484,8 @@ def plot_density(ensembles: list[EnsembleSpec],
     ax.set_xticklabels(xticklabels)
     ax.set_xlim(0.4, positions[-1] + 0.6)
 
-    all_rho = np.concatenate(rho_data + ([np.array([exp_lo, exp_hi])]
-                                          if has_exp else []))
+    all_rho = np.concatenate(rho_data + [np.asarray(interval_extents)]
+                             + ([np.array([exp_lo, exp_hi])] if has_exp else []))
     ymin = all_rho.min() - 0.10 * max(0.05, all_rho.max() - all_rho.min())
     ymax = all_rho.max() + 0.20 * max(0.05, all_rho.max() - all_rho.min())
     span = max(0.1, ymax - ymin)
@@ -454,6 +497,8 @@ def plot_density(ensembles: list[EnsembleSpec],
 
     _save(fig, output_dir, prefix, "density", save_pdf=save_pdf)
     _write_csv(output_dir, prefix, "density", csv_rows)
+    base = os.path.join(output_dir, f"{prefix}_density" if prefix else "density")
+    _save_curve_uncertainty(base, [0], summaries)
 
 
 # ─── CSV helper ───────────────────────────────────────────────────────────

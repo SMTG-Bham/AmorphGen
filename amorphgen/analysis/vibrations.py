@@ -13,6 +13,7 @@ from ase import units
 from ase.calculators.singlepoint import SinglePointCalculator
 from scipy.integrate import trapezoid
 
+from .uncertainty import summarize_structures
 
 # sqrt(eV / (angstrom**2 * atomic_mass_unit)) is an angular frequency.
 _FREQUENCY_TO_THZ = np.sqrt(units._e / (1e-20 * units._amu)) / (2 * np.pi * 1e12)
@@ -81,7 +82,10 @@ def compute_vibrational_dos(
         negative values represent imaginary modes, not negative real
         frequencies. Structures are pooled with equal weight per mode.
         ``per_structure`` provides frequencies, instability counts and Hessian
-        asymmetry diagnostics. Numerically zero eigenvalues are clipped only
+        asymmetry diagnostics, plus individually normalized DOS curves on the
+        shared frequency grid. ``uncertainty`` gives equal-weight structure
+        means, standard errors, t intervals and pointwise bootstrap bands for
+        DOS and its element projections. Numerically zero eigenvalues are clipped only
         within roundoff (relative to the largest eigenvalue and matrix size).
 
     Notes
@@ -189,6 +193,8 @@ def compute_vibrational_dos(
             "n_modes": n_modes,
             "frequencies_thz": frequencies,
             "imaginary_modes": int(np.count_nonzero(eigenvalues < 0)),
+            "imaginary_fraction": float(np.count_nonzero(eigenvalues < 0) / n_modes),
+            "mean_frequency_thz": float(frequencies.mean()),
             "hessian_asymmetry": asymmetry,
             "force_evaluations": 2 * n_modes,
         })
@@ -202,6 +208,10 @@ def compute_vibrational_dos(
     grid = np.linspace(lower, upper, npoints)
     dos = np.zeros(npoints)
     projected_dos = {element: np.zeros(npoints) for element in weights}
+    per_frame_dos = np.zeros((len(structures), npoints))
+    per_frame_projected = {element: np.zeros_like(per_frame_dos) for element in weights}
+    mode_structures = np.repeat(np.arange(len(structures)),
+                                [frame["n_modes"] for frame in per_structure])
     # Normalize on the returned grid, including truncated Gaussian tails. Avoid
     # constructing an npoints-by-3N array for large amorphous structures.
     for mode_index, frequency in enumerate(frequencies):
@@ -215,8 +225,22 @@ def compute_vibrational_dos(
             raise ValueError("sigma is too small to resolve on the frequency grid")
         kernel /= area * len(frequencies)
         dos += kernel
+        frame_index = mode_structures[mode_index]
+        frame_kernel = kernel * len(frequencies) / per_structure[frame_index]["n_modes"]
+        per_frame_dos[frame_index] += frame_kernel
         for element, element_weights in weights.items():
             projected_dos[element] += element_weights[mode_index] * kernel
+            per_frame_projected[element][frame_index] += element_weights[mode_index] * frame_kernel
+
+    for index, frame in enumerate(per_structure):
+        frame["dos"] = per_frame_dos[index]
+        frame["projected_dos"] = {element: curves[index]
+                                  for element, curves in per_frame_projected.items()}
+    uncertainty = {key: summarize_structures([frame[key] for frame in per_structure])
+                   for key in ("dos", "imaginary_modes", "imaginary_fraction",
+                               "mean_frequency_thz", "hessian_asymmetry")}
+    uncertainty.update({f"projected_dos.{element}": summarize_structures(curves)
+                        for element, curves in per_frame_projected.items()})
 
     return {
         "method": "harmonic_finite_difference",
@@ -230,6 +254,7 @@ def compute_vibrational_dos(
         "total_modes": len(frequencies),
         "imaginary_modes": sum(item["imaginary_modes"] for item in per_structure),
         "per_structure": per_structure,
+        "uncertainty": uncertainty,
         "displacement_angstrom": displacement,
         "sigma_thz": sigma,
         "force_evaluations": sum(item["force_evaluations"] for item in per_structure),

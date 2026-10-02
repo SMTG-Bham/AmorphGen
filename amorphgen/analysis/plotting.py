@@ -24,6 +24,50 @@ _PALETTE = ["#0072B2", "#D55E00", "#009E73", "#CC79A7",
 _EXP_COLOR = "#222222"
 
 
+def _draw_uncertainty(ax, x, uncertainty, color):
+    """Draw pointwise whole-structure bootstrap bounds, if estimable."""
+    if not uncertainty:
+        return False
+    lo = np.asarray(uncertainty["bootstrap_low"], dtype=float)
+    hi = np.asarray(uncertainty["bootstrap_high"], dtype=float)
+    valid = np.isfinite(lo) & np.isfinite(hi)
+    if not valid.any():
+        return False
+    label = f"{100 * uncertainty['confidence']:g}% pointwise bootstrap CI"
+    if label in ax.get_legend_handles_labels()[1]:
+        label = None
+    ax.fill_between(x, lo, hi, where=valid, color=color, alpha=0.18,
+                    linewidth=0, label=label)
+    return True
+
+
+def _save_curve_uncertainty(base, x, summaries):
+    """Save intervals, contributing structures and reproducibility metadata."""
+    import csv
+    import json
+    summaries = {k: v for k, v in summaries.items() if v}
+    if not summaries:
+        return
+    with open(f"{base}_uncertainty.json", "w") as handle:
+        json.dump({"grid": list(x), "descriptors": summaries}, handle,
+                  indent=2, allow_nan=False)
+    fields = ["mean", "std", "sem", "ci_low", "ci_high", "bootstrap_low", "bootstrap_high"]
+    with open(f"{base}_uncertainty.csv", "w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["descriptor", "coordinate", "n_structures", *fields])
+        for name, u in summaries.items():
+            for i, coordinate in enumerate(x):
+                writer.writerow([name, coordinate, u["n_per_point"][i],
+                                 *[u[field][i] for field in fields]])
+    with open(f"{base}_per_structure.csv", "w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["descriptor", "structure_index", "coordinate", "value"])
+        for name, u in summaries.items():
+            for index, curve in enumerate(u["per_structure"]):
+                writer.writerows((name, index, coordinate, value)
+                                 for coordinate, value in zip(x, curve))
+
+
 def _apply_pub_style(ax, label_fs=11, tick_fs=10):
     """Apply publication-style cosmetics: hide top/right spines, inward ticks,
     minor ticks, consistent font sizing on tick labels."""
@@ -87,7 +131,8 @@ def _save_fig(fig, base_path, dpi=300, save_pdf=False):
 
 
 def plot_pair_panels(x, curves, xlabel, ylabel, base_path, dpi=300,
-                     save_pdf=False, xlim=None, hline=1.0, title=None):
+                     save_pdf=False, xlim=None, hline=1.0, title=None,
+                     uncertainties=None):
     """One small panel per element pair (shared axes), for g(r) or S_ab(q).
 
     ``curves`` maps a pair label to its y-array on the common grid ``x``.
@@ -110,6 +155,9 @@ def plot_pair_panels(x, curves, xlabel, ylabel, base_path, dpi=300,
         if hline is not None:
             ax.axhline(hline, ls=":", color="grey", alpha=0.6, lw=0.8)
         ax.plot(x[m], y[m], lw=1.3, color=_PALETTE[k % len(_PALETTE)])
+        if uncertainties and _draw_uncertainty(
+                ax, x, uncertainties.get(labels[k]), _PALETTE[k % len(_PALETTE)]):
+            ax.legend(fontsize=6, frameon=False, loc="upper left")
         ax.text(0.97, 0.92, labels[k], transform=ax.transAxes, ha="right",
                 va="top", fontsize=9)
         _apply_pub_style(ax, label_fs=10, tick_fs=8)
@@ -181,6 +229,7 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
 
     fig, ax = _figure(figsize=(7, 4.5))
     rdf_csv_data = {}
+    rdf_uncertainties = {}
 
     if normalise:
         ax.axhline(y=1, color='0.5', linestyle='--', linewidth=0.8, alpha=0.6,
@@ -192,9 +241,11 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
     r = np.array(rdf_total["r"])
     g_r_total = np.array(rdf_total["g_r"])
     rdf_csv_data["Total"] = (r, g_r_total)
+    rdf_uncertainties["Total"] = rdf_total.get("uncertainty")
     if len(unique) == 1 or show_total_rdf:
         ax.plot(r, g_r_total, label="Total", linewidth=2.0,
                 color='black', linestyle='--' if len(unique) > 1 else '-')
+        _draw_uncertainty(ax, r, rdf_total.get("uncertainty"), "black")
 
     for i, pair in enumerate(pairs):
         rdf_data = analyser.rdf(pair=pair, rmax=rmax, sigma=smearing)
@@ -203,6 +254,8 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
         ax.plot(r, g_r, label=pair, linewidth=1.8,
                 color=_PALETTE[i % len(_PALETTE)])
         rdf_csv_data[pair] = (r, g_r)
+        rdf_uncertainties[pair] = rdf_data.get("uncertainty")
+        _draw_uncertainty(ax, r, rdf_data.get("uncertainty"), _PALETTE[i % len(_PALETTE)])
 
     ax.set_xlabel(r"r (Å)")
     ax.set_ylabel("g(r)" if normalise else "Count")
@@ -221,7 +274,8 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
                          os.path.join(output_dir, f"{prefix}_rdf_panels"),
                          dpi, save_pdf, xlim=(0, rmax),
                          hline=1.0 if normalise else None,
-                         title=f"Partial RDFs — {formula}" if show_title else None)
+                         title=f"Partial RDFs — {formula}" if show_title else None,
+                         uncertainties=rdf_uncertainties)
 
     if save_csv:
         rdf_csv_path = os.path.join(output_dir, f"{prefix}_rdf.csv")
@@ -235,6 +289,8 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
                     row.append(f"{rdf_csv_data[pair][1][i]:.6f}")
                 f.write(",".join(row) + "\n")
         print(f"  Saved: {rdf_csv_path}")
+        _save_curve_uncertainty(os.path.join(output_dir, f"{prefix}_rdf"), r,
+                                rdf_uncertainties)
 
     # ── 2. CN distribution ───────────────────────────────────────────
     # Only BONDED pairs are plotted (cation-anion, hetero covalent), the same
@@ -275,7 +331,7 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
         pcts = [data["distribution"][cn] for cn in cn_vals]
         bars = ax.bar(cn_vals, pcts, color=color, edgecolor='black', linewidth=0.4)
         ax.set_xlabel(f"{label} CN")
-        ax.set_ylabel("Fraction (%)")
+        ax.set_ylabel("Fraction of sites (%)")
         ax.set_xticks(cn_vals)
         ax.set_ylim(0, max(pcts, default=1) * 1.22)     # room for the mean box
         ax.text(0.97, 0.95, f"mean = {data['mean']:.1f}",
@@ -334,7 +390,7 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
                     ha="right", va="bottom", fontsize=10,
                     fontweight="bold", color="0.25")
             ax.set_xlabel("Coordination number")
-            ax.set_ylabel("Fraction (%)")
+            ax.set_ylabel("Fraction of sites (%)")
             ax.set_xticks(all_cn)
             ax.legend(frameon=False, fontsize=9, loc="upper left",
                       labelspacing=0.25)
@@ -353,13 +409,13 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
         if save_csv:
             cn_csv_path = os.path.join(output_dir, f"{prefix}_cn.csv")
             with open(cn_csv_path, "w") as f:
-                f.write("pair,CN,fraction(%),count\n")
+                f.write("pair,CN,fraction_of_sites(%),fraction_of_structures(%),count\n")
                 rows = dict(cn_pairs); rows.update(totals)
                 for pair, data in rows.items():
                     total_atoms = data.get("total_atoms", 0)
                     for cn_val, pct in sorted(data["distribution"].items()):
-                        count = int(round(pct * total_atoms / 100)) if total_atoms else ""
-                        f.write(f"{pair},{cn_val},{pct:.1f},{count}\n")
+                        count = int(round(data["fraction_of_sites"][cn_val] * total_atoms)) if total_atoms else ""
+                        f.write(f"{pair},{cn_val},{pct:.1f},{100 * data['fraction_of_structures'][cn_val]:.3f},{count}\n")
             print(f"  Saved: {cn_csv_path}")
 
     # ── 2b. Requested totals (--total-cn / total_cn:) ────────────────
@@ -376,43 +432,39 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
             if save_csv:
                 path = os.path.join(output_dir, f"{prefix}_cn_total.csv")
                 with open(path, "w") as f:
-                    f.write("centre,CN,fraction(%)\n")
+                    f.write("centre,CN,fraction_of_sites(%),fraction_of_structures(%)\n")
                     for label, data in items.items():
                         for cn_val, pct in sorted(data["distribution"].items()):
-                            f.write(f"{label},{cn_val},{pct:.1f}\n")
+                            f.write(f"{label},{cn_val},{pct:.1f},{100 * data['fraction_of_structures'][cn_val]:.3f}\n")
                 print(f"  Saved: {path}")
 
     # ── 3. Bond angle distribution ───────────────────────────────────
     all_angle_data = analyser._compute_all_angles()
+    distributions = analyser.angle_distribution(normalise=normalise)
+    selected = [k for k in distributions
+                if angle_triplets is None or k in angle_triplets]
 
-    if angle_triplets is not None:
-        all_angle_data = {k: v for k, v in all_angle_data.items()
-                         if k in angle_triplets}
-    all_angle_data = {k: v for k, v in all_angle_data.items() if len(v) > 10}
-
-    if all_angle_data:
+    if selected:
         fig, ax = _figure(figsize=(7, 4.5))
-        bins = np.arange(40, 181, 2)        # last edge 180: linear triplets count
-        bin_centres = (bins[:-1] + bins[1:]) / 2
-
-        for i, (triplet, angles) in enumerate(all_angle_data.items()):
+        for i, triplet in enumerate(selected):
+            data = distributions[triplet]
             colour = _PALETTE[i % len(_PALETTE)]
+            bin_centres = np.asarray(data["angle"])
+            hist = np.asarray(data["distribution"], dtype=float)
             if angle_style in ("histogram", "both"):
-                ax.hist(angles, bins=bins, alpha=0.3,
-                        label=triplet if angle_style == "histogram" else None,
-                        density=normalise, color=colour,
-                        edgecolor='black', linewidth=0.3)
+                ax.bar(bin_centres, hist, width=np.diff(data["bin_edges"]), alpha=0.3,
+                       label=triplet if angle_style == "histogram" else None,
+                       color=colour, edgecolor="black", linewidth=0.3)
             if angle_style in ("line", "both"):
-                hist, _ = np.histogram(angles, bins=bins, density=normalise)
-                ax.plot(bin_centres, hist, label=triplet, linewidth=2.0,
-                        color=colour)
+                ax.plot(bin_centres, hist, label=triplet, linewidth=2.0, color=colour)
+            _draw_uncertainty(ax, bin_centres, data["uncertainty"], colour)
 
         ax.set_xlabel("Angle (°)")
         ax.set_ylabel("Probability density" if normalise else "Count")
         if show_title:
             ax.set_title(f"Bond Angle Distribution — {formula}", fontsize=12)
         ax.legend(fontsize=9, frameon=False, loc='best')
-        ax.set_xlim(40, 180)
+        ax.set_xlim(0, 180)
         _apply_pub_style(ax)
         fig.tight_layout()
         _save_fig(fig, os.path.join(output_dir, f"{prefix}_angles"),
@@ -421,11 +473,15 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
         if save_csv:
             angle_csv_path = os.path.join(output_dir, f"{prefix}_angles.csv")
             with open(angle_csv_path, "w") as f:
-                f.write("triplet,angle(deg)\n")
-                for triplet, angles in all_angle_data.items():
-                    for a in angles:
-                        f.write(f"{triplet},{a:.2f}\n")
+                f.write("triplet,angle(deg),structure_index\n")
+                for index, frame in enumerate(all_angle_data.per_structure):
+                    for triplet in selected:
+                        for a in frame.get(triplet, []):
+                            f.write(f"{triplet},{a:.2f},{index}\n")
             print(f"  Saved: {angle_csv_path}")
+            _save_curve_uncertainty(os.path.join(output_dir, f"{prefix}_angles"),
+                                    bin_centres,
+                                    {k: distributions[k]["uncertainty"] for k in selected})
 
     # ── 4. Per-structure density violin ──────────────────────────────
     # New in v1.0.0: matches the density panel in
@@ -447,14 +503,16 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
         jx = x_pos + 0.06 * rng.standard_normal(len(rho_values))
         ax.scatter(jx, rho_values, color=_PALETTE[0], s=22, alpha=0.9,
                    edgecolor="black", lw=0.4, zorder=3)
-        m, s = rho_values.mean(), rho_values.std()
+        m = rho_values.mean()
+        u = density_dict["uncertainty"]
+        s = u["ci_high"] - m
         ax.hlines(m, x_pos - 0.22, x_pos + 0.22, color="black", lw=1.6,
                   zorder=4)
         ax.errorbar(x_pos, m, yerr=s, color="black", lw=1.0, capsize=4,
                     fmt="none", zorder=4)
         ax.text(x_pos, rho_values.max()
                 + 0.03 * (rho_values.max() - rho_values.min() + 0.1) + 0.02,
-                f"{m:.2f} ± {s:.2f}",
+                f"{m:.2f} ± {s:.2f} (95% t CI)",
                 ha="center", va="bottom", fontsize=9,
                 color=_PALETTE[0], fontweight="bold")
         ax.set_xticks([x_pos])
@@ -462,9 +520,9 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
         # not by the tool.
         ax.set_xticklabels([f"{formula} (n = {len(rho_values)})"])
         ax.set_xlim(0.4, 1.6)
-        ymin = rho_values.min() - 0.10 * max(0.05,
+        ymin = min(rho_values.min(), u["ci_low"]) - 0.10 * max(0.05,
                                               rho_values.max() - rho_values.min())
-        ymax = rho_values.max() + 0.20 * max(0.05,
+        ymax = max(rho_values.max(), u["ci_high"]) + 0.20 * max(0.05,
                                               rho_values.max() - rho_values.min())
         span = max(0.1, ymax - ymin)
         ax.set_ylim(ymin - 0.05 * span, ymax + 0.10 * span)
@@ -483,6 +541,31 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
                 for i, rho in enumerate(rho_values):
                     f.write(f"{i},{rho:.4f}\n")
             print(f"  Saved: {rho_csv_path}")
+
+    if save_csv:
+        import csv
+        import json
+        from .structure import compute_bond_angle_stats
+        # Scalar estimates retain raw structure identity as well as pooled
+        # descriptors, so reports can be audited without rerunning geometry.
+        statistics = {"density": density_dict, "coordination": cn_data,
+                      "total_coordination": analyser.total_coordination(),
+                      "bond_distances": analyser.bond_distances(),
+                      "bond_angles": compute_bond_angle_stats(all_angle_data)}
+        base = os.path.join(output_dir, f"{prefix}_statistics")
+        with open(f"{base}.json", "w") as handle:
+            json.dump(statistics, handle, indent=2, allow_nan=False)
+        with open(f"{base}.csv", "w", newline="") as handle:
+            writer = csv.writer(handle)
+            fields = ["mean", "std", "sem", "ci_low", "ci_high", "n_structures"]
+            writer.writerow(["descriptor", "pooled_mean", "pooled_std", *fields])
+            entries = [("density", density_dict)]
+            entries.extend((f"{section}.{key}", data)
+                           for section in ("coordination", "total_coordination", "bond_distances", "bond_angles")
+                           for key, data in statistics[section].items())
+            for name, data in entries:
+                writer.writerow([name, data.get("pooled_mean"), data.get("pooled_std"),
+                                 *[data["uncertainty"][key] for key in fields]])
 
 
 def plot_sq(sq_result, output_dir=".", prefix="analysis", dpi=300,
@@ -513,6 +596,8 @@ def plot_sq(sq_result, output_dir=".", prefix="analysis", dpi=300,
 
     fig, ax = _figure(figsize=(5.4, 4.0))
     ax.plot(q[m], s[m], lw=1.4, color=_PALETTE[0])
+    if _draw_uncertainty(ax, q, sq_result.get("uncertainty"), _PALETTE[0]):
+        ax.legend(frameon=False, fontsize=8)
     ax.axhline(1.0, ls=":", color="grey", alpha=0.6)
     # Conventional S(q) presentation starts at 0. Note the Faber-Ziman total
     # can be negative at low q for multi-component x-ray weighting (down to
@@ -535,6 +620,8 @@ def plot_sq(sq_result, output_dir=".", prefix="analysis", dpi=300,
             mm = ~np.isnan(s_ab) & ((n > 0) if n is not None else True)
             ax2.plot(q[mm], s_ab[mm], lw=1.3, color=_PALETTE[i % len(_PALETTE)],
                      label=rf"$S_{{\mathrm{{{pair.replace('-', '')}}}}}(q)$")
+            _draw_uncertainty(ax2, q, sq_result.get("partials_uncertainty", {}).get(pair),
+                              _PALETTE[i % len(_PALETTE)])
         ax2.axhline(1.0, ls=":", color="grey", alpha=0.6)
         ax2.set_xlabel(r"$q$ ($\mathrm{\AA}^{-1}$)")
         ax2.set_ylabel(r"$S_{ab}(q)$")
@@ -549,7 +636,8 @@ def plot_sq(sq_result, output_dir=".", prefix="analysis", dpi=300,
                                  for p, v in partials.items()},
                              r"$q$ ($\mathrm{\AA}^{-1}$)", r"$S_{ab}(q)$",
                              f"{base}_partials_panels", dpi, save_pdf,
-                             title="Faber-Ziman partials" if show_title else None)
+                             title="Faber-Ziman partials" if show_title else None,
+                             uncertainties=sq_result.get("partials_uncertainty"))
 
     with open(f"{base}.csv", "w", newline="") as fh:
         w = csv.writer(fh)
@@ -572,6 +660,8 @@ def plot_sq(sq_result, output_dir=".", prefix="analysis", dpi=300,
             for qi, si in zip(q, s):
                 w.writerow([f"{qi:.5f}", "" if np.isnan(si) else f"{si:.6f}"])
     print(f"  Saved: {base}.csv")
+    _save_curve_uncertainty(base, q, {"s_q": sq_result.get("uncertainty"),
+                                     **sq_result.get("partials_uncertainty", {})})
 
 
 def plot_tr(tr_result, output_dir=".", prefix="analysis", dpi=300,
@@ -593,6 +683,8 @@ def plot_tr(tr_result, output_dir=".", prefix="analysis", dpi=300,
 
     fig, ax = plt.subplots(figsize=(5.4, 4.0))
     ax.plot(r, T, lw=1.5, color=_PALETTE[0])
+    if _draw_uncertainty(ax, r, tr_result.get("uncertainty"), _PALETTE[0]):
+        ax.legend(frameon=False, fontsize=8)
     ax.set_xlabel(r"$r$ ($\mathrm{\AA}$)")
     ax.set_ylabel(r"$T(r)$ ($\mathrm{\AA}^{-2}$)")
     ax.set_xlim(r.min(), r.max())
@@ -614,6 +706,8 @@ def plot_tr(tr_result, output_dir=".", prefix="analysis", dpi=300,
         for row in zip(r, g, T, G):
             w.writerow([f"{v:.6f}" for v in row])
     print(f"  Saved: {base}.csv")
+    curves = tr_result.get("curve_uncertainty", {})
+    _save_curve_uncertainty(base, r, {k: curves[k] for k in ("T_r", "g_r", "G_r") if k in curves})
 
 
 def plot_rings(rings, output_dir, label="auto", dpi=300, save_pdf=False,

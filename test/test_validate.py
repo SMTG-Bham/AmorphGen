@@ -36,6 +36,15 @@ class TestVerdict:
     def test_none_value_is_na(self):
         assert _verdict(None, 2.0, 3.0) == "n/a"
 
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+    def test_nonfinite_value_is_na(self, value):
+        assert _verdict(value, 2.0, 3.0) == "n/a"
+
+    @pytest.mark.parametrize("low, high", [(3.0, 2.0), (float("nan"), 3.0),
+                                         (2.0, float("inf"))])
+    def test_invalid_reference_is_inconclusive(self, low, high):
+        assert _verdict(2.5, low, high) == "inconclusive"
+
     def test_custom_tolerance(self):
         # With 1% tol, 1.96 (margin 0.04) > 0.01*max(2,3,1)=0.03 → fail
         assert _verdict(1.96, 2.0, 3.0, tol_frac=0.01) == "fail"
@@ -171,12 +180,81 @@ class TestValidateAgainstReference:
                                           ref)["rows"]
         assert [r[0] for r in rows] == ["Bond Si-O", "CN Si-O", "CN O-Si",
                                         "Angle Si-O-Si", "Angle O-Si-O"]
-        assert [r[5] for r in rows] == ["match"] * 5
+        assert [r[5] for r in rows] == ["inconclusive"] * 5
 
     def test_no_system_falls_back_to_unspecified(self, reference):
         ref_no_system = {k: v for k, v in reference.items() if k != "system"}
         result = validate_against_reference(_StubAnalyser(), ref_no_system)
         assert result["system"] == "(unspecified)"
+
+    @pytest.mark.parametrize("mean, interval, verdict", [
+        (2.5, (2.2, 2.8), "match"),
+        (2.5, (2.0, 3.0), "match"),
+        (2.0, (2.0, 2.0), "match"),
+        (2.5, (1.9, 2.8), "inconclusive"),
+        (2.5, (2.2, 3.1), "inconclusive"),
+        (2.5, (1.0, 4.0), "inconclusive"),
+        (1.5, (1.0, 2.1), "inconclusive"),
+        (3.5, (2.9, 4.0), "inconclusive"),
+        (1.5, (1.0, 2.0), "inconclusive"),
+        (3.5, (3.0, 4.0), "inconclusive"),
+        (1.5, (1.1, 1.9), "fail"),
+        (1.95, (1.92, 1.98), "concern"),
+        (2.5, (None, None), "inconclusive"),
+        (2.5, (float("nan"), float("nan")), "inconclusive"),
+        (2.5, (2.0, float("inf")), "inconclusive"),
+        (2.5, (2.8, 2.2), "inconclusive"),
+    ])
+    def test_structure_mean_interval_decides_verdict(self, mean, interval, verdict):
+        uncertainty = {"mean": mean, "n_structures": 4, "sem": 0.1,
+                       "ci_low": interval[0], "ci_high": interval[1],
+                       "confidence": 0.95, "sampling_unit": "structure"}
+
+        class Analyser:
+            def density(self):
+                # A different pooled mean catches accidental validation of
+                # pooled atoms instead of the equal-weight structure mean.
+                return {"mean": 20.0, "uncertainty": uncertainty}
+
+        result = validate_against_reference(
+            Analyser(), {"density": {"expected": [2.0, 3.0]}})
+        assert result["rows"] == [("Density", mean, 2.0, 3.0, "g/cm³", verdict)]
+        assert result["intervals"]["Density"] == uncertainty
+
+    def test_all_metric_types_use_intervals_with_reversed_keys(self):
+        entry = {"mean": 99.0, "uncertainty": {
+            "mean": 2.5, "ci_low": 1.5, "ci_high": 3.5,
+            "n_structures": 3, "confidence": 0.95}}
+
+        class Analyser:
+            def bond_distances(self):
+                return {"Ga-O": entry}
+
+            def coordination(self):
+                return {"Ga-O": entry}
+
+            def bond_angles(self):
+                return {"N-Ga-O": entry}
+
+        reference = {
+            "bond_distances": {"O-Ga": {"expected": [2.0, 3.0]}},
+            "coordination": {"Ga-O": {"mean_expected": [2.0, 3.0]}},
+            "bond_angles": {"O-Ga-N": {"expected": [2.0, 3.0]}}}
+        result = validate_against_reference(Analyser(), reference)
+        assert [row[1] for row in result["rows"]] == [2.5] * 3
+        assert [row[5] for row in result["rows"]] == ["inconclusive"] * 3
+        assert set(result["intervals"]) == {"Bond O-Ga", "CN Ga-O", "Angle O-Ga-N"}
+
+    def test_nonfinite_uncertainty_mean_is_na(self):
+        class Analyser:
+            def density(self):
+                return {"mean": 2.5, "uncertainty": {
+                    "mean": float("nan"), "ci_low": None, "ci_high": None}}
+
+        result = validate_against_reference(
+            Analyser(), {"density": {"expected": [2.0, 3.0]}})
+        assert result["rows"][0][1] is None
+        assert result["rows"][0][5] == "n/a"
 
 
 # ─── format_validation_report() ───────────────────────────────────────────
@@ -245,3 +323,30 @@ class TestFormatValidationReport:
         }
         out = format_validation_report(result)
         assert "123.5" in out
+
+    def test_reports_confidence_interval_and_inconclusive_total(self):
+        result = {
+            "system": "X", "sources": [],
+            "rows": [("Density", 2.5, 2.0, 3.0, "g/cm³", "inconclusive")],
+            "intervals": {"Density": {
+                "mean": 2.5, "ci_low": 1.8, "ci_high": 3.2,
+                "confidence": 0.95, "n_structures": 4}},
+        }
+        out = format_validation_report(result)
+        assert "95% [1.800, 3.200]" in out
+        assert "uncertainty of that mean" in out
+        assert "independent sampling units" in out
+        assert "0 fail, 1 inconclusive (out of 1 metrics)" in out
+        assert "interval crosses a reference bound" in out
+
+    def test_reports_unavailable_interval(self):
+        result = {
+            "system": "X", "sources": [],
+            "rows": [("Density", 2.5, 2.0, 3.0, "g/cm³", "inconclusive")],
+            "intervals": {"Density": {
+                "mean": 2.5, "ci_low": None, "ci_high": None,
+                "confidence": 0.95, "n_structures": 1}},
+        }
+        out = format_validation_report(result)
+        assert "unavailable" in out
+        assert "At least two independent structures" in out

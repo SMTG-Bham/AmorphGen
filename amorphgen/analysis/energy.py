@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import re
+from math import isfinite
+
+from .uncertainty import summarize_structures
 
 
 def compute_energy_ranking(atoms_list):
     """
     Rank structures by potential energy.
 
-    Reads energy from atoms.info or calculator.
+    Reads energy from atoms.info or calculator. Uncertainty of the mean is
+    estimated over structures, with missing energies retained in input order.
     """
+    atoms_list = list(atoms_list)
     energies = []
     for atoms in atoms_list:
         e = None
@@ -23,7 +28,20 @@ def compute_energy_ranking(atoms_list):
                 e = atoms.get_potential_energy()
             except Exception:
                 e = None
-        energies.append(e)
+        try:
+            e = float(e) if e is not None else None
+        except (TypeError, ValueError):
+            e = None
+        energies.append(e if e is not None and isfinite(e) and len(atoms) else None)
+
+    per_atom = [e / len(atoms) if e is not None else None
+                for e, atoms in zip(energies, atoms_list)]
+    summaries = {
+        "energy": summarize_structures(energies),
+        "energy_per_atom": summarize_structures(per_atom),
+    }
+    per_structure = [{"index": index, "energy": energy, "energy_per_atom": energy_pa}
+                     for index, (energy, energy_pa) in enumerate(zip(energies, per_atom))]
 
     valid = [(i, e) for i, e in enumerate(energies) if e is not None]
     if not valid:
@@ -36,6 +54,8 @@ def compute_energy_ranking(atoms_list):
             "worst_energy": None,
             "spread": 0.0,
             "warning": "No energy data found in structures",
+            "per_structure": per_structure,
+            "uncertainty": summaries,
         }
 
     e_per_atom = [(i, e / len(atoms_list[i])) for i, e in valid]
@@ -52,6 +72,8 @@ def compute_energy_ranking(atoms_list):
         "best_energy": energies_sorted[0],
         "worst_energy": energies_sorted[-1],
         "spread": energies_sorted[-1] - energies_sorted[0],
+        "per_structure": per_structure,
+        "uncertainty": summaries,
     }
 
 

@@ -13,6 +13,7 @@ from ase import Atoms, units
 from ase.calculators.singlepoint import SinglePointCalculator
 from ase.optimize import BFGS
 
+from .uncertainty import summarize_structures
 
 _VOIGT_PAIRS = ((0, 0), (1, 1), (2, 2), (1, 2), (0, 2), (0, 1))
 _MODULUS_KEYS = (
@@ -148,6 +149,9 @@ def compute_elastic_moduli(atoms_list, calculator=None, strain=0.005,
         diagnostics, and Voigt/Reuss/Hill moduli in GPa (Poisson ratio is
         dimensionless). Ensemble means and population standard deviations use
         equal structure weights; unavailable values are excluded with counts.
+        ``uncertainty`` reports standard errors and intervals of ensemble
+        means, preserving missing per-structure values. Tensor components
+        are flattened in row-major Voigt order, with ``shape`` metadata.
 
     Notes
     -----
@@ -262,6 +266,16 @@ def compute_elastic_moduli(atoms_list, calculator=None, strain=0.005,
         "stiffness_tensor_std_gpa": tensors.std(axis=0).tolist(),
         "moduli": {},
     }
+    uncertainty = {}
+    for key in ("stiffness_tensor_gpa", "raw_stiffness_tensor_gpa",
+                "residual_stress_gpa", "eigenvalues_gpa"):
+        values = np.asarray([result[key] for result in results])
+        uncertainty[key] = summarize_structures(values.reshape(len(results), -1))
+        uncertainty[key]["shape"] = list(values.shape[1:])
+        uncertainty[key]["component_order"] = "row-major; ASE Voigt xx, yy, zz, yz, xz, xy"
+    for key in ("volume_angstrom3", "max_residual_stress_gpa", "symmetry_error_gpa",
+                "condition_number", "mechanically_stable", "compliance_valid"):
+        uncertainty[key] = summarize_structures([result[key] for result in results])
     for average in ("voigt", "reuss", "hill"):
         ensemble["moduli"][average] = {}
         for key in _MODULUS_KEYS:
@@ -273,6 +287,10 @@ def compute_elastic_moduli(atoms_list, calculator=None, strain=0.005,
                 "std": float(np.std(values)) if values else None,
                 "count": len(values),
             }
+            uncertainty[f"{average}.{key}"] = summarize_structures([
+                result["moduli"][average][key]
+                if result["moduli"][average] is not None else None
+                for result in results])
     return {
         "n_structures": len(results),
         "strain": strain,
@@ -282,4 +300,5 @@ def compute_elastic_moduli(atoms_list, calculator=None, strain=0.005,
                   "poisson_ratio": "dimensionless"},
         "per_structure": results,
         "ensemble": ensemble,
+        "uncertainty": uncertainty,
     }

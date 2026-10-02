@@ -15,6 +15,7 @@ from ase.neighborlist import neighbor_list
 from scipy.special import lpmv
 
 from .cutoff import parse_cutoff_spec, resolve_cutoffs
+from .uncertainty import summarize_structures
 
 
 def _positive_cutoff(value):
@@ -164,6 +165,10 @@ def compute_bond_order(atoms_list, cutoff="auto-rdf", qbar6_threshold=0.3,
         Fractions use all atoms in that frame as the denominator.
         Top-level scalar summaries are arithmetic means over frames,
         including ``largest_cluster_size``; ``n_structures`` is the count.
+        ``uncertainty`` contains standard errors and intervals of these
+        structure means, excluding empty frames. ``fraction_of_sites`` pools
+        ordered atoms, while ``fraction_of_structures`` counts frames with
+        at least one ordered atom, including empty frames in its denominator.
     """
     try:
         threshold = float(qbar6_threshold)
@@ -213,14 +218,29 @@ def compute_bond_order(atoms_list, cutoff="auto-rdf", qbar6_threshold=0.3,
             "largest_cluster_fraction": largest / n_atoms if n_atoms else 0.0,
             "q6_mean": float(q6.mean()) if n_atoms else 0.0,
             "qbar6_mean": float(qbar6.mean()) if n_atoms else 0.0,
+            "neighbor_count_mean": float(counts.mean()) if n_atoms else 0.0,
         })
     result = {
         "parameters": {"cutoff": resolved, "qbar6_threshold": threshold,
                        "min_neighbors": int(min_neighbors)},
         "n_structures": len(frames), "per_structure": per_structure,
+        "uncertainty": {},
     }
     for key in ("q6_mean", "qbar6_mean", "ordered_fraction",
-                "largest_cluster_size", "largest_cluster_fraction"):
+                "largest_cluster_size", "largest_cluster_fraction",
+                "ordered_count", "neighbor_count_mean"):
         result[key] = (float(np.mean([frame[key] for frame in per_structure]))
                        if per_structure else 0.0)
+        result["uncertainty"][key] = summarize_structures([
+            frame[key] if frame["n_atoms"] else None for frame in per_structure])
+    n_sites = sum(frame["n_atoms"] for frame in per_structure)
+    result["fraction_of_sites"] = (
+        sum(frame["ordered_count"] for frame in per_structure) / n_sites
+        if n_sites else 0.0)
+    prevalence = [float(frame["ordered_count"] > 0) for frame in per_structure]
+    result["fraction_of_structures"] = float(np.mean(prevalence)) if prevalence else 0.0
+    result["fraction_of_structures_definition"] = (
+        "fraction of all input structures containing at least one ordered atom")
+    result["uncertainty"]["fraction_of_sites"] = result["uncertainty"]["ordered_fraction"]
+    result["uncertainty"]["fraction_of_structures"] = summarize_structures(prevalence)
     return result
