@@ -175,10 +175,22 @@ _BLOCK_SCHEMA = {
         "sq_method": str,
         "sq_smooth": _NUMBER,
         "sq_partials": bool,
+        "sq_qmax": _NUMBER,
+        "sq_nq": int,
         "tr": bool,
         "tr_qrange": list,
         "tr_window": str,
         "tr_scan": bool,
+        "experiment_sq": _OPTIONAL_STRING,
+        "experiment_tr": _OPTIONAL_STRING,
+        "experiment_skiprows": int,
+        "experiment_columns": (list, type(None)),
+        "sq_fit_range": (list, type(None)),
+        "tr_fit_range": (list, type(None)),
+        "xrd": bool,
+        "xrd_wavelength": _NUMBER,
+        "xrd_qmax": _OPTIONAL_NUMBER,
+        "xrd_nq": int,
         "rings": (bool, str, list, type(None)),
         "ring_bond_pair": (bool, str, list, type(None)),
         "connectivity": bool,
@@ -323,6 +335,7 @@ def _validate_nested_values(cfg: dict, errors: list[str], path: str) -> None:
     max_structures = analysis.get("convergence_max_structures")
     if type(max_structures) is int and max_structures < 2:
         errors.append("analysis.convergence_max_structures must be at least 2")
+    _validate_scattering_values(analysis, errors)
     for key in ("total_cn", "rdf_pairs", "angle_triplets", "tr_qrange",
                 "rings", "ring_bond_pair", "network_formers"):
         value = analysis.get(key)
@@ -333,6 +346,76 @@ def _validate_nested_values(cfg: dict, errors: list[str], path: str) -> None:
         for index, entry in enumerate(value):
             _check_type(entry, _NUMBER if key == "tr_qrange" else str,
                         f"analysis.{key}[{index}]", errors)
+
+
+def _validate_scattering_values(analysis: dict, errors: list[str]) -> None:
+    """Validate comparison controls before a scattering calculation is started."""
+    for name, allowed in (("sq_method", ("direct", "ft")),
+                          ("sq_weighting", ("xray", "neutron", "unweighted")),
+                          ("tr_window", ("lorch", "none"))):
+        value = analysis.get(name)
+        if isinstance(value, str) and value not in allowed:
+            errors.append(f"analysis.{name} must be one of {', '.join(allowed)}")
+
+    for name, minimum in (("experiment_skiprows", 0), ("sq_nq", 2), ("xrd_nq", 2)):
+        value = analysis.get(name)
+        if type(value) is int and value < minimum:
+            errors.append(f"analysis.{name} must be at least {minimum}")
+    for name, threshold, inclusive in (("sq_qmax", 0.1, False),
+                                       ("sq_smooth", 0.0, True),
+                                       ("xrd_wavelength", 0.0, False),
+                                       ("xrd_qmax", 0.0, False)):
+        value = analysis.get(name)
+        if type(value) in _NUMBER and (
+                not math.isfinite(value)
+                or (value < threshold if inclusive else value <= threshold)):
+            relation = "at least" if inclusive else "greater than"
+            errors.append(f"analysis.{name} must be finite and {relation} {threshold}")
+
+    qmax = analysis.get("xrd_qmax")
+    if type(qmax) in _NUMBER and math.isfinite(qmax):
+        if qmax > 24.0 * math.pi:
+            errors.append("analysis.xrd_qmax exceeds the form-factor validity limit (24*pi)")
+    # Physical accessibility depends on both qmax and wavelength, either of
+    # which can be overridden on the CLI. compute_xrd_pattern validates that
+    # relationship after the final values have been merged.
+
+    for name in ("sq_fit_range", "tr_fit_range"):
+        bounds = analysis.get(name)
+        if not isinstance(bounds, list):
+            continue
+        valid = len(bounds) == 2
+        if not valid:
+            errors.append(f"analysis.{name} must contain exactly two values")
+        for index, value in enumerate(bounds):
+            if not _check_type(value, _NUMBER, f"analysis.{name}[{index}]", errors):
+                valid = False
+            elif not math.isfinite(value):
+                errors.append(f"analysis.{name}[{index}] must be finite")
+                valid = False
+        if valid and bounds[0] > bounds[1]:
+            errors.append(f"analysis.{name} must have lower <= upper")
+
+    columns = analysis.get("experiment_columns")
+    if isinstance(columns, list):
+        if len(columns) not in (2, 3):
+            errors.append("analysis.experiment_columns must select two or three columns")
+        valid = True
+        for index, value in enumerate(columns):
+            if not _check_type(value, int, f"analysis.experiment_columns[{index}]", errors):
+                valid = False
+            elif value < 0:
+                errors.append(f"analysis.experiment_columns[{index}] must be non-negative")
+                valid = False
+        if valid and len(set(columns)) != len(columns):
+            errors.append("analysis.experiment_columns must select distinct columns")
+
+    qrange = analysis.get("tr_qrange")
+    if (isinstance(qrange, list) and len(qrange) == 2
+            and all(type(value) in _NUMBER for value in qrange)):
+        if (not all(math.isfinite(value) for value in qrange)
+                or not 0 <= qrange[0] < qrange[1]):
+            errors.append("analysis.tr_qrange must satisfy finite 0 <= qmin < qmax")
 
 
 def _validate_config(cfg: dict, path: str) -> tuple[list[str], list[str]]:

@@ -212,7 +212,29 @@ amorphgen --analyse --input-dir optimised/ --sq --sq-weighting neutron --save-pl
 # Same neutron weighting, using the Fourier-transform-of-g(r) route
 amorphgen --analyse --input-dir optimised/ --sq --sq-method ft \
     --sq-weighting neutron --save-plot plots/
+
+# Measured S(q): CSV header, optional third column of one-sigma errors
+amorphgen --analyse --input-dir optimised/ \
+    --experiment-sq measured_sq.csv --experiment-skiprows 1 \
+    --sq-qmax 12 --sq-fit-range 1.5 10 --save-plot comparison/ --save-report fit.txt
+
+# Measured T(r): match the experiment's Fourier window and q range
+amorphgen --analyse --input-dir optimised/ --experiment-tr measured_tr.dat \
+    --tr-qrange 0.5 20 --tr-window lorch --tr-fit-range 1 8 --save-plot comparison/
+
+# Coherent X-ray intensity per atom, with pointwise ensemble confidence bands
+amorphgen --analyse --input-dir optimised/ --xrd \
+    --xrd-wavelength 1.5406 --xrd-qmax 8 --xrd-nq 400 --save-plot plots/
 ```
+
+Experimental inputs accept two or three numeric columns: coordinate, value,
+and optional positive one-sigma uncertainty. For extra columns, select two or
+three zero-based indices with `--experiment-columns`. CSV and whitespace are
+detected automatically. Experimental file flags enable `--sq` or `--tr`;
+comparison exports contain JSON, CSV, TXT, PNG and optional PDF, including
+fit metrics, residuals and pointwise ensemble bands. `--sq-nq` sets the S(q)
+grid size (default 300). CLI options also work as underscore-named keys in
+the YAML `analysis` block. See {doc}`/guides/analysis` for units and conventions.
 
 ### Rank structures by energy (from a random-gen log)
 

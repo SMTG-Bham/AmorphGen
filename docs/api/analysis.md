@@ -19,6 +19,29 @@ API is the ``StructureAnalyser`` class.
    :show-inheritance:
 ```
 
+## Measured scattering and XRD
+
+`StructureAnalyser.compare_experiment()` loads measured S(q) or T(r),
+calculates the matching ensemble curve and reports residuals and metrics with
+pointwise ensemble bands. The separate loader and comparison functions accept
+already calculated curves. `StructureAnalyser.xrd_pattern()` returns coherent
+X-ray intensity per atom on a physical 2θ axis. See {doc}`/guides/analysis`
+for file formats, metric definitions, CLI examples and intensity conventions.
+
+```{eval-rst}
+.. autofunction:: amorphgen.analysis.load_experiment
+
+.. autofunction:: amorphgen.analysis.compare_experiment
+
+.. autofunction:: amorphgen.analysis.format_experiment_report
+
+.. autofunction:: amorphgen.analysis.save_experiment_comparison
+
+.. autofunction:: amorphgen.analysis.compute_xrd_pattern
+
+.. autofunction:: amorphgen.analysis.save_xrd_pattern
+```
+
 ## Optional material descriptors
 
 The following functions are also exported from `amorphgen.analysis`.

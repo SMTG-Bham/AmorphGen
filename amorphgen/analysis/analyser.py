@@ -22,7 +22,7 @@ from .structure import (compute_density, compute_coordination,
                         compute_bond_distances, compute_all_angles,
                         compute_bond_angle_stats, build_neighbour_dict)
 from .rdf import (compute_rdf, compute_structure_factor,
-                  compute_averaged_rdf, DEFAULT_SMEARING)
+                  compute_averaged_rdf, DEFAULT_SMEARING, DEFAULT_SQ_SMOOTH)
 from .rings import compute_ring_statistics
 from .voronoi import compute_voronoi
 from .energy import compute_energy_ranking
@@ -475,7 +475,7 @@ class StructureAnalyser:
 
     def total_correlation(self, weighting="xray", qmin=0.3, qmax=20.0, nq=400,
                           rmax=10.0, nr=600, window="lorch", *, confidence=0.95,
-                          n_bootstrap=1000, seed=0):
+                          n_bootstrap=1000, seed=0, sigma_q=DEFAULT_SQ_SMOOTH):
         """Total correlation function T(r) = 4 pi r rho g(r), the curve a
         diffraction paper plots beside S(Q).
 
@@ -484,6 +484,8 @@ class StructureAnalyser:
         directly comparable with published data and is NOT the same as
         :meth:`rdf` with ``pair=None``, which weights every pair equally.
         Set ``qmin``/``qmax``/``window`` to the experiment's own values.
+        ``sigma_q`` is the direct S(q) re-binning width in inverse Angstrom
+        (default 0.05); use 0 for the unsmoothed shells.
 
         Returns a dict with ``r``, ``g_r``, ``T_r``, ``G_r`` (the reduced PDF),
         the ``q``/``s_q`` used, and ``rho``.
@@ -492,7 +494,87 @@ class StructureAnalyser:
         return compute_total_correlation(self.atoms_list, weighting=weighting,
                                          qmin=qmin, qmax=qmax, nq=nq, rmax=rmax,
                                          nr=nr, window=window, confidence=confidence,
-                                         n_bootstrap=n_bootstrap, seed=seed)
+                                         n_bootstrap=n_bootstrap, seed=seed,
+                                         sigma_q=sigma_q)
+
+    def xrd_pattern(self, wavelength=1.5406, qmax=None, nq=300,
+                    method="direct", rmax=None, sigma_q=0.0, *,
+                    q_batch=4096, confidence=0.95, n_bootstrap=1000, seed=0):
+        """Coherent X-ray intensity per atom versus 2theta in degrees.
+
+        ``wavelength`` is in Angstrom (default Cu K-alpha). Each structure's
+        X-ray S(q) is converted using its own composition before averaging.
+        Returns ``q``, ``two_theta``, ``intensity``, ``per_structure`` and
+        pointwise ``uncertainty``. Missing reciprocal shells stay missing.
+        This profile includes no instrument, background or sample corrections.
+        See :func:`amorphgen.analysis.compute_xrd_pattern` for conventions.
+        """
+        from .xrd import compute_xrd_pattern
+        return compute_xrd_pattern(
+            self.atoms_list, wavelength=wavelength, qmax=qmax, nq=nq,
+            method=method, rmax=rmax, sigma_q=sigma_q, q_batch=q_batch,
+            confidence=confidence, n_bootstrap=n_bootstrap, seed=seed)
+
+    def compare_experiment(self, experiment, kind=None, *, method="direct",
+                           weighting="xray", calculation_options=None,
+                           load_options=None, x_range=None, confidence=0.95,
+                           n_bootstrap=1000, seed=0):
+        """Compare a measured S(q) or T(r) file with this ensemble.
+
+        ``experiment`` is a path or a mapping returned by ``load_experiment``.
+        ``kind`` is ``"sq"`` (the default for paths) or ``"tr"``. Set
+        ``calculation_options`` to the chosen scattering method's options,
+        e.g. ``{"qmax": 12, "sigma_q": 0.05}``; for T(r), match the measured
+        q range and window. ``load_options`` accepts delimiter, columns and
+        skiprows. Coordinates use inverse Angstrom for S(q), Angstrom for T(r).
+
+        Each structure is interpolated onto the measured grid, with no
+        extrapolation or interpolation across missing bins. The result has
+        residuals, goodness-of-fit metrics and pointwise mean confidence bands.
+        No scale, offset or other parameter is fitted. Scattering conventions
+        and instrument resolution must already match the measured curve.
+        """
+        import inspect
+        from collections.abc import Mapping
+        from .experiment import load_experiment, compare_experiment, _kind
+        if isinstance(experiment, (str, os.PathLike)):
+            experiment = load_experiment(experiment, kind=kind or "sq",
+                                         **(load_options or {}))
+        elif load_options:
+            raise ValueError("load_options requires an experimental data path")
+        if not isinstance(experiment, Mapping):
+            raise ValueError("experiment must be a path or a mapping from load_experiment")
+        resolved_kind = _kind(kind or experiment.get("kind", "sq"))
+        if method not in ("direct", "ft"):
+            raise ValueError("method must be 'direct' or 'ft'")
+        if resolved_kind == "tr" and method != "direct":
+            raise ValueError("T(r) uses the direct S(q) method")
+        options = dict(calculation_options or {})
+        for key in ("weighting", "confidence", "n_bootstrap", "seed"):
+            if key in options:
+                raise ValueError(f"pass {key} directly, not in calculation_options")
+        fn = (self.total_correlation if resolved_kind == "tr" else
+              self.structure_factor_direct if method == "direct" else
+              self.structure_factor)
+        calculated = fn(weighting=weighting, confidence=confidence,
+                        n_bootstrap=0, seed=seed, **options)
+        result = compare_experiment(
+            calculated, experiment, kind=resolved_kind, x_range=x_range,
+            confidence=confidence, n_bootstrap=n_bootstrap, seed=seed)
+        bound = inspect.signature(fn).bind_partial(weighting=weighting, **options)
+        bound.apply_defaults()
+        settings = {key: value for key, value in bound.arguments.items()
+                    if key not in ("confidence", "n_bootstrap", "seed")}
+        if resolved_kind == "sq" and method == "ft":
+            from .rdf import _shared_rmax
+            settings["rmax"] = _shared_rmax(self.atoms_list, settings["rmax"])
+        result["calculation"] = {
+            "method": method, **settings,
+            "normalization": ("Faber-Ziman" if resolved_kind == "sq" else
+                              "T(r) = 4*pi*r*rho*g(r)"),
+        }
+        result["structure_files"] = list(self._file_list)
+        return result
 
     def averaged_rdf(self, pair=None, rmax=None, nbins=200, *, confidence=0.95,
                      n_bootstrap=1000, seed=0):

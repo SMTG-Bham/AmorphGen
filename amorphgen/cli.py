@@ -459,6 +459,8 @@ def _add_arguments(p):
                            "and S(q->inf)=1. Saved as PNG+CSV under "
                            "--save-plot. Note: the FSDP region needs a large "
                            "box (q_min = 2*pi/L; ~450+ atoms recommended).")
+    from .scattering_cli import add_scattering_arguments
+    add_scattering_arguments(g_an)
     g_an.add_argument("--sq-weighting", default="xray",
                       choices=["xray", "neutron", "unweighted"],
                       help="Scattering-factor weighting for --sq. Use 'xray' "
@@ -1664,15 +1666,28 @@ def _main():
             sa.plot(output_dir=plot_dir, **plot_kwargs)
 
         # S(q): CLI flag > YAML (direct method, Faber-Ziman normalised)
-        if args.sq or an_cfg.get("sq", False):
+        sq_result = None
+        tr = None
+        if (args.sq or an_cfg.get("sq", False)
+                or args.experiment_sq or an_cfg.get("experiment_sq")):
             sq_weighting = args.sq_weighting
             if (not _typed("--sq-weighting") and "sq_weighting" in an_cfg):
                 sq_weighting = an_cfg["sq_weighting"]
             L_min = min(min(a.cell.lengths()) for a in sa.atoms_list)
             q_min = 2 * 3.141592653589793 / L_min
             sq_method = args.sq_method
-            if sq_method == "direct" and "sq_method" in an_cfg:
+            if not _typed("--sq-method") and "sq_method" in an_cfg:
                 sq_method = an_cfg["sq_method"]
+            sq_qmax = (args.sq_qmax if _typed("--sq-qmax") else
+                       an_cfg.get("sq_qmax", args.sq_qmax))
+            sq_nq = (args.sq_nq if _typed("--sq-nq") else
+                     an_cfg.get("sq_nq", args.sq_nq))
+            import math
+            if (not math.isfinite(sq_qmax) or sq_qmax <= 0.1
+                    or isinstance(sq_nq, bool) or not isinstance(sq_nq, int)
+                    or sq_nq < 2):
+                print("Error: --sq-qmax must exceed 0.1 and --sq-nq must be at least 2.")
+                sys.exit(1)
             print(f"\n  S(q): {sq_method} method, {sq_weighting} weighting "
                   f"(q_min = 2pi/L = {q_min:.2f} A^-1)")
             if sq_method == "ft":
@@ -1690,12 +1705,14 @@ def _main():
                 sq_smooth = float(an_cfg.get("sq_smooth", DEFAULT_SQ_SMOOTH))
             sq_partials = bool(args.sq_partials or an_cfg.get("sq_partials", False))
             if sq_method == "ft":
-                sq_result = sa.structure_factor(weighting=sq_weighting)
+                sq_result = sa.structure_factor(weighting=sq_weighting,
+                                                qmax=sq_qmax, nq=sq_nq)
                 if sq_partials:
                     print("  Note: --sq-partials needs the direct method; "
                           "partials skipped for --sq-method ft.")
             else:
                 sq_result = sa.structure_factor_direct(weighting=sq_weighting,
+                                                       qmax=sq_qmax, nq=sq_nq,
                                                        sigma_q=sq_smooth,
                                                        partials=sq_partials)
                 if sq_smooth > 0:
@@ -1712,6 +1729,15 @@ def _main():
                             k = _np.argmax(_np.where(m, s_ab, -_np.inf))
                             print(f"    {pair:<8s} q = {_q[k]:.2f} A^-1, "
                                   f"S = {s_ab[k]:.2f}")
+            sq_result["calculation"] = {
+                "method": sq_method, "weighting": sq_weighting,
+                "qmax": sq_qmax, "nq": sq_nq,
+                "sigma_q": sq_smooth if sq_method == "direct" else 0.0,
+                "normalization": "Faber-Ziman",
+            }
+            if sq_method == "ft":
+                from .analysis.rdf import _shared_rmax
+                sq_result["calculation"]["rmax"] = _shared_rmax(sa.atoms_list, None)
             if convergence_enabled:
                 _collect_convergence_summaries(
                     convergence_descriptors, "sq.total", sq_result.get("uncertainty"))
@@ -1729,7 +1755,8 @@ def _main():
                 print("  (pass --save-plot DIR to write the S(q) PNG + CSV)")
 
         # T(r): CLI flag > YAML key, weighted like --sq
-        if args.tr or an_cfg.get("tr", False):
+        if (args.tr or an_cfg.get("tr", False)
+                or args.experiment_tr or an_cfg.get("experiment_tr")):
             tr_w = args.sq_weighting
             if not _typed("--sq-weighting") and "sq_weighting" in an_cfg:
                 tr_w = an_cfg["sq_weighting"]
@@ -1744,6 +1771,12 @@ def _main():
             except ValueError as exc:
                 print(f"  T(r) skipped: {exc}")
             else:
+                tr["calculation"] = {
+                    "method": "direct", "weighting": tr_w,
+                    "qmin": qlo, "qmax": qhi, "window": win,
+                    "nq": 400, "nr": 600, "rmax": 10.0, "sigma_q": 0.05,
+                    "normalization": "T(r) = 4*pi*r*rho*g(r)",
+                }
                 if convergence_enabled:
                     _collect_convergence_summaries(
                         convergence_descriptors, "tr", tr.get("curve_uncertainty"))
@@ -1781,6 +1814,17 @@ def _main():
                             show_title=plot_kwargs.get("show_title", False))
                 else:
                     print("  (pass --save-plot DIR to write the T(r) PNG + CSV)")
+
+        from .scattering_cli import run_scattering_comparisons
+        try:
+            run_scattering_comparisons(
+                sa, args, an_cfg, _typed, sq=sq_result, tr=tr,
+                plot_dir=plot_dir, report_path=report_path,
+                dpi=plot_kwargs.get("dpi", 300),
+                save_pdf=plot_kwargs.get("save_pdf", False))
+        except (ValueError, OSError, KeyError) as exc:
+            print(f"Error: scattering comparison: {exc}")
+            sys.exit(1)
 
         # Ring statistics and Voronoi indices: CLI flag > YAML key.
         # (YAML: rings: true | "Ge-O"; voronoi: true | "Ge"; the older

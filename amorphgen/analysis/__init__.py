@@ -52,6 +52,9 @@ from .voids import compute_void_distribution
 from .elasticity import compute_elastic_moduli
 from .vibrations import compute_vibrational_dos
 from .validate import validate_against_reference, format_validation_report
+from .experiment import load_experiment, compare_experiment, format_experiment_report
+from .xrd import compute_xrd_pattern
+from .scattering_output import save_experiment_comparison, save_xrd_pattern
 from .comparison_plots import (
     EnsembleSpec,
     compare_ensembles,
@@ -77,6 +80,12 @@ __all__ = [
     "format_log_ranking",
     "validate_against_reference",
     "format_validation_report",
+    "load_experiment",
+    "compare_experiment",
+    "format_experiment_report",
+    "save_experiment_comparison",
+    "compute_xrd_pattern",
+    "save_xrd_pattern",
     "EnsembleSpec",
     "compare_ensembles",
     "plot_partial_rdf",

@@ -613,47 +613,41 @@ term and form-factor scale, then map momentum transfer to angle:
 $$I_{\mathrm{coh}}(q)/N = \langle f(q)\rangle^2[S(q)-1]
 +\langle f^2(q)\rangle, \qquad q=\frac{4\pi\sin\theta}{\lambda}.$$
 
-The following post-processing example uses Cu-Kα wavelength and the
-composition of the first structure. It approximates the form factors
-at each bin centre; use narrow q bins when comparing intensities.
+`xrd_pattern()` performs this conversion independently for each structure,
+using its own composition, before averaging. Cu-Kα is the default wavelength.
+Form factors are evaluated at q-bin centres for the direct method; use narrow
+bins and inspect the counts when comparing intensities.
 
 ```python
-import numpy as np
-from amorphgen.analysis import StructureAnalyser
-from amorphgen.analysis.rdf import xray_form_factor
+from amorphgen.analysis import StructureAnalyser, save_xrd_pattern
 
 sa = StructureAnalyser("ga2o3_ensemble/")
-sq = sa.structure_factor_direct(weighting="xray", qmax=8.0, nq=400)
-q, s, counts = (np.asarray(sq[k]) for k in ("q", "s_q", "n_per_bin"))
-symbols = sa.atoms_list[0].get_chemical_symbols()
-fractions = {el: symbols.count(el) / len(symbols) for el in set(symbols)}
-f = {el: xray_form_factor(el, q) for el in fractions}
-f_mean = sum(fractions[el] * f[el] for el in fractions)
-f2_mean = sum(fractions[el] * f[el]**2 for el in fractions)
-coherent = f_mean**2 * (s - 1.0) + f2_mean
-
-wavelength = 1.5406  # Å, Cu-Kα
-keep = (counts >= 5) & np.isfinite(coherent)
-if np.count_nonzero(keep) < 2:
-    raise ValueError("Too few populated q bins; use more structures or wider bins")
-two_theta = np.linspace(20.0, 90.0, 1000)
-q_at_angle = 4.0 * np.pi * np.sin(np.deg2rad(two_theta / 2)) / wavelength
-intensity = np.interp(q_at_angle, q[keep], coherent[keep],
-                      left=np.nan, right=np.nan)
+xrd = sa.xrd_pattern(wavelength=1.5406, qmax=8.0, nq=400)
+save_xrd_pattern(xrd, output_dir="plots/", save_pdf=True)
+# xrd["two_theta"] in degrees, xrd["intensity"] in electron²/atom
+# xrd["per_structure"] and xrd["uncertainty"] retain ensemble information
 ```
 
-This gives a coherent-scattering profile before instrument and sample
-corrections. Polarization, geometry, absorption, background and resolution
-must match the measurement. A powder-diffraction Lorentz–polarization
-factor applied to `S(q)` alone is not a general prediction of an amorphous
-sample's measured trace. Any additional broadening should come from the
-instrument's resolution; the structural halo width is already present
-in the calculated profile.
+```bash
+amorphgen --analyse --input-dir ga2o3_ensemble/ --xrd \
+    --xrd-wavelength 1.5406 --xrd-qmax 8 --xrd-nq 400 --save-plot plots/
+```
 
-AmorphGen currently has no `xrd_pattern()` convenience method; this is
-Python post-processing. For a comparison to an experimentally reduced
-Faber–Ziman `S(Q)`, compare directly to the calculated `S(q)` using matching
-weights and normalization.
+The API also supports `method="ft"` with an optional `rmax`. The default
+qmax is min(15, 4π/λ) Å⁻¹; inaccessible requested q ranges are rejected.
+The angular grid comes from the calculated q grid and is not uniformly
+spaced in 2θ. Intensities are sampled values, without an integration Jacobian
+or peak-height normalization. Unsampled direct shells remain unavailable.
+Optional `sigma_q` smooths each coherent intensity curve before averaging;
+raw values are retained. No smoothing is applied by default.
+
+The output is a coherent-scattering profile per atom before instrument and
+sample corrections. Polarization, geometry, absorption, background and
+resolution must match the measurement. A powder-diffraction
+Lorentz–polarization factor applied to `S(q)` alone is not a general prediction
+of an amorphous sample's measured trace. Ensemble bands do not include these
+systematic effects. For experimentally reduced Faber–Ziman S(Q), compare
+against S(q) directly using matching weights and normalization.
 
 :::
 
@@ -741,10 +735,83 @@ Peak positions and intensities depend on the supplied structures, cell
 size and settings. The same API applies to other compositions; select
 weights and a q range appropriate to the reference data.
 
-### Open issues / future work
+### Compare measured S(q) or T(r)
 
-- An `xrd_pattern()` convenience method with explicit intensity conventions
-  and instrument settings.
+Supply a whitespace or CSV file with two columns (coordinate, value), or
+three columns (coordinate, value, one-sigma measurement uncertainty):
+
+```bash
+amorphgen --analyse --input-dir structures/ \
+    --experiment-sq measured_sq.csv --experiment-skiprows 1 \
+    --sq-weighting xray --sq-method direct --sq-qmax 12 --sq-nq 300 \
+    --sq-fit-range 1.5 10 --save-plot comparison/ --save-report report.txt
+
+amorphgen --analyse --input-dir structures/ \
+    --experiment-tr measured_tr.dat --sq-weighting neutron \
+    --tr-qrange 0.5 20 --tr-window lorch --tr-fit-range 1 8 \
+    --save-plot comparison/
+```
+
+The file options enable the corresponding calculation. Comment lines start
+with `#`; use `--experiment-skiprows` for an uncommented header. Files with
+extra columns require `--experiment-columns 0 2 3` (zero-based coordinate,
+value, sigma), or two indices when sigma is unavailable. Coordinates are
+sorted together with values and errors. Duplicate coordinates, nonfinite
+values and nonpositive sigma are rejected. q is in Å⁻¹, r in Å, S(q) is
+dimensionless, and T(r) = 4πrρg(r) is in Å⁻². No convention or unit conversion
+is inferred from a filename or column label. Both files may be supplied in
+one run; shared loader options apply to both. YAML `analysis` keys use
+underscores, for example `experiment_sq`, `sq_fit_range`, and `sq_qmax`;
+explicit CLI values take precedence.
+
+Python exposes the loader and comparison independently, so a calculated
+curve can be reused:
+
+```python
+from amorphgen.analysis import (
+    StructureAnalyser, load_experiment, compare_experiment,
+    format_experiment_report, save_experiment_comparison,
+)
+
+sa = StructureAnalyser("structures/")
+measured = load_experiment("measured_sq.csv", kind="sq", skiprows=1)
+sq = sa.structure_factor_direct(qmax=12, nq=300, weighting="xray", sigma_q=0.05)
+comparison = compare_experiment(sq, measured, x_range=(1.5, 10))
+print(format_experiment_report(comparison))
+save_experiment_comparison(comparison, output_dir="comparison/", save_pdf=True)
+
+# Or load, calculate and compare in one call:
+comparison = sa.compare_experiment(
+    "measured_tr.dat", kind="tr", weighting="neutron", x_range=(1, 8),
+    calculation_options={"qmin": 0.5, "qmax": 20, "window": "lorch"},
+)
+```
+
+Each structure is linearly interpolated onto the measured coordinates before
+averaging. Extrapolation and interpolation across missing calculated bins
+are excluded. The report counts excluded points and records the number of
+contributing structures at each retained point. Match the scattering weights,
+normalization, temperature, resolution and, for T(r), q range and window.
+Changing these choices can alter the residuals independently of model quality.
+
+Metrics use the same retained measured points. For residual Δ = calculated
+minus measured, RMSE = √mean(Δ²), MAE = mean(|Δ|), and bias = mean(Δ).
+Rw = √[ΣwΔ² / Σw(measured)²], expressed as a fraction, with w = 1/σ² when
+measurement uncertainties are supplied and w = 1 otherwise. A zero
+denominator leaves Rw unavailable. χ² = Σ(Δ/σ)² and reduced χ² = χ²/N are
+reported only with measured sigma; no scale or offset is fitted. These
+diagonal-error statistics are descriptive for correlated points, particularly
+Fourier-transformed T(r); no p-value is inferred.
+
+The shaded bands are pointwise Student-t confidence intervals of the
+equal-weight ensemble mean. They require at least two independent contributing
+structures and do not include instrument or model systematic error. Measurement
+error bars remain separate. Whole-structure bootstrap bounds, standard
+deviations and SEM are also exported. The CLI saves
+`analysis_experiment_sq.{json,csv,txt,png}` or `analysis_experiment_tr.*`, plus
+PDF with `--save-pdf`. Figures show the overlay and residuals; JSON retains
+per-structure curves and reproducibility metadata, and CSV contains values,
+residuals, counts and interval bounds.
 
 ## Crystal-like order and the largest ordered cluster
 

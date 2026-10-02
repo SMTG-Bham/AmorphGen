@@ -723,8 +723,26 @@ sa.save_report("report.txt")
 sa.plot(output_dir="plots/")
 ```
 
-The analysis guide in the documentation covers the S(q) conventions and the
-reference-YAML format.
+Measured S(q) or T(r) can be compared with pointwise ensemble bands and
+goodness-of-fit metrics:
+
+```python
+from amorphgen.analysis import save_experiment_comparison, save_xrd_pattern
+
+fit = sa.compare_experiment("measured_sq.dat", kind="sq", x_range=(1.5, 10),
+                            calculation_options={"qmax": 12, "sigma_q": 0.05})
+print(fit["metrics"])  # RMSE, MAE, bias, Rw; chi-square with measurement sigma
+save_experiment_comparison(fit, output_dir="comparison/")
+xrd = sa.xrd_pattern(wavelength=1.5406, qmax=8, nq=400)
+save_xrd_pattern(xrd, output_dir="comparison/")
+```
+
+The CLI equivalents are `--experiment-sq FILE`, `--experiment-tr FILE` and
+`--xrd`, with `--save-plot DIR` for exports. Experimental text/CSV files have
+coordinate, value and optional one-sigma uncertainty columns. XRD returns
+coherent intensity per atom versus 2θ before instrument corrections. The
+analysis guide covers file formats, fit definitions, scattering conventions
+and the reference-YAML format.
 
 </details>
 
