@@ -166,7 +166,7 @@ close contacts, abrupt energy changes, or temperature/volume runaway before
 saving invalid results. Configure the limits with the top-level `safety` YAML
 block. Optional `repulsive_core` and `safety.reference` settings add short-range
 repulsion and periodic checks against an independent model. See the
-[YAML configuration guide](docs/guides/yaml-config.md#mlip-failure-checks-and-optional-stabilisation)
+[YAML configuration guide](https://smtg-bham.github.io/AmorphGen/guides/yaml-config.html#mlip-failure-checks-and-optional-stabilisation)
 for defaults, units, and examples.
 
 </details>
@@ -626,7 +626,7 @@ Notes on the options:
   confidence half-widths in descriptor units (density in g/cm³, coordination
   in neighbours). Curves use full-ensemble variance and are independent of
   input order. Estimated additional counts assume independent structures
-  with unchanged variance; see the [convergence guide](docs/guides/analysis.md#declared-tolerances-and-ensemble-convergence).
+  with unchanged variance; see the [convergence guide](https://smtg-bham.github.io/AmorphGen/guides/analysis.html#declared-tolerances-and-ensemble-convergence).
 - `--sq` computes S(q) at the reciprocal-lattice q-vectors of each cell, so the
   first sharp diffraction peak is resolved without the truncation of a Fourier
   transform of g(r). Weighting is `xray` (q-dependent Waasmaier–Kirfel form
@@ -1068,7 +1068,7 @@ amorphgen-slurm examples/slurm_workflow.yaml --output-dir jobs
 bash jobs/submit.sh --account=your-project
 ```
 
-Edit [the example workflow](examples/slurm_workflow.yaml) for your paths and
+Edit [the example workflow](https://github.com/SMTG-Bham/AmorphGen/blob/main/examples/slurm_workflow.yaml) for your paths and
 resources. The generator writes standalone `.slurm` scripts and a submission
 script; it does not submit jobs. The default profile is generic; add
 `--profile bluebear` for BlueBEAR defaults. Arrays give every task its own
@@ -1084,7 +1084,7 @@ frames without promising bitwise continuation.
 The existing 27 BlueBEAR scripts in `examples/` also support signal handling
 and dependency submission. Set `AMORPHGEN_VENV`, choose your account with
 `sbatch --account=your-project`, and create `logs/` before submitting.
-See the [HPC guide](docs/guides/hpc.md) for the YAML format, array isolation,
+See the [HPC guide](https://smtg-bham.github.io/AmorphGen/guides/hpc.html) for the YAML format, array isolation,
 dependency conditions and restart limits.
 
 </details>

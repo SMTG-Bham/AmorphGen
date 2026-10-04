@@ -3,6 +3,9 @@
 # ======================
 *.xyz
 *.extxyz
+# ...except the small offline-benchmark fixtures the tests read (see
+# test/data/experimental/README.md)
+!test/data/experimental/*.xyz
 *.traj
 *.dump
 *.lammps
