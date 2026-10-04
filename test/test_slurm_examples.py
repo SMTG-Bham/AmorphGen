@@ -145,6 +145,9 @@ while True:
 @LINUX_SLURM
 def test_sio2_array_tasks_use_independent_checkpoints_and_publish_disjoint_indices(tmp_path):
     """Run two real legacy array tasks with a lightweight placement command."""
+    script = ROOT / "examples" / "run_sio2_gen_array_bluebear.slurm"
+    if not script.exists():
+        pytest.skip("examples/ is not in this source tree")   # an sdist
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "activate").write_text(":\n")
@@ -167,7 +170,7 @@ lock.unlink()
     processes = []
     for task in (0, 1):
         processes.append(subprocess.Popen(
-            ["bash", str(ROOT / "examples" / "run_sio2_gen_array_bluebear.slurm")],
+            ["bash", str(script)],
             cwd=tmp_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             env={**os.environ, "PATH": f'{bin_dir}:{os.environ["PATH"]}',
                  "AMORPHGEN_ROOT": str(ROOT), "AMORPHGEN_VENV": str(tmp_path),
