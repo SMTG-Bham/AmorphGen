@@ -4,3 +4,5 @@
 recursive-include test *.py
 # Offline experimental benchmarks must also run from an unpacked sdist.
 recursive-include test/data *.xyz *.md
+# test_slurm.py parses the bundled example workflow.
+include examples/slurm_workflow.yaml
