@@ -232,7 +232,10 @@ def render_submission(workflow):
              "set -euo pipefail", 'SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)',
              f"mkdir -p -- {shlex.quote(workflow['root'] + '/logs')}",
              "# Each successful submission is recorded even if a later submission fails.",
-             'RECEIPT=$(mktemp "$SCRIPT_DIR/submitted.XXXXXXXX.tsv")',
+             # BSD/macOS mktemp only fills X's at the END of the template, so
+             # the .tsv suffix is added by a rename (GNU and BSD alike).
+             'RECEIPT=$(mktemp "$SCRIPT_DIR/submitted.XXXXXXXX")',
+             'mv -- "$RECEIPT" "$RECEIPT.tsv"; RECEIPT="$RECEIPT.tsv"',
              'echo "Submission receipt: $RECEIPT" >&2',
              'submit_job() {', '    local result',
              '    result=$(sbatch --parsable "$@") || return $?',
