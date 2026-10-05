@@ -541,7 +541,12 @@ def _add_arguments(p):
                            "Optional PAIR such as Ge-O selects the node-bridge "
                            "pair; default auto (least electronegative element as "
                            "nodes). Printed, appended to --save-report, and "
-                           "written as analysis_rings.{csv,png} under --save-plot.")
+                           "written as analysis_rings.{json,csv,png} with "
+                           "per-structure CSVs under --save-plot.")
+    g_an.add_argument("--ring-max-size", type=int, default=None, metavar="N",
+                      help="Largest ring to search in network nodes (default 12).")
+    g_an.add_argument("--ring-cutoff", type=float, default=None, metavar="A",
+                      help="Bond cutoff in A for rings only (default: analyser pair cutoff).")
     g_an.add_argument("--voronoi", nargs="?", const="all", default=None, metavar="ELEMENT",
                       help="Voronoi indices <n3 n4 n5 n6> for all atoms or for "
                            "ELEMENT only. Printed, appended to --save-report, and "
@@ -571,6 +576,9 @@ def _add_arguments(p):
                       help="Random points per cell for --voids (default 10000).")
     g_an.add_argument("--void-probe-radius", type=float, default=None,
                       help="Probe radius in A for --voids (default 0).")
+    g_an.add_argument("--void-probe-radii", type=float, nargs="+", default=None,
+                      metavar="A", help="Probe radii in A for a free-volume curve "
+                      "from the same samples (default: histogram bin edges).")
     g_an.add_argument("--void-bins", type=int, default=None,
                       help="Clearance histogram bins (default 50).")
     g_an.add_argument("--void-seed", type=int, default=None,
@@ -1862,31 +1870,32 @@ def _main():
                 rings_opt = y
         if rings_opt:
             pair = None if rings_opt == "auto" else tuple(rings_opt.split("-"))
-            rings = sa.ring_statistics(bond_pair=pair)
+            ring_max_size = (args.ring_max_size if args.ring_max_size is not None
+                             else an_cfg.get("ring_max_size", 12))
+            ring_cutoff = (args.ring_cutoff if args.ring_cutoff is not None
+                           else an_cfg.get("ring_cutoff"))
+            try:
+                rings = sa.ring_statistics(bond_pair=pair, cutoff=ring_cutoff,
+                                           max_ring=ring_max_size)
+            except ValueError as exc:
+                print(f"Error: ring analysis: {exc}")
+                sys.exit(1)
+            if sa._file_list:
+                rings["structure_files"] = [str(f) for f in sa._file_list]
             if convergence_enabled:
                 _collect_convergence_summaries(
                     convergence_descriptors, "rings", rings.get("uncertainty"))
-            label = f"{pair[0]}-{pair[1]}" if pair else "auto"
-            lines = [f"\n  Ring statistics (nodes-bridge: {label}, shortest ring per edge):"]
-            for sz, c, f in zip(rings["ring_sizes"], rings["counts"], rings["fractions"]):
-                lines.append(f"    {sz:2d}-ring: {c:6d}  ({f:5.1f}%)")
-            ring_text = "\n".join(lines)
+            from .analysis.descriptors import format_descriptor, save_descriptor
+            ring_text = format_descriptor("rings", rings)
             print(ring_text)
             if report_path:
                 with open(report_path, "a") as rf:
                     rf.write("\n" + ring_text + "\n")
             if plot_dir:
-                os.makedirs(plot_dir, exist_ok=True)
-                with open(os.path.join(plot_dir, "analysis_rings.csv"), "w") as fh:
-                    fh.write("ring_size,count,fraction_percent\n")
-                    for sz, c, f in zip(rings["ring_sizes"], rings["counts"], rings["fractions"]):
-                        fh.write(f"{sz},{c},{f:.4f}\n")
-                from .analysis.plotting import plot_rings
-                plot_rings(rings, output_dir=plot_dir, label=label,
-                           dpi=plot_kwargs.get("dpi", 300),
-                           save_pdf=plot_kwargs.get("save_pdf", False),
-                           show_title=plot_kwargs.get("show_title", False))
-                print(f"  Saved: {os.path.join(plot_dir, 'analysis_rings.csv')} / .png")
+                save_descriptor("rings", rings, plot_dir,
+                                dpi=plot_kwargs.get("dpi", 300),
+                                save_pdf=plot_kwargs.get("save_pdf", False),
+                                show_title=plot_kwargs.get("show_title", False))
 
         if args.connectivity or an_cfg.get("connectivity", False):
             from .analysis.structure import format_connectivity_report

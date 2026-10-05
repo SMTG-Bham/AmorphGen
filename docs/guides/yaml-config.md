@@ -414,6 +414,8 @@ analysis:
   tr_window: lorch        # lorch | none
   tr_scan: true           # sweep qmax / window and report the spread
   rings: true             # or a nodes-bridge pair such as Ge-O
+  ring_max_size: 12        # maximum searched ring size in network nodes
+  # ring_cutoff: 2.0       # optional A, otherwise uses the analyser pair cutoff
   voronoi: Ge             # or true for all atoms
   connectivity: true      # corner/edge/face sharing of cation polyhedra
 ```
@@ -472,6 +474,7 @@ analysis:
   voids: true
   void_samples: 10000    # independent uniform points per cell
   void_probe_radius: 0.0 # A
+  void_probe_radii: [0, 0.25, 0.5, 0.75, 1.0]  # A; same samples at every threshold
   void_bins: 50
   void_seed: 42          # separate from the top-level simulation seed
   # void_radii: {Si: 1.11, O: 0.66}  # optional A; other elements keep ASE covalent radii

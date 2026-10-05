@@ -28,12 +28,57 @@ def _format_descriptor(name, result):
                      "against crystal and liquid references.")
         return "\n".join(lines)
     if name == "voids":
-        return ("\n  Void distribution (sampled point clearance):\n"
-                f"    Accessible fraction: {result['accessible_fraction']:.6f} "
-                f"+/- {result['accessible_fraction_stderr']:.6f} (sampling stderr)\n"
-                f"    Probe radius: {result['probe_radius']:.4f} A; "
-                f"radii: {result['radius_source']}\n"
-                f"    Mean accessible volume: {result['accessible_volume']:.4f} A^3")
+        def clearance(value):
+            return f"{value:.4f}" if value is not None else "unavailable"
+
+        quantiles = result["clearance_quantiles"]
+        lines = ["\n  Void distribution (sampled point clearance):",
+                 f"    Accessible fraction: {result['accessible_fraction']:.6f} "
+                 f"+/- {result['accessible_fraction_stderr']:.6f} (Monte Carlo sampling stderr)",
+                 f"    Probe radius: {result['probe_radius']:.4f} A; "
+                 f"radii: {result['radius_source']}",
+                 f"    Mean accessible volume: {result['accessible_volume']:.4f} A^3",
+                 "    Accessible-point clearance (A): "
+                 f"mean={clearance(result['mean_clearance'])}; "
+                 f"sample maximum={clearance(result['max_clearance'])}",
+                 "    Accessible-point clearance quantiles (A): " + "; ".join(
+                     f"{key}={clearance(quantiles[key])}" for key in ("p10", "p50", "p90"))]
+        curve = result["probe_curve"]
+        lines.append(f"    Probe accessibility curve: {len(curve['radii'])} radii; "
+                     "fractions are weighted by cell volume.")
+        lines.append(f"    Sampling: {result['n_samples']} points per structure; "
+                     "Monte Carlo errors exclude between-structure variation.")
+        lines.append("    Sample maxima are lower bounds on maximum clearance; "
+                     "this is not a connected-pore or maximal-cavity analysis.")
+        return "\n".join(lines)
+    if name == "rings":
+        pair = "-".join(result["bond_pair"])
+        cutoff = result["cutoff"]
+        cutoff_text = (", ".join(f"{key}={value:g}" for key, value in cutoff.items())
+                       if isinstance(cutoff, dict) else f"{cutoff:g}")
+        lines = [f"\n  Ring statistics ({pair}; network nodes):",
+                 f"    nodes-bridge: {pair}",
+                 f"    Shortest closure per network edge; cutoff={cutoff_text} A; "
+                 f"maximum ring size={result['max_ring']}.",
+                 "    Counts are edge assignments, not unique cycles; "
+                 "size fractions use resolved edges."]
+        for size, count, fraction in zip(result["ring_sizes"], result["counts"],
+                                         result["fractions"]):
+            lines.append(f"    {size:2d}-ring: {count:6d} ({fraction:6.2f}%)")
+        if result["mean_ring_size"] is not None:
+            lines.append(f"    Ring size: mean={result['mean_ring_size']:.3f}; "
+                         f"std={result['std_ring_size']:.3f}; "
+                         f"range={result['min_ring_size']}-{result['max_ring_size']} nodes")
+        else:
+            lines.append("    No ring closures resolved within the requested maximum size.")
+        coverage = result["ring_edge_fraction"]
+        coverage_text = f" ({100 * coverage:.2f}%)" if coverage is not None else ""
+        lines.append(f"    Resolved network edges: {result['n_ring_edges']}/"
+                     f"{result['n_network_edges']}{coverage_text}")
+        lines.append(f"    Unresolved edges: {result['n_unresolved_edges']} "
+                     f"(no closure found with size <= {result['max_ring']}; "
+                     "larger rings may exist).")
+        return "\n".join(lines)
     if name == "oxygen_speciation":
         lines = ["\n  Oxygen speciation (network formers: "
                  + ", ".join(result['network_formers']) + "):"]
@@ -121,6 +166,33 @@ def save_descriptor(name, result, output_dir, *, dpi=300, save_pdf=False,
             writer.writerow(header)
             writer.writerows(rows)
 
+    def source_file(index):
+        files = result.get("structure_files", [])
+        return str(files[index]) if index < len(files) else ""
+
+    if name == "rings":
+        from .plotting import plot_rings
+        # Retain the original pooled CSV interface for existing workflows.
+        write_csv(base.with_suffix(".csv"), ["ring_size", "count", "fraction_percent"],
+                  zip(result["ring_sizes"], result["counts"], result["fractions"]))
+        columns = ["mean_ring_size", "std_ring_size", "min_ring_size", "max_ring_size",
+                   "n_network_nodes", "n_network_edges", "n_ring_edges",
+                   "n_unresolved_edges", "ring_edge_fraction", "total_rings"]
+        write_csv(directory / "analysis_rings_structures.csv", ["index", "source_file", *columns],
+                  ([row["index"], source_file(row["index"]), *[row[key] for key in columns]]
+                   for row in result["per_structure"]))
+        write_csv(directory / "analysis_rings_per_structure.csv",
+                  ["structure_index", "source_file", "ring_size", "count", "fraction_percent"],
+                  ([row["index"], source_file(row["index"]), size,
+                    row["counts"].get(size, row["counts"].get(str(size), 0)),
+                    100 * row["counts"].get(size, row["counts"].get(str(size), 0)) / row["total_rings"]
+                    if row["total_rings"] else None]
+                   for row in result["per_structure"] for size in result["ring_sizes"]))
+        plot_rings(result, directory, label="-".join(result["bond_pair"]), dpi=dpi,
+                   save_pdf=save_pdf, show_title=show_title)
+        print(f"  Saved: {base}.csv / .json")
+        return
+
     fig, ax = _figure(figsize=(6.0, 4.0))
     if name == "bond_order":
         columns = ["index", "n_atoms", "q6_mean", "qbar6_mean", "ordered_count",
@@ -148,6 +220,48 @@ def save_descriptor(name, result, output_dir, *, dpi=300, save_pdf=False,
                       result["bin_volume_fraction"]))
         ax.plot(result["radius"], result["probability_density"], color=_PALETTE[0])
         ax.set(xlabel="Point clearance (Å)", ylabel="Accessible-space density (Å⁻¹)")
+        columns = ["index", "source_file", "cell_volume_A3", "n_samples", "n_accessible",
+                   "probe_radius_A", "accessible_fraction", "accessible_fraction_stderr",
+                   "accessible_fraction_interval_95_low", "accessible_fraction_interval_95_high",
+                   "accessible_volume_A3", "accessible_volume_stderr_A3",
+                   "mean_clearance_A", "max_clearance_A",
+                   "clearance_p10_A", "clearance_p50_A", "clearance_p90_A"]
+        write_csv(directory / "analysis_voids_structures.csv", columns,
+                  ([row["index"], source_file(row["index"]), row["cell_volume"],
+                    row["n_samples"], row["n_accessible"], result["probe_radius"],
+                    row["accessible_fraction"], row["accessible_fraction_stderr"],
+                    *row["accessible_fraction_interval_95"], row["accessible_volume"],
+                    row["accessible_volume_stderr"], row["mean_clearance"], row["max_clearance"],
+                    *[row["clearance_quantiles"][key] for key in ("p10", "p50", "p90")]]
+                   for row in result["per_structure"]))
+        curve = result["probe_curve"]
+        write_csv(directory / "analysis_voids_probe.csv",
+                  ["probe_radius_A", "accessible_fraction", "accessible_fraction_stderr",
+                   "accessible_volume_A3", "accessible_volume_stderr_A3"],
+                  zip(curve["radii"], curve["accessible_fraction"],
+                      curve["accessible_fraction_stderr"], curve["accessible_volume"],
+                      curve["accessible_volume_stderr"]))
+        curve_fig, curve_ax = _figure(figsize=(6.0, 4.0))
+        probe_radii = np.asarray(curve["radii"])
+        fractions = np.asarray(curve["accessible_fraction"])
+        stderr = np.asarray(curve["accessible_fraction_stderr"])
+        curve_ax.plot(probe_radii, fractions, color=_PALETTE[0],
+                      marker="o" if len(probe_radii) == 1 else None,
+                      label="Volume-weighted accessible fraction")
+        curve_ax.fill_between(probe_radii, np.maximum(0, fractions - stderr),
+                              np.minimum(1, fractions + stderr), color=_PALETTE[0],
+                              alpha=0.2, label="±1 Monte Carlo sampling SE")
+        if len(probe_radii) == 1:
+            curve_ax.errorbar(probe_radii, fractions, yerr=stderr, color=_PALETTE[0],
+                              fmt="none", capsize=3)
+        curve_ax.set(xlabel="Probe radius (Å)", ylabel="Accessible volume fraction", ylim=(0, 1))
+        curve_ax.legend(frameon=False, fontsize=9)
+        _apply_pub_style(curve_ax)
+        if show_title:
+            curve_ax.set_title("Probe accessibility")
+        curve_fig.tight_layout()
+        _save_fig(curve_fig, str(directory / "analysis_voids_probe"),
+                  dpi=dpi, save_pdf=save_pdf)
     elif name == "oxygen_speciation":
         labels = list(result["counts"])
         write_csv(base.with_suffix(".csv"),
@@ -248,6 +362,7 @@ def run_descriptor_analysis(sa, args, config, override, *, plot_dir=None,
             result = sa.void_distribution(
                 n_samples=option("void_samples", 10000),
                 probe_radius=option("void_probe_radius", 0.0),
+                probe_radii=option("void_probe_radii", None),
                 nbins=option("void_bins", 50), seed=option("void_seed", 0),
                 radii=config.get("void_radii"))
         elif name == "oxygen_speciation":

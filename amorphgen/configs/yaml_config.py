@@ -194,6 +194,8 @@ _BLOCK_SCHEMA = {
         "xrd_nq": int,
         "rings": (bool, str, list, type(None)),
         "ring_bond_pair": (bool, str, list, type(None)),
+        "ring_max_size": int,
+        "ring_cutoff": _OPTIONAL_NUMBER,
         "connectivity": bool,
         "voronoi": (bool, str, type(None)),
         "voronoi_element": (bool, str, type(None)),
@@ -206,6 +208,7 @@ _BLOCK_SCHEMA = {
         "order_min_neighbors": int,
         "void_samples": int,
         "void_probe_radius": _NUMBER,
+        "void_probe_radii": (list, type(None)),
         "void_bins": int,
         "void_seed": (int, type(None)),
         "void_radii": _OPTIONAL_DICT,
@@ -341,6 +344,22 @@ def _validate_nested_values(cfg: dict, errors: list[str], path: str) -> None:
             and (not math.isfinite(cutoff_window) or cutoff_window <= 0)):
         errors.append("analysis.cutoff_window must be finite and positive")
     _validate_scattering_values(analysis, errors)
+    ring_max_size = analysis.get("ring_max_size")
+    if type(ring_max_size) is int and ring_max_size < 3:
+        errors.append("analysis.ring_max_size must be at least 3")
+    ring_cutoff = analysis.get("ring_cutoff")
+    if (type(ring_cutoff) in _NUMBER
+            and (not math.isfinite(ring_cutoff) or ring_cutoff <= 0)):
+        errors.append("analysis.ring_cutoff must be finite and positive")
+    probe_radii = analysis.get("void_probe_radii")
+    if isinstance(probe_radii, list):
+        if not probe_radii:
+            errors.append("analysis.void_probe_radii must contain at least one radius")
+        for index, radius in enumerate(probe_radii):
+            key = f"analysis.void_probe_radii[{index}]"
+            if _check_type(radius, _NUMBER, key, errors):
+                if not math.isfinite(radius) or radius < 0:
+                    errors.append(f"{key} must be finite and non-negative")
     for key in ("total_cn", "rdf_pairs", "angle_triplets", "tr_qrange",
                 "rings", "ring_bond_pair", "network_formers"):
         value = analysis.get(key)

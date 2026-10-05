@@ -19,6 +19,42 @@ API is the ``StructureAnalyser`` class.
    :show-inheritance:
 ```
 
+## Ring sizes and void clearance
+
+```python
+from amorphgen.analysis import StructureAnalyser
+from amorphgen.analysis.descriptors import save_descriptor
+
+sa = StructureAnalyser("structures/", cutoff={"Si-O": 2.0})
+rings = sa.ring_statistics(bond_pair=("Si", "O"), max_ring=16)
+voids = sa.void_distribution(n_samples=20000, probe_radius=0.5, seed=42,
+                             probe_radii=[0, 0.25, 0.5, 0.75, 1.0])
+save_descriptor("rings", rings, "analysis/")
+save_descriptor("voids", voids, "analysis/")
+```
+
+Ring `counts` and legacy `total_rings` count shortest-cycle observations per
+network edge, not unique cycles. `mean_ring_size`, `std_ring_size` (population
+spread), `min_ring_size` and `max_ring_size` summarize the resolved edges.
+`n_network_edges`, `n_ring_edges`, `n_unresolved_edges` and `ring_edge_fraction`
+report search coverage. An unresolved edge may close beyond `max_ring`;
+undefined size statistics and coverage are `None`. The resolved cutoff,
+counting convention and per-structure observations accompany the result.
+
+Void `probe_curve` contains sorted unique `radii` and the aligned
+`accessible_fraction`, `accessible_volume` and corresponding `*_stderr`
+arrays. All thresholds use the same samples; these errors quantify Monte
+Carlo noise. Omitting `probe_radii` uses the histogram bin edges. The curve
+can include radii below the base `probe_radius`, independently of the
+histogram. `clearance_quantiles` gives empirical p10/p50/p90 clearances
+conditional on the base probe, using cell-volume weights across structures.
+No accessible samples gives `None` quantiles. Clearance describes local free
+space, not connected pores or maximal cavities.
+
+Both results include `per_structure` observations and separate `uncertainty`
+summaries of equal-weight structure means. See {doc}`/guides/analysis` for
+normalization, interpretation and exported files.
+
 ## Cutoff robustness
 
 `StructureAnalyser.cutoff_robustness(window=0.1, points=5)` measures contact

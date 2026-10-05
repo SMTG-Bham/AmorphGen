@@ -73,8 +73,32 @@ def _wilson_interval(successes, trials):
             min(1.0, float(center + half_width))]
 
 
+def _probe_radii(values):
+    """Validate a one-dimensional radius sequence without coercing strings."""
+    try:
+        values = np.asarray(values, dtype=object)
+    except (TypeError, ValueError) as error:
+        raise ValueError("probe_radii must be a nonempty 1D sequence") from error
+    if values.ndim != 1 or not values.size:
+        raise ValueError("probe_radii must be a nonempty 1D sequence")
+    return np.unique([_finite_real(value, "probe_radii entries") for value in values])
+
+
+def _clearance_quantiles(samples, weights):
+    """Weighted empirical inverse-CDF quantiles of accessible clearance draws."""
+    values = np.concatenate(samples)
+    if not len(values):
+        return {key: None for key in ("p10", "p50", "p90")}
+    sample_weights = np.repeat(weights, [len(sample) for sample in samples])
+    order = np.argsort(values)
+    cumulative = np.cumsum(sample_weights[order])
+    indices = np.searchsorted(cumulative, np.array([0.1, 0.5, 0.9]) * cumulative[-1])
+    return {key: float(values[order[index]])
+            for key, index in zip(("p10", "p50", "p90"), indices)}
+
+
 def compute_void_distribution(atoms_list, n_samples=10000, probe_radius=0.0,
-                              radii=None, nbins=50, seed=0):
+                              radii=None, nbins=50, seed=0, *, probe_radii=None):
     """Sample the volume-weighted point-clearance distribution in periodic cells.
 
     At each uniformly sampled cell point ``x``, the clearance is
@@ -88,6 +112,18 @@ def compute_void_distribution(atoms_list, n_samples=10000, probe_radius=0.0,
     ``bin_volume_fraction`` sums to ``accessible_fraction``. Frames are
     weighted by cell volume. ``accessible_volume`` is the arithmetic mean
     accessible volume per frame in angstrom cubed, not their sum.
+
+    ``probe_curve`` evaluates the fraction and volume accessible to each
+    spherical probe using the same unfiltered clearance draws, including
+    radii below ``probe_radius``. ``probe_radii`` is a nonempty 1D sequence
+    of finite nonnegative numbers, sorted and deduplicated in the result;
+    when omitted it defaults to ``bin_edges``. Curve standard errors are
+    pointwise Monte Carlo errors, with correlated estimates across radii.
+    ``clearance_quantiles`` gives p10, p50 and p90 of clearance conditional
+    on accessibility at ``probe_radius``, or None if none were observed.
+    These are inverse empirical-CDF quantiles (the smallest sampled value
+    reaching the target cumulative weight), with each draw weighted by its
+    cell volume; per-frame quantiles give all draws equal weight.
 
     ``n_samples`` independent points are drawn per frame with a local NumPy
     random generator. ``seed=None`` requests nondeterministic sampling.
@@ -109,6 +145,7 @@ def compute_void_distribution(atoms_list, n_samples=10000, probe_radius=0.0,
     n_samples = _positive_integer(n_samples, "n_samples")
     nbins = _positive_integer(nbins, "nbins")
     probe_radius = _finite_real(probe_radius, "probe_radius")
+    curve_radii = None if probe_radii is None else _probe_radii(probe_radii)
     if seed is not None:
         if isinstance(seed, bool) or not isinstance(seed, Integral) or seed < 0:
             raise ValueError("seed must be a non-negative integer or None")
@@ -157,6 +194,7 @@ def compute_void_distribution(atoms_list, n_samples=10000, probe_radius=0.0,
 
     rng = np.random.default_rng(seed)
     samples = [None] * len(prepared)
+    all_samples = [None] * len(prepared)
     per_structure = [None] * len(prepared)
     # Assign Monte Carlo draws independently of generation/file order. The
     # curve statistics alone cannot remove order dependence in their inputs.
@@ -166,6 +204,7 @@ def compute_void_distribution(atoms_list, n_samples=10000, probe_radius=0.0,
         positions, cell, volume, atom_radii = prepared[index]
         points = rng.random((n_samples, 3)) @ cell
         clearance = _point_clearances(points, positions, cell, atom_radii)
+        all_samples[index] = clearance
         accessible = clearance[clearance >= probe_radius]
         samples[index] = accessible
         count = len(accessible)
@@ -183,6 +222,7 @@ def compute_void_distribution(atoms_list, n_samples=10000, probe_radius=0.0,
             "accessible_volume_stderr": volume * stderr,
             "mean_clearance": float(accessible.mean()) if count else None,
             "max_clearance": float(accessible.max()) if count else None,
+            "clearance_quantiles": _clearance_quantiles([accessible], [1.0]),
         }
 
     volumes = np.array([entry[2] for entry in prepared])
@@ -199,6 +239,35 @@ def compute_void_distribution(atoms_list, n_samples=10000, probe_radius=0.0,
     if upper <= probe_radius:
         upper = probe_radius + max(1.0, abs(probe_radius) * 1e-12)
     edges = np.linspace(probe_radius, upper, nbins + 1)
+    if curve_radii is None:
+        curve_radii = edges
+    curve_counts = np.array([
+        n_samples - np.searchsorted(np.sort(sample), curve_radii, side="left")
+        for sample in all_samples
+    ])
+    curve_fractions = curve_counts / n_samples
+    curve_errors = np.sqrt(curve_fractions * (1 - curve_fractions) / n_samples)
+    for index, frame in enumerate(per_structure):
+        frame["probe_curve"] = {
+            "radii": curve_radii.tolist(),
+            "n_accessible": curve_counts[index].tolist(),
+            "accessible_fraction": curve_fractions[index].tolist(),
+            "accessible_fraction_stderr": curve_errors[index].tolist(),
+            "accessible_fraction_interval_95": [
+                _wilson_interval(int(count), n_samples) for count in curve_counts[index]
+            ],
+            "accessible_volume": (volumes[index] * curve_fractions[index]).tolist(),
+            "accessible_volume_stderr": (volumes[index] * curve_errors[index]).tolist(),
+        }
+    curve_fraction = weights @ curve_fractions
+    curve_stderr = np.sqrt(np.sum(weights[:, None]**2 * curve_errors**2, axis=0))
+    probe_curve = {
+        "radii": curve_radii.tolist(),
+        "accessible_fraction": curve_fraction.tolist(),
+        "accessible_fraction_stderr": curve_stderr.tolist(),
+        "accessible_volume": (np.mean(volumes) * curve_fraction).tolist(),
+        "accessible_volume_stderr": (np.mean(volumes) * curve_stderr).tolist(),
+    }
     per_frame_fractions = np.array([
         np.histogram(sample, bins=edges)[0] / n_samples for sample in samples
     ])
@@ -221,6 +290,15 @@ def compute_void_distribution(atoms_list, n_samples=10000, probe_radius=0.0,
                    for key in ("accessible_fraction", "accessible_volume",
                                "mean_clearance", "max_clearance", "cell_volume",
                                "bin_volume_fraction", "probability_density")}
+    uncertainty["probe_curve"] = {
+        key: summarize_structures([frame["probe_curve"][key] for frame in per_structure])
+        for key in ("accessible_fraction", "accessible_volume")
+    }
+    uncertainty["clearance_quantiles"] = {
+        key: summarize_structures([
+            frame["clearance_quantiles"][key] for frame in per_structure
+        ]) for key in ("p10", "p50", "p90")
+    }
     return {
         "radius": ((edges[:-1] + edges[1:]) / 2).tolist(),
         "bin_edges": edges.tolist(),
@@ -233,6 +311,8 @@ def compute_void_distribution(atoms_list, n_samples=10000, probe_radius=0.0,
         "accessible_volume_stderr": float(np.mean(volumes) * stderr),
         "mean_clearance": mean,
         "max_clearance": maximum,
+        "probe_curve": probe_curve,
+        "clearance_quantiles": _clearance_quantiles(samples, volumes),
         "per_structure": per_structure,
         "uncertainty": uncertainty,
         "n_structures": len(atoms_list),

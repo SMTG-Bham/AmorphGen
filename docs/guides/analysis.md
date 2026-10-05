@@ -872,6 +872,41 @@ PDF with `--save-pdf`. Figures show the overlay and residuals; JSON retains
 per-structure curves and reproducibility metadata, and CSV contains values,
 residuals, counts and interval bounds.
 
+## Ring sizes and search coverage
+
+```bash
+amorphgen --analyse --input-dir silica/ --rings Si-O \
+    --ring-cutoff 2.0 --ring-max-size 16 \
+    --save-report rings.txt --save-plot rings/
+```
+
+The network uses the first element as nodes and the second as bridges;
+single-element networks use direct bonds. A ring size counts network nodes
+(for example, Si sites for Si–O), and periodic paths must close at the same
+image. The default pair is selected by electronegativity. Set it explicitly
+for mixed chemistries. `--ring-cutoff` overrides the analyser's resolved pair
+cutoff for this calculation only; `--ring-max-size` defaults to 12.
+
+Each undirected network edge contributes its shortest cycle, if one closes
+within the limit. **Counts describe edges, not unique rings**: a lone
+six-node polygon contributes six observations of size six. Multiple bridges
+between the same pair of node images collapse to one network edge. Thus
+this projected network is not an enumeration of atom-level cycles.
+
+Reports give the mean, population standard deviation, observed size range,
+and counts of resolved and unresolved edges. An unresolved edge has no
+closure within the chosen limit; it may belong to a longer ring. Increase
+the limit to check convergence. Percentages use only resolved edges, while
+`ring_edge_fraction` uses all network edges. No edges gives an undefined
+coverage; no resolved rings gives undefined size summaries (JSON `null`).
+Ensemble counts pool edges, while uncertainty summaries give each structure
+equal weight.
+
+`--save-plot` writes `analysis_rings.json`, the existing size/count/percent
+CSV and PNG, `analysis_rings_structures.csv` for per-structure summaries,
+and `analysis_rings_per_structure.csv` for per-structure distributions.
+`--save-pdf` adds a PDF plot.
+
 ## Crystal-like order and the largest ordered cluster
 
 Use `--bond-order` to look for residual or newly formed crystal-like regions
@@ -994,6 +1029,7 @@ insufficient.
 ```bash
 amorphgen --analyse --input-dir silica/ --voids \
     --void-samples 20000 --void-probe-radius 0.5 --void-seed 42 \
+    --void-probe-radii 0 0.25 0.5 0.75 1.0 \
     --save-plot descriptors/
 ```
 
@@ -1012,6 +1048,26 @@ to the accessible fraction. Ensemble fractions are weighted by cell volume;
 errors describe Monte Carlo sampling only. Per-structure 95% Wilson intervals
 also cover cases where no accessible points were found; neither measure
 captures variation between structures. All cells must be fully periodic in 3D.
+
+`--void-probe-radii` evaluates an accessible-fraction and accessible-volume
+curve from the **same sampled points**, including thresholds below the
+histogram's `--void-probe-radius`. Radii must be finite and nonnegative;
+they are sorted and duplicates removed. Without this option the curve uses
+the histogram bin edges. Fractions decrease as the probe grows. Thresholds
+share samples, so their errors are correlated; the shaded plot shows one
+Monte Carlo standard error at each threshold, not a simultaneous interval.
+
+The result also includes `clearance_quantiles` (`p10`, `p50`, `p90`) for
+points admitting the base probe. These are empirical inverse-CDF quantiles,
+weighted by cell volume in the pooled ensemble. They are `null` when no
+points are accessible. Each structure retains its own quantiles and probe
+curve, including Wilson intervals. The nested `uncertainty` summaries
+estimate equal-weight structure means separately from sampling errors.
+
+In addition to the histogram and full JSON, `--save-plot` writes
+`analysis_voids_probe.csv` and `analysis_voids_probe.png` for the curve,
+plus `analysis_voids_structures.csv` for per-structure volumes, clearances
+and quantiles. `--save-pdf` adds a PDF of each figure.
 
 ### Bridging and non-bridging oxygen
 
@@ -1094,7 +1150,11 @@ from amorphgen.analysis import StructureAnalyser
 from amorphgen.analysis.descriptors import save_descriptor
 
 sa = StructureAnalyser("silica/", cutoff={"Si-O": 2.0})
-voids = sa.void_distribution(n_samples=20000, probe_radius=0.5, seed=42)
+voids = sa.void_distribution(n_samples=20000, probe_radius=0.5, seed=42,
+                             probe_radii=[0, 0.25, 0.5, 0.75, 1.0])
+print(voids["clearance_quantiles"], voids["probe_curve"])
+rings = sa.ring_statistics(bond_pair=("Si", "O"), max_ring=16)
+save_descriptor("rings", rings, "descriptors/", save_pdf=True)
 oxygen = sa.oxygen_speciation(network_formers=["Si"])
 save_descriptor("voids", voids, "descriptors/", save_pdf=True)
 
@@ -1168,7 +1228,8 @@ amorphgen --analyse \
 | `--pair-panels` | One small panel per element pair for the partial g(r) (`analysis_rdf_panels.png`) and, with `--sq-partials`, for S_ab(q) (`analysis_sq_partials_panels.png`). |
 | `--total-cn SPEC` | Total first-shell coordination of one element over several partner types, repeatable: `O` counts every bonded partner, `O:In+Ga` only the named ones. Printed, and plotted as `analysis_cn_total.png` + CSV. |
 | `--check-dimers` | Report unphysical close contacts (O–O peroxide, N–N) per structure. |
-| `--rings [PAIR]` | Ring statistics (shortest ring per network edge). Nodes default to the least electronegative element; `--rings Ge-O` sets nodes–bridge explicitly. Added to the report; `analysis_rings.{csv,png}` under ``--save-plot``. |
+| `--rings [PAIR]` | Shortest ring per network edge, size summaries and search coverage; `--rings Ge-O` sets nodes–bridge explicitly. |
+| `--ring-max-size INT`, `--ring-cutoff FLOAT` | Maximum searched size in network nodes (default 12) and ring-specific bond cutoff in Å (default: analyser pair cutoff). |
 | `--voronoi [ELEMENT]` | Voronoi indices <n3 n4 n5 n6> for all atoms or one element. Added to the report; `analysis_voronoi.csv` under ``--save-plot``. |
 | `--connectivity` | Corner/edge/face sharing between cation-centred polyhedra (two cations sharing one anion = corner, two = edge, three or more = face) and the percentage of cations in at least one edge- or face-sharing pair, which is near zero in a corner-sharing network glass and tens of percent in a random packing. Added to the report; `analysis_connectivity.csv` under ``--save-plot``. |
 | `--bond-order` | Steinhardt $q_6$, Lechner–Dellago $\bar q_6$, ordered atom fraction and largest connected ordered cluster. |
@@ -1178,6 +1239,7 @@ amorphgen --analyse \
 | `--voids` | Periodic point-clearance distribution and accessible volume. |
 | `--void-samples INT`, `--void-bins INT` | Monte Carlo points per cell (default 10000) and histogram bins (50). |
 | `--void-probe-radius FLOAT`, `--void-seed INT` | Probe radius in Å (default 0) and sampling seed (0). |
+| `--void-probe-radii FLOAT [FLOAT ...]` | Threshold radii in Å for the accessible-volume curve from the same samples; defaults to histogram bin edges. |
 | `--oxygen-speciation`, `--network-formers Si,Al` | Oxygen connectivity classes; formers default to the Al/B/Ge/P/Si present. |
 | `--elastic`, `--elastic-strain FLOAT` | Stress-derived tensor and isotropic moduli; strain amplitude defaults to 0.005. |
 | `--elastic-relax` | Relax internal positions at each fixed cell, using `--fmax` and `--opt-steps`. |
@@ -1209,11 +1271,13 @@ listed flags.
 | `analysis_density.csv` | One row per structure: ``structure_index, density_g_per_cm3`` (at least two structures). |
 | `analysis_sq.png` / `.pdf`, `analysis_sq.csv` | With ``--sq``: S(q) and, for the direct method, the number of q-vectors per bin; raw values are also saved when smoothing is enabled. |
 | `analysis_tr.png` / `.pdf`, `analysis_tr.csv` | With ``--tr``: the total correlation function and its scattering-weighted g(r) and reduced PDF G(r). |
-| `analysis_rings.png` / `.csv` | With ``--rings``: ring-size distribution (size, count, percent of edges). |
+| `analysis_rings.{json,csv,png,pdf}` | With ``--rings``: shortest-cycle size distribution (size, edge count, percent of resolved edges); full JSON includes coverage and uncertainty. PDF requires `--save-pdf`. |
+| `analysis_rings_structures.csv`, `analysis_rings_per_structure.csv` | Ring-size summaries and search coverage per structure; per-structure size distributions. |
 | `analysis_voronoi.csv` | With ``--voronoi``: the ten most common Voronoi indices with counts and percentages. |
 | `analysis_connectivity.csv` | With ``--connectivity``: corner/edge/face link percentages and the edge-sharing cation fraction, overall and per structure. |
 | `analysis_bond_order.{json,csv,png,pdf}`, `analysis_bond_order_atoms.csv` | With `--bond-order`: per-structure ordered fraction and largest ordered cluster, a $\bar q_6$ histogram, and per-atom $q_6$, $\bar q_6$, neighbour counts and cluster labels in JSON and the atom CSV. PDF requires `--save-pdf`. |
 | `analysis_voids.{json,csv,png,pdf}` | With `--voids`: clearance density and volume fractions; JSON includes sampling uncertainties and per-structure statistics. PDF requires `--save-pdf`. |
+| `analysis_voids_probe.{csv,png,pdf}`, `analysis_voids_structures.csv` | Probe-radius curve with sampling errors; per-structure volumes, clearances and quantiles. PDF requires `--save-pdf`. |
 | `analysis_oxygen_speciation.{json,csv,png,pdf}` | Oxygen counts/fractions by class; JSON also contains each oxygen's former coordination. |
 | `analysis_elastic.{json,csv,png,pdf}`, `analysis_elastic_tensor.csv` | Modulus means/std/counts and mean stiffness heatmap; JSON includes raw/symmetrized tensors and diagnostics per structure. |
 | `analysis_vdos.{json,csv,png,pdf}` | Total and element-projected DOS; JSON includes individual mode frequencies and per-structure diagnostics. |

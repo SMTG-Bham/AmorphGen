@@ -638,6 +638,10 @@ Notes on the options:
   system like IGZO.
 - `--rings` counts the shortest ring per network edge, with the network former
   (Si, Ge, ...) as nodes; `--rings Ge-O` sets the pair explicitly.
+  `--ring-max-size` sets the search limit (12 by default), and `--ring-cutoff`
+  sets a separate bond cutoff. Reports include size summaries and unresolved
+  edges; counts are edge observations, not unique rings. `--save-plot` adds
+  full JSON and per-structure CSVs.
 - `--connectivity` reports corner-, edge- and face-sharing between cation-centred
   polyhedra and the fraction of cations in edge-sharing pairs, which separates a
   corner-sharing network glass from a random packing with the same coordination.
@@ -651,6 +655,9 @@ Notes on the options:
   crystal and liquid references for the material; they do not identify a phase.
   `--save-plot` exports JSON, per-structure and per-atom CSVs, and a figure.
 - `--voids` samples periodic point clearance using configurable atomic radii;
+  it reports clearance quantiles and accessible volume. `--void-probe-radii
+  0 0.5 1.0` adds a probe-radius curve from the same samples, with sampling
+  errors, a plot and CSV. This describes local free space, not connected pores.
   `--oxygen-speciation` counts each oxygen's selected network-former neighbours.
 - `--elastic` computes the stiffness tensor and Voigt/Reuss/Hill moduli from
   stresses; `--elastic-relax` adds fixed-cell atomic relaxation. `--vdos` uses

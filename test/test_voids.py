@@ -70,6 +70,12 @@ def test_fully_blocked_samples_report_interval_and_finite_empty_histogram():
     assert result["accessible_volume"] == 0
     assert result["mean_clearance"] is None
     assert result["max_clearance"] is None
+    assert result["clearance_quantiles"] == {"p10": None, "p50": None, "p90": None}
+    assert result["per_structure"][0]["clearance_quantiles"] == result["clearance_quantiles"]
+    assert result["probe_curve"]["accessible_fraction"] == [0] * 51
+    assert result["probe_curve"]["radii"] == result["bin_edges"]
+    assert all(bounds[1] > 0 for bounds in
+               result["per_structure"][0]["probe_curve"]["accessible_fraction_interval_95"])
     assert sum(result["probability_density"]) == 0
     assert sum(result["bin_volume_fraction"]) == 0
     assert result["per_structure"][0]["accessible_fraction_interval_95"][1] > 0
@@ -201,3 +207,94 @@ def test_one_sample_and_nondeterministic_seed_supported():
     assert result["seed"] is None
     assert result["per_structure"][0]["n_samples"] == 1
     json.dumps(result, allow_nan=False)
+
+
+def test_probe_curve_matches_analytic_excluded_sphere_volume():
+    """Every probe radius inflates the periodic excluded sphere analytically."""
+    radii = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+    result = compute_void_distribution(
+        [single_atom()], n_samples=12000, radii={"Si": 1.0},
+        probe_radius=0.8, probe_radii=radii, seed=9,
+    )
+    curve = result["probe_curve"]
+    expected = 1 - 4 * np.pi * (1 + np.array(radii))**3 / (3 * 4**3)
+    observed = np.array(curve["accessible_fraction"])
+    errors = np.array(curve["accessible_fraction_stderr"])
+    assert np.all(abs(observed - expected) < 5 * errors)
+    assert np.all(np.diff(observed) <= 0)
+    assert observed[0] > result["accessible_fraction"]
+    assert observed[4] == result["accessible_fraction"]
+    assert curve["accessible_volume"][4] == pytest.approx(result["accessible_volume"])
+    assert curve["accessible_fraction_stderr"][4] == pytest.approx(
+        result["accessible_fraction_stderr"])
+
+
+def test_probe_curves_and_clearance_quantiles_use_volume_weighted_draws(monkeypatch):
+    """A larger cell contributes more represented volume per clearance draw."""
+    import amorphgen.analysis.voids as module
+
+    def known_clearances(points, positions, cell, atom_radii):
+        return np.arange(4.0) + (0 if cell[0, 0] == 1 else 4)
+
+    monkeypatch.setattr(module, "_point_clearances", known_clearances)
+    result = compute_void_distribution(
+        [single_atom(1), single_atom(2)], n_samples=4, probe_radius=2,
+        probe_radii=[0, 2, 4, 6, 8],
+    )
+    curve = result["probe_curve"]
+    frames = result["per_structure"]
+    assert curve["accessible_fraction"] == pytest.approx([1, 8.5 / 9, 8 / 9, 4 / 9, 0])
+    assert curve["accessible_volume"] == pytest.approx([4.5, 4.25, 4, 2, 0])
+    assert frames[0]["probe_curve"]["n_accessible"] == [4, 2, 0, 0, 0]
+    assert frames[1]["probe_curve"]["n_accessible"] == [4, 4, 4, 2, 0]
+    assert result["clearance_quantiles"] == {"p10": 4, "p50": 5, "p90": 7}
+    assert frames[0]["clearance_quantiles"] == {"p10": 2, "p50": 2, "p90": 3}
+    assert frames[1]["clearance_quantiles"] == {"p10": 4, "p50": 5, "p90": 7}
+    assert result["uncertainty"]["probe_curve"]["accessible_fraction"]["mean"] == [
+        1, 0.75, 0.5, 0.25, 0]
+    assert result["uncertainty"]["clearance_quantiles"]["p50"]["mean"] == 3.5
+    assert curve["accessible_fraction_stderr"][1] == pytest.approx(0.25 / 9)
+    assert curve["accessible_volume_stderr"][1] == pytest.approx(0.25 / 2)
+    assert curve["accessible_fraction_stderr"][3] == pytest.approx(8 * 0.25 / 9)
+    json.dumps(result, allow_nan=False)
+
+
+def test_probe_curve_is_independent_of_base_probe_and_preserves_old_outputs():
+    atoms = [single_atom(3), single_atom(4)]
+    radii = [2.0, 0.0, 1.0, 0.0]
+    original = list(radii)
+    result = compute_void_distribution(atoms, n_samples=200, probe_radii=radii)
+    default = compute_void_distribution(atoms, n_samples=200)
+    inaccessible = compute_void_distribution(
+        atoms, n_samples=200, probe_radius=10, probe_radii=radii)
+    assert radii == original
+    assert result["probe_curve"]["radii"] == [0, 1, 2]
+    assert default["probe_curve"]["radii"] == default["bin_edges"]
+    assert result["probe_curve"] == inaccessible["probe_curve"]
+    assert inaccessible["accessible_fraction"] == 0
+    assert inaccessible["clearance_quantiles"] == {"p10": None, "p50": None, "p90": None}
+    # Only the requested curve and its uncertainty change when radii change.
+    for output in (result, default):
+        output.pop("probe_curve")
+        output["uncertainty"].pop("probe_curve")
+        for frame in output["per_structure"]:
+            frame.pop("probe_curve")
+    assert result == default
+    json.dumps(inaccessible, allow_nan=False)
+
+
+@pytest.mark.parametrize("radii", [
+    [], (), np.array([]), 1, "1,2", [[0, 1]], [0, [1]],
+    [-1], [np.nan], [np.inf], ["1"], [True], [0, False],
+    {"radius": 1}, {0, 1}, np.array([False, True]),
+])
+def test_invalid_probe_radius_sequences(radii):
+    with pytest.raises(ValueError, match="probe_radii"):
+        compute_void_distribution([single_atom()], probe_radii=radii)
+
+
+def test_numpy_probe_radii_supported_without_mutation():
+    radii = np.array([2.0, 1.0, 1.0, 0.0])
+    result = compute_void_distribution([single_atom()], n_samples=10, probe_radii=radii)
+    assert result["probe_curve"]["radii"] == [0, 1, 2]
+    np.testing.assert_array_equal(radii, [2, 1, 1, 0])

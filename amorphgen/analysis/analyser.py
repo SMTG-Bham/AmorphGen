@@ -637,15 +637,20 @@ class StructureAnalyser:
         bond_pair : tuple of str, optional
             Bond pair to trace, e.g. ("Si", "O"). Auto-detected if None.
         cutoff : float or dict, optional
-            Bond cutoff. Uses analyser cutoff if None.
+            Positive bond cutoff in Angstrom, or an ASE pair-cutoff mapping.
+            Uses analyser pair cutoff if None.
         max_ring : int
             Maximum ring size to search (default 12).
 
         Returns
         -------
         dict
-            {"ring_sizes": list, "counts": list, "fractions": list,
-             "bond_pair": tuple, "total_rings": int}
+            Size distribution, mean/spread, resolved and unresolved network
+            edge counts, and per-structure statistics with uncertainty.
+            Counts (including legacy ``total_rings``) are shortest-cycle
+            observations per edge, not the number of unique rings. Unresolved
+            edges have no closure within ``max_ring``. See
+            :func:`amorphgen.analysis.rings.compute_ring_statistics`.
         """
         return compute_ring_statistics(
             self.atoms_list, bond_pair, cutoff, max_ring, self._get_cutoff)
@@ -683,17 +688,20 @@ class StructureAnalyser:
         return compute_voronoi(self.atoms_list, element)
 
     def void_distribution(self, n_samples=10000, probe_radius=0.0,
-                          radii=None, nbins=50, seed=0):
+                          radii=None, nbins=50, seed=0, *, probe_radii=None):
         """Sample periodic free-space clearance and accessible volume.
 
         Distances/radii are in Angstrom. This is a volume-weighted point
         clearance distribution; it does not identify connected pores.
+        ``probe_radii`` selects thresholds for an accessible-volume curve
+        evaluated from the same samples (default: histogram bin edges).
+        Clearance quantiles describe points accessible to ``probe_radius``.
         See :func:`amorphgen.analysis.voids.compute_void_distribution`.
         """
         from .voids import compute_void_distribution
         return compute_void_distribution(
             self.atoms_list, n_samples=n_samples, probe_radius=probe_radius,
-            radii=radii, nbins=nbins, seed=seed)
+            radii=radii, nbins=nbins, seed=seed, probe_radii=probe_radii)
 
     def oxygen_speciation(self, network_formers=None):
         """Count free/non-bridging/bridging and multiply shared oxygen.

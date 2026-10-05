@@ -720,22 +720,30 @@ def plot_tr(tr_result, output_dir=".", prefix="analysis", dpi=300,
 
 def plot_rings(rings, output_dir, label="auto", dpi=300, save_pdf=False,
                show_title=False):
-    """Bar chart of the ring-size distribution (percent of network edges)."""
+    """Bar chart of ring-size assignments (percent of resolved network edges)."""
     import os
     os.makedirs(output_dir, exist_ok=True)
-    sizes = list(rings["ring_sizes"]); frac = list(rings["fractions"])
+    sizes = list(rings["ring_sizes"])
+    frac = list(rings["fractions"])
     fig, ax = _figure(figsize=(5.0, 3.4), dpi=dpi)
-    ax.bar(sizes, frac, color="#2a78d6", width=0.7)
-    ax.set_xlabel("ring size (network nodes)")
-    ax.set_ylabel("fraction of edges (%)")
+    if sizes:
+        ax.bar(sizes, frac, color=_PALETTE[0], width=0.7)
+    else:
+        limit = rings.get("max_ring")
+        message = (f"No ring closures resolved\nwith size ≤ {limit}" if limit is not None
+                   else "No ring closures resolved")
+        ax.text(0.5, 0.5, message, transform=ax.transAxes, ha="center", va="center")
+        ax.set_ylim(0, 100)
+    ax.set_xlabel("Ring size (network nodes)")
+    ax.set_ylabel("Fraction of resolved edges (%)")
     ax.set_xticks(sizes)
-    for sp in ("top", "right"):
-        ax.spines[sp].set_visible(False)
+    _apply_pub_style(ax)
     if show_title:
         ax.set_title(f"Ring statistics ({label})")
     fig.tight_layout()
     base = os.path.join(output_dir, "analysis_rings")
-    fig.savefig(base + ".png")
-    if save_pdf:
-        fig.savefig(base + ".pdf")
+    _save_fig(fig, base, dpi=dpi, save_pdf=save_pdf)
+    # _figure deliberately avoids pyplot and therefore never registers an
+    # open figure. Release its artists after saving the potentially large plot.
+    fig.clear()
     return base + ".png"
