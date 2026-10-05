@@ -17,6 +17,8 @@ POSCAR
 !examples/**/*.xyz
 !examples/**/*.extxyz
 !examples/**/*.cif
+# Offline experimental test fixtures must be present in clean checkouts.
+!test/data/experimental/*.xyz
 CONTCAR
 OUTCAR
 XDATCAR

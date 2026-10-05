@@ -43,14 +43,14 @@ autodoc_default_options = {
     "member-order": "bysource",
 }
 autodoc_typehints = "description"
+# Core dependencies are installed with the docs extra. Only mock optional
+# ML backends: mocking NumPy breaks SciPy's import-time version checks.
 autodoc_mock_imports = [
-    "ase",
     "mace",
     "mace_torch",
     "chgnet",
     "sevenn",
     "torch",
-    "numpy",
 ]
 
 # -- Autosummary configuration -----------------------------------------------

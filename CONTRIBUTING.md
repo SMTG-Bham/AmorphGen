@@ -71,7 +71,7 @@ standard, and compare EMT copper stiffness with experimental low-temperature
 extrapolations. These are bounded regression checks, not validation of every
 generation workflow. Sources, sample conditions, fixture provenance and the
 distinction between test tolerances and experimental uncertainties are recorded
-in [the benchmark notes](test/data/experimental/README.md). The small structure
+in [the benchmark notes](https://github.com/SMTG-Bham/AmorphGen/blob/main/test/data/experimental/README.md). The small structure
 fixtures ship in the sdist so these checks also run in the package job.
 
 For additional experimental checks, cite a primary source and preserve its
