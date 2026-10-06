@@ -1,0 +1,35 @@
+# CPU smoke example for sequential stopping, not a calibrated glass model.
+# Run: amorphgen --random-gen --config examples/until_converged.yaml -o sequential_demo
+model: lennard-jones
+engine: torchsim
+device: cpu
+default_dtype: float64
+seed: 42831
+classical_params:
+  params:
+    Cu-Cu: {sigma: 2.3, epsilon: 0.1}
+  cutoff: 3.0
+opt:
+  cell_filter: none
+  fmax: 0.1
+  max_steps: 200
+random_gen:
+  composition: {Cu: 4}
+  target_density: 2.0
+  minsep: {Cu-Cu: 2.8}
+  target_cn: {}
+  relax: true
+  until_converged: true
+  convergence_batch_size: 16
+  convergence_min_structures: 32
+analysis:
+  cutoff: 2.8
+  convergence_confidence: 0.95
+  convergence_max_structures: 256
+  tolerances:
+    density: 1.2
+    coordination.Cu-Cu: 1.2
+  descriptor_bounds:
+    density: [0.0, 4.0]
+    # Fixed cell length > 2*cutoff: at most the other three atoms.
+    coordination.Cu-Cu: [0.0, 3.0]

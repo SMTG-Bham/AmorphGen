@@ -43,6 +43,7 @@ Usage
 
 from .analyser import StructureAnalyser
 from .convergence import convergence_report
+from .sequential import sequential_convergence_report
 from .convergence_output import format_convergence_report, save_convergence_report
 from .robustness import format_cutoff_robustness, save_cutoff_robustness
 from .energy import rank_from_log, format_log_ranking
@@ -68,6 +69,7 @@ from .comparison_plots import (
 __all__ = [
     "StructureAnalyser",
     "convergence_report",
+    "sequential_convergence_report",
     "format_convergence_report",
     "save_convergence_report",
     "format_cutoff_robustness",

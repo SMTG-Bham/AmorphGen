@@ -147,11 +147,15 @@ _BLOCK_SCHEMA = {
         "dmax_factor": _NUMBER,
         "cell_filter": _OPTIONAL_STRING,
         "relax": bool,
+        "until_converged": bool,
+        "convergence_batch_size": int,
+        "convergence_min_structures": int,
         "seed": (int, type(None)),
     },
     "analysis": {
         "convergence": bool,
         "tolerances": dict,
+        "descriptor_bounds": dict,
         "convergence_confidence": _NUMBER,
         "convergence_max_structures": int,
         "cutoff": (str, int, float, dict),
@@ -320,6 +324,14 @@ def _validate_nested_values(cfg: dict, errors: list[str], path: str) -> None:
                 errors, path, cutoff=(block_name == "analysis"
                                       and field in ("cutoff", "order_cutoff")))
 
+    random_cfg = cfg.get("random_gen")
+    if isinstance(random_cfg, dict):
+        for name, minimum in (("convergence_batch_size", 1),
+                              ("convergence_min_structures", 2)):
+            value = random_cfg.get(name)
+            if type(value) is int and value < minimum:
+                errors.append(f"random_gen.{name} must be at least {minimum}")
+
     analysis = cfg.get("analysis")
     if not isinstance(analysis, dict):
         return
@@ -332,6 +344,25 @@ def _validate_nested_values(cfg: dict, errors: list[str], path: str) -> None:
             if _check_type(value, _NUMBER, key, errors):
                 if not math.isfinite(value) or value <= 0:
                     errors.append(f"{key} must be finite and positive")
+    descriptor_bounds = analysis.get("descriptor_bounds")
+    if isinstance(descriptor_bounds, dict):
+        for name, bounds in descriptor_bounds.items():
+            key = f"analysis.descriptor_bounds.{name}"
+            if not isinstance(name, str) or not name.strip():
+                errors.append("analysis.descriptor_bounds keys must be nonempty descriptor names")
+            if not isinstance(bounds, list) or len(bounds) != 2:
+                errors.append(f"{key} must be a [lower, upper] list")
+                continue
+            valid = True
+            for index, value in enumerate(bounds):
+                if not _check_type(value, _NUMBER, f"{key}[{index}]", errors):
+                    valid = False
+                elif not math.isfinite(value):
+                    errors.append(f"{key}[{index}] must be finite")
+                    valid = False
+            if valid and (not bounds[0] < bounds[1]
+                          or not math.isfinite(bounds[1] - bounds[0])):
+                errors.append(f"{key} must have finite lower < upper and range")
     confidence = analysis.get("convergence_confidence")
     if type(confidence) in _NUMBER:
         if not math.isfinite(confidence) or not 0 < confidence < 1:

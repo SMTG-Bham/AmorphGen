@@ -627,6 +627,14 @@ Notes on the options:
   in neighbours). Curves use full-ensemble variance and are independent of
   input order. Estimated additional counts assume independent structures
   with unchanged variance; see the [convergence guide](https://smtg-bham.github.io/AmorphGen/guides/analysis.html#declared-tolerances-and-ensemble-convergence).
+- `--random-gen --relax --engine torchsim --until-converged` generates batches
+  until every predeclared bounded descriptor reaches its precision target.
+  Empirical Bernstein confidence sequences with alpha spending make these
+  repeated stopping checks statistically valid under the recorded sampling
+  assumptions. A resource cap exits with code 2 when precision remains unmet.
+  The analysis planning curves above do not provide this stopping guarantee;
+  see [sequential generation](docs/guides/sequential-generation.md) and the
+  [complete example](examples/until_converged.yaml).
 - `--sq` computes S(q) at the reciprocal-lattice q-vectors of each cell, so the
   first sharp diffraction peak is resolved without the truncation of a Fourier
   transform of g(r). Weighting is `xray` (q-dependent Waasmaier–Kirfel form

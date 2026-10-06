@@ -107,6 +107,8 @@ For multiple quenches, see {doc}`guides/mq-ensemble` or {doc}`guides/batch-quenc
 
 - {doc}`guides/analysis`: RDFs, coordination, bond angles, rings, structure factors
   and plots, using the CLI or Python API.
+- {doc}`guides/sequential-generation`: generate torch-sim batches until declared
+  precision targets pass a statistically valid adaptive stopping rule.
 - {doc}`guides/yaml-config`: save a protocol, set temperatures and cooling rates,
   and control reproducibility.
 - {doc}`guides/hpc`: run and resume jobs on a cluster.
@@ -183,6 +185,7 @@ getting-started/quickstart
 :caption: User Guide
 
 guides/random-generation
+guides/sequential-generation
 guides/pipeline
 guides/mq-ensemble
 guides/batch-quench

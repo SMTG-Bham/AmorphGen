@@ -111,6 +111,13 @@ remains `n/a`. Reports include intervals and count inconclusive verdicts.
 (ensemble-convergence)=
 ## Declared tolerances and ensemble convergence
 
+This section describes uncertainty and sample-size planning for an existing
+ensemble. Repeatedly stopping when a Student-t planning interval passes does
+not preserve its nominal coverage. For generation with an anytime-valid
+stopping rule, use `--random-gen --relax --engine torchsim --until-converged`,
+with predeclared population support bounds and tolerances; see
+{doc}`sequential-generation`.
+
 Declare an absolute tolerance for the uncertainty of each descriptor's
 **ensemble mean**, in its native units. A tolerance of `0.02` for density
 means a 95% Student-t interval half-width no greater than 0.02 g/cm³; it is

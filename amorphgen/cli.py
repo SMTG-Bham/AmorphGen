@@ -132,6 +132,121 @@ def _convergence_options(args, config):
     return enabled, tolerances, confidence, max_structures
 
 
+def _parse_descriptor_bounds(value):
+    """Parse fixed population support bounds for sequential inference."""
+    import math
+
+    name, separator, raw = value.partition("=")
+    name = name.strip()
+    try:
+        bounds = [float(part) for part in raw.split(",")]
+    except ValueError:
+        bounds = []
+    if (not separator or not name or len(bounds) != 2
+            or not all(math.isfinite(part) for part in bounds)
+            or not bounds[0] < bounds[1]
+            or not math.isfinite(bounds[1] - bounds[0])):
+        raise argparse.ArgumentTypeError(
+            "descriptor bounds must be NAME=LOW,HIGH with finite LOW < HIGH")
+    return name, bounds
+
+
+def _until_convergence_options(args, config):
+    """Resolve the immutable sequential sampling contract before model setup."""
+    import math
+
+    random_cfg = config.get("random_gen", {})
+    analysis = config.get("analysis", {})
+    enabled = bool(args.until_converged or random_cfg.get("until_converged", False))
+    if not enabled:
+        if (args.descriptor_bounds or args.convergence_batch_size is not None
+                or args.convergence_min_structures is not None):
+            raise ValueError("descriptor bounds and sampling controls require --until-converged")
+        return None
+    if not args.random_gen:
+        raise ValueError("--until-converged requires --random-gen")
+    if not (args.relax or random_cfg.get("relax", False)):
+        raise ValueError("--until-converged requires --relax")
+    if config.get("engine", "ase") != "torchsim":
+        raise ValueError("--until-converged requires --engine torchsim")
+    if args.indices is not None:
+        raise ValueError("--until-converged cannot use --indices; sampling must retain its complete prefix")
+    if _typed("-n", "--n-structures"):
+        raise ValueError("--until-converged uses --convergence-max-structures instead of --n-structures")
+    output_format = (args.format if _typed("--format")
+                     else random_cfg.get("output_format", args.format))
+    if output_format != "xyz" or config.get("opt", {}).get("output_format", "xyz") != "xyz":
+        raise ValueError("--until-converged requires xyz output to preserve descriptor and seed metadata")
+    seed = (args.seed if args.seed is not None
+            else random_cfg.get("seed", config.get("seed")))
+    if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
+        raise ValueError("--until-converged requires an explicit nonnegative integer --seed")
+    tolerances = dict(analysis.get("tolerances", {}))
+    tolerances.update(args.tolerance or [])
+    bounds = dict(analysis.get("descriptor_bounds", {}))
+    bounds.update(args.descriptor_bounds or [])
+    if not tolerances:
+        raise ValueError("--until-converged requires at least one declared --tolerance")
+    if set(bounds) != set(tolerances):
+        raise ValueError("every convergence tolerance requires matching descriptor bounds, with no extra bounds")
+    from ase.data import atomic_numbers
+    for name, tolerance in tolerances.items():
+        if not isinstance(name, str):
+            raise ValueError("convergence descriptor names must be strings")
+        if name not in {"density", "energy.total", "energy.per_atom"}:
+            kind, separator, label = name.partition(".")
+            count = {"coordination": 2, "total_coordination": 1,
+                     "bond_distance": 2, "bond_angle": 3}.get(kind)
+            elements = label.split("-")
+            if (not separator or count is None or len(elements) != count
+                    or any(element not in atomic_numbers for element in elements)):
+                raise ValueError(f"Unsupported sequential descriptor {name!r}")
+        if (isinstance(tolerance, bool) or not isinstance(tolerance, (int, float))
+                or not math.isfinite(tolerance) or tolerance <= 0):
+            raise ValueError(f"Tolerance for {name!r} must be finite and positive")
+        support = bounds[name]
+        if (not isinstance(support, (list, tuple)) or len(support) != 2
+                or any(isinstance(x, bool) or not isinstance(x, (int, float))
+                       or not math.isfinite(x) for x in support)
+                or not support[0] < support[1]
+                or not math.isfinite(support[1] - support[0])):
+            raise ValueError(f"Descriptor bounds for {name!r} require finite lower < upper")
+    targets = {name: {"bounds": bounds[name], "tolerance": tolerance, "components": 1}
+               for name, tolerance in tolerances.items()}
+    confidence = (args.convergence_confidence if args.convergence_confidence is not None
+                  else analysis.get("convergence_confidence", .95))
+    if (isinstance(confidence, bool) or not isinstance(confidence, (int, float))
+            or not math.isfinite(confidence) or not 0 < confidence < 1):
+        raise ValueError("convergence confidence must be finite and between 0 and 1")
+    batch_size = (args.convergence_batch_size if args.convergence_batch_size is not None
+                  else random_cfg.get("convergence_batch_size", 8))
+    minimum = (args.convergence_min_structures if args.convergence_min_structures is not None
+               else random_cfg.get("convergence_min_structures", 2))
+    maximum = (args.convergence_max_structures if args.convergence_max_structures is not None
+               else analysis.get("convergence_max_structures", 1000))
+    for name, value, lower in (("batch size", batch_size, 1),
+                               ("min structures", minimum, 2),
+                               ("max structures", maximum, 2)):
+        if isinstance(value, bool) or not isinstance(value, int) or value < lower:
+            raise ValueError(f"convergence {name} must be an integer >= {lower}")
+    if maximum < minimum:
+        raise ValueError("convergence max structures must be >= min structures")
+    cutoff = args.cutoff if _typed("--cutoff") else analysis.get("cutoff", args.cutoff)
+    needs_cutoff = any(name not in {"density", "energy.total", "energy.per_atom"}
+                       for name in targets)
+    try:
+        numeric_cutoff = float(cutoff)
+    except (ValueError, TypeError):
+        numeric_cutoff = None
+    if (isinstance(cutoff, bool) or numeric_cutoff is None
+            or not math.isfinite(numeric_cutoff) or numeric_cutoff <= 0):
+        if needs_cutoff:
+            raise ValueError("--until-converged requires an explicit positive numeric --cutoff for structural targets")
+        numeric_cutoff = None
+    return {"targets": targets, "batch_size": batch_size, "min_structures": minimum,
+            "max_structures": maximum, "confidence": confidence, "cutoff": numeric_cutoff}
+
+
 def _cutoff_window_option(args, config):
     """Resolve the positive cutoff half-window: CLI > YAML > 0.1 A."""
     import math
@@ -349,6 +464,13 @@ def _add_arguments(p):
                         help="Number of structures.")
     g_rand.add_argument("--relax", action="store_true",
                         help="Relax each generated structure.")
+    g_rand.add_argument("--until-converged", action="store_true",
+                        help="Generate and relax independent torch-sim batches until all "
+                             "declared descriptor precision targets pass an anytime-valid rule.")
+    g_rand.add_argument("--convergence-batch-size", type=int, default=None, metavar="N",
+                        help="Independent structures per sequential convergence look (default 8).")
+    g_rand.add_argument("--convergence-min-structures", type=int, default=None, metavar="N",
+                        help="Minimum structures before sequential stopping (default 2).")
     g_rand.add_argument("--target-density", type=float, default=None,
                         help="Target density (g/cm3); auto if omitted.")
     g_rand.add_argument("--density-scale", type=float, default=1.0,
@@ -454,10 +576,14 @@ def _add_arguments(p):
                       metavar="LEVEL",
                       help="Confidence level for convergence uncertainty "
                            "(default 0.95).")
+    g_an.add_argument("--descriptor-bounds", action="append", type=_parse_descriptor_bounds,
+                      default=None, metavar="NAME=LOW,HIGH",
+                      help="Fixed population support for an --until-converged descriptor. "
+                           "Repeat once per tolerance; CLI overrides YAML per descriptor.")
     g_an.add_argument("--convergence-max-structures", type=int, default=None,
                       metavar="N",
-                      help="Maximum ensemble size to consider when estimating "
-                           "additional structures (default 1000000).")
+                      help="Maximum structures: sequential generation cap with --until-converged "
+                           "(default 1000), or analysis projection cap (default 1000000).")
     g_an.add_argument("--cutoff", default="auto-rdf",
                       help="Bond cutoff. 'auto-rdf' (default): first minimum "
                            "of each partial g(r), so every pair gets its own "
@@ -1485,6 +1611,12 @@ def _main():
     override = _apply_amorphous_cubic_default(
         args, override, _get_parser().get_default("cell_filter"))
 
+    try:
+        until_options = _until_convergence_options(args, override)
+    except ValueError as exc:
+        print(f"Error: sequential convergence: {exc}")
+        sys.exit(1)
+
     # ── Fail fast when the requested backend is missing ──────────────────────
     # Calculator-requiring modes abort BEFORE any setup work (no work dir, no
     # structure loading) with a copy-pasteable install hint. Backend knowledge
@@ -1492,7 +1624,7 @@ def _main():
     # The same gate refuses a precision the model can't run (CHGNet + float64),
     # which --mq-ensemble would otherwise only hit in phase 3, after stages
     # 1-4 of MD.
-    if _requires_calculator(args, override.get("analysis", {})):
+    if until_options is not None or _requires_calculator(args, override.get("analysis", {})):
         from .utils.calculators import (require_backend, require_dtype,
                                         BackendNotInstalledError)
         model = override.get("model", args.model) or "mace-mpa-0"
@@ -2191,6 +2323,41 @@ def _main():
                     "output_format": opt_cfg.get("output_format", "xyz"),
                     "batch_size": args.batch_size or opt_cfg.get("batch_size") or "auto",
                 }
+
+        if until_options is not None:
+            from .pipeline.until_converged import run_until_converged
+
+            sequential_override = dict(override)
+            sequential_override["opt"] = {
+                **opt_cfg, "fmax": fmax, "max_steps": max_relax_steps,
+                "optimizer": optimizer, "cell_filter": cell_filter,
+            }
+            if args.batch_size is not None:
+                sequential_override["opt"]["batch_size"] = (
+                    int(args.batch_size) if str(args.batch_size).isdigit() else args.batch_size)
+            generation = {
+                "target_density": target_density, "density_scale": density_scale,
+                "minsep": minsep, "max_attempts_per_atom": args.max_attempts,
+                "target_cn": target_cn, "dmax": dmax_dict,
+                "cn_tolerance": cn_tolerance, "dmax_factor": args.dmax_factor,
+                "repair_iters": args.repair_iters, "retry_mode": args.retry_mode,
+                "seed": (args.seed if args.seed is not None
+                         else rg_cfg.get("seed", override.get("seed"))),
+            }
+            try:
+                result = run_until_converged(
+                    composition, args.work_dir, **until_options, generation=generation,
+                    cfg_override=sequential_override, resume=args.resume)
+            except (ValueError, RuntimeError, OSError, ImportError) as exc:
+                print(f"Error: sequential convergence: {exc}")
+                sys.exit(1)
+            print(f"Sequential convergence: {result['status']} "
+                  f"after {result['n_structures']} structures.")
+            if result["status"] == "max_structures_reached":
+                sys.exit(2)
+            if result["status"] != "converged":
+                sys.exit(1)
+            return
 
         # Placement and the optional separate torch-sim phase share ownership
         # of the whole output tree, including resume metadata validation.
