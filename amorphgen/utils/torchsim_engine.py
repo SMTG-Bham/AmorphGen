@@ -270,6 +270,7 @@ def batch_relax(atoms_list, model, fmax: float = 0.01, max_steps: int = 1000,
     import torch_sim as ts
     from torch_sim.optimizers import OPTIM_REGISTRY
     from .repulsion import wrap_torch_model
+    from .relaxation import record_relaxation_metadata
 
     atoms_list = list(atoms_list)
     if not atoms_list:
@@ -338,8 +339,22 @@ def batch_relax(atoms_list, model, fmax: float = 0.01, max_steps: int = 1000,
     out = guard.check(state, res)
     if guard.ids(state) != list(range(len(atoms_list))):
         raise RuntimeError("torch-sim failed to restore the original structure order")
-    for a in out:
+    final_converged = conv(state).detach().cpu().numpy().reshape(-1)
+    final_max_forces = ts.system_wise_max_force(state).detach().cpu().numpy().reshape(-1)
+    final_pressures = None
+    if cf is not None:
+        final_pressures = (-torch.diagonal(state.stress, dim1=1, dim2=2).mean(dim=1)
+                           * 160.21766208).detach().cpu().numpy().reshape(-1)
+    for index, a in enumerate(out):
         a.info["max_force"] = float(np.abs(a.get_forces(apply_constraint=False)).max())
+        record_relaxation_metadata(
+            a, converged=final_converged[index], fmax=fmax,
+            max_force=final_max_forces[index], steps=guard.steps[index],
+            max_steps=max_steps, engine="torchsim",
+            force_criterion="torch_sim.system_wise_max_force", cell_filter=key,
+            pressure_tol_gpa=pressure_tol_gpa if cf is not None else None,
+            pressure_gpa=final_pressures[index] if final_pressures is not None else None,
+        )
     dt = time.time() - t0
     log(f"[torch-sim] done in {dt:.1f} s ({dt / max(n, 1):.2f} s per structure); "
         f"max|F| range {min(a.info['max_force'] for a in out):.3f} - "

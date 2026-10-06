@@ -1,0 +1,34 @@
+# Inspect labels before choosing exclusion policies. This example excludes
+# close contacts only; all other labels remain in the analysed population.
+# Bounds illustrate a silica use case; calibrate them for your material.
+#
+# amorphgen --analyse --input-dir ensemble/ --config examples/screening.yaml
+analysis:
+  cutoff: auto-rdf
+  screening_output: analysis/screening
+  screening:
+    coordination:
+      allowed: auto             # random-gen targets +/- inferred tolerance
+      # Use explicit sets to also assess species without inferred targets:
+      # allowed: {Si: [4], O: [2]}
+      max_fraction: 0.05        # fraction of assessed sites outside their sets
+      exclude: false
+    crystal_like:
+      qbar6_threshold: 0.3      # calibrate for the chosen neighbour shell
+      min_neighbors: 4
+      max_fraction: 0.2         # fraction of all sites classified as ordered
+      exclude: false
+    close_contacts:
+      threshold_frac: 0.7      # times the radii-based pair minimum separation
+      # Alternatively, min_distance: 1.0 specifies a fixed threshold in A.
+      exclude: true
+    density:
+      min: 2.1                 # g/cm^3; inclusive bounds
+      max: 2.3
+      exclude: false
+    energy:
+      enabled: false           # enable after setting a suitable energy bound
+      max: 0.0                 # eV/atom; replace for your calculator/reference
+      exclude: false
+    unconverged:
+      exclude: false           # absent convergence metadata is also labelled

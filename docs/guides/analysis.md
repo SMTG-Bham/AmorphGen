@@ -19,6 +19,113 @@ directory. Files with the same stem count once, in that format priority
 order. Each file contributes its last frame; to analyse a trajectory as an
 ensemble, first extract snapshots or pass a list of frames to the Python API.
 
+## Screening and analysis inclusion
+
+Screening records a label independently of whether a structure is excluded
+from analysis. Run the default screens with:
+
+```bash
+amorphgen --analyse --input-dir ensemble/ --screen \
+    --screening-output analysis/screening --save-plot analysis/
+```
+
+`--screen` enables coordination, crystal-like order, close-contact and
+relaxation-convergence checks. All screens default to `exclude: false`, so
+labels alone retain structures in the analysis. Density and energy need
+material-specific bounds and are enabled through YAML. For example:
+
+```yaml
+analysis:
+  screening:
+    coordination:
+      allowed: auto
+      max_fraction: 0.05
+    crystal_like:
+      qbar6_threshold: 0.3
+      min_neighbors: 4
+      max_fraction: 0.2
+    close_contacts:
+      threshold_frac: 0.7
+      exclude: true
+    density:
+      min: 2.1
+      max: 2.3
+    unconverged:
+      exclude: false
+```
+
+Run this configuration with `--config examples/screening.yaml`; a screening
+mapping enables screening without requiring `--screen`. `analysis.screening:
+true` selects the default screens; `false` disables screening unless
+overridden by `--screen`. In a mapping, only listed screens are enabled, and
+`enabled: false` disables an individual screen. `exclude: true` applies
+exclusion for that screen's labels. The
+example thresholds above illustrate silica and must be chosen for the
+material and neighbour shell being assessed.
+
+| Screen | What triggers a label |
+|---|---|
+| `coordination` | More than `max_fraction` of assessed sites have a total coordination outside their species' `allowed` set; the default fraction is `0.0`. Counts use chemically bonding neighbour pairs. Set `allowed: {Si: [4], O: [2]}` explicitly, or use `auto`. |
+| `crystal_like` | The ordered atom fraction exceeds `max_fraction` (default `0.0`), or the largest ordered cluster fraction exceeds an optional `max_cluster_fraction`. Atom labels use `qbar6_threshold` (default `0.3`) and `min_neighbors` (default `4`). |
+| `close_contacts` | Any periodic interatomic separation is strictly below its threshold. By default this is `threshold_frac: 0.7` times the radii-based minimum separation for each pair. `min_distance` supplies an explicit distance in Å, either a scalar or a pair mapping covering every pair present. Every pair type is assessed, including unlike species and periodic self-images. |
+| `density` | Density lies outside the inclusive `min`/`max` bounds in g/cm³. Supply at least one bound. |
+| `energy` | Stored energy per atom lies outside the inclusive `min`/`max` bounds in eV/atom. Supply at least one bound and use energies from a consistent calculator and reference. Screening reads existing energy metadata or calculator results without evaluating a calculator. |
+| `unconverged` | Explicit `relaxation_converged` or `relax_converged` metadata is false. Missing convergence metadata is unavailable, rather than an assumed successful relaxation. |
+
+Automatic coordination sets reuse `auto_target_cn()` from
+`amorphgen.utils.radii`, the same composition-based targets used by
+`--random-gen`. Each returned target expands to the integer set from
+`target - tolerance` to `target + tolerance`, inclusive. Species without an
+inferred target are unassessed; this is not a full list of acceptable
+coordinations for every species. Use explicit sets when needed, for example
+to assess oxygen as well as silicon in silica. The coordination fraction
+uses assessed sites as its denominator. Automatic neighbour cutoffs are
+resolved once using the full candidate ensemble and remain fixed for both
+screening and analysis of the retained structures.
+Crystal-like screening shares this cutoff by default. An optional
+`crystal_like.cutoff` selects a separate order shell using the same scalar,
+pair, `auto` or `auto-rdf` forms as `--cutoff`; it is also resolved once over
+the full candidate ensemble. Screening settings are independent of the
+optional `--bond-order` descriptor's CLI options.
+
+Unavailable metrics produce a `<screen>_unavailable` label. They exclude a
+structure only if that screen has `exclude: true`. This preserves the
+difference between a measured failure and missing evidence. Structure files
+that do not retain energy or relaxation metadata can therefore receive
+unavailable labels even when their geometry is valid.
+
+Newly relaxed structures, including `--random-gen --relax` outputs, retain
+the optimiser's convergence evidence in extended XYZ metadata. CIF and VASP
+outputs use a companion `<structure>.relaxation.json` file; keep it beside
+the structure. The loader verifies the structure file's hash before using
+the companion, so replaced files do not acquire stale convergence results.
+Earlier files without evidence remain unavailable. Starting new MD clears
+the previous relaxation status; a later relaxation records its own result.
+
+The CLI prints a generated / passed / labelled / analysed table and writes
+three files, even when every candidate is excluded:
+
+| Count | Meaning |
+|---|---|
+| `generated` | Candidates supplied to this analysis, after normal input loading; it does not reconstruct historical generation attempts. |
+| `passed` | Candidates with no triggered or unavailable screen labels. |
+| `labelled` | Candidates with at least one label, whether retained or excluded. |
+| `analysed` | Retained candidates whose analysis completed. |
+| `excluded` | Candidates removed by at least one screen configured with `exclude: true`. |
+
+Labelled and analysed counts can overlap. For example, ten candidates with
+three labelled and one excluded can give `generated=10`, `passed=7`,
+`labelled=3`, `analysed=9`, `excluded=1`. Analysis describes the retained
+population; changing exclusions can change its means and uncertainty.
+
+`--screening-output PREFIX` writes `PREFIX.json`,
+`PREFIX_structures.csv` and `PREFIX_summary.csv`, containing the full
+decisions, individual structure records and count table respectively.
+The default prefix is `<work-dir>/screening`; YAML can set
+`analysis.screening_output`. The Python API exposes the same decisions via
+`StructureAnalyser.screen()` and a retained analyser via `.screened()`;
+see {doc}`/api/analysis`.
+
 ## Spread and uncertainty of the mean
 
 Each input structure is one independent sampling unit. Pooled site, bond and
@@ -1190,6 +1297,7 @@ amorphgen --analyse \
     [--cutoff MODE_OR_NUMBER] \
     [--cutoff-window FLOAT] \
     [--per-structure] \
+    [--screen] [--screening-output PREFIX] \
     [--save-report FILE] \
     [--save-plot DIR] \
     [--save-pdf] \
@@ -1213,6 +1321,8 @@ amorphgen --analyse \
 | `--cutoff MODE` | `auto-rdf` (default: first minimum of each partial g(r)), `auto` (radii table), a number in Å, or per-pair overrides such as `"In-O=2.6,Zn-O=2.3"` that keep `auto-rdf` for the other pairs (`"auto,In-O=2.6"` or `"2.4,In-O=2.6"` change the base). |
 | `--cutoff-window FLOAT` | Finite positive half-window in Å for the default near-cutoff contact shares and five-point coordination sweep (default 0.1). CLI overrides `analysis.cutoff_window`. |
 | `--per-structure` | Print a per-structure table (one row per file: density, E/atom, CN). |
+| `--screen` | Label candidates before analysis with the default screens, or apply `analysis.screening` settings. Exclusion is configured independently for each screen. |
+| `--screening-output PREFIX` | Save screening JSON, per-structure CSV and summary CSV (default `<work-dir>/screening`). |
 | `--save-report FILE` | Write the full text report (densities, bond distances, coordination, angles) to a file. |
 | `--save-plot DIR` | Save available standard figures (RDF, CN, angles, density) plus CSV data into ``DIR``. |
 | `--save-pdf` | Also save vector PDF copies alongside the PNGs. |

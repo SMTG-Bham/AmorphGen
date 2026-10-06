@@ -1757,6 +1757,9 @@ def _batch_random_unlocked(
                 from ..utils.common import compute_density_gcm3, require_stress
                 from ..utils.safety import SafetyMonitor
                 from ..utils.repulsion import with_repulsive_core
+                from ..utils.relaxation import (
+                    record_relaxation_metadata, write_relaxation_metadata,
+                )
                 from ase.geometry import cell_to_cellpar
                 calc = with_repulsive_core(calc, repulsive_core)
                 atoms.calc = calc
@@ -1798,6 +1801,7 @@ def _batch_random_unlocked(
                 opt = OptimizerClass(target, logfile=None)
                 t_relax_start = time.perf_counter()
                 steps_done = 0
+                max_f = None
                 for step in range(max_relax_steps):
                     stop_if_requested()
                     opt.step()
@@ -1830,6 +1834,16 @@ def _batch_random_unlocked(
                 density_f = compute_density_gcm3(atoms)
                 _log(f"    Final density: {density_f:.2f} g/cm3", lf)
 
+                if max_f is None:
+                    forces = target.get_forces()
+                    max_f = float((forces ** 2).sum(axis=1).max() ** 0.5)
+                    monitor.check(atoms, step=0)
+                record_relaxation_metadata(
+                    atoms, converged=max_f < fmax, fmax=fmax, max_force=max_f,
+                    steps=steps_done, max_steps=max_relax_steps, engine="ase",
+                    force_criterion="max_filtered_force_norm", cell_filter=cell_filter,
+                )
+
                 # Save relaxed structure as _opt (in random_opt/)
                 fname_opt = os.path.join(
                     opt_dir, f"random_{generated:04d}_opt{ext}")
@@ -1839,6 +1853,7 @@ def _batch_random_unlocked(
                           sort=True)
                 else:
                     write(fname_opt, atoms, format=ase_format)
+                write_relaxation_metadata(fname_opt, atoms)
                 fname = fname_opt  # return path to relaxed version
 
             paths.append(fname)

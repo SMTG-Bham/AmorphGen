@@ -563,6 +563,14 @@ def _add_arguments(p):
 
     # ── Analysis ──────────────────────────────────────────────────────────────
     g_an = p.add_argument_group("analyse", "Used with --analyse.")
+    g_an.add_argument("--screen", action="store_true",
+                      help="Label candidates before analysis using YAML "
+                           "analysis.screening, or default coordination, "
+                           "crystal-like, close-contact and relaxation screens. "
+                           "Only screens with exclude: true remove structures.")
+    g_an.add_argument("--screening-output", default=None, metavar="PREFIX",
+                      help="Write screening JSON and candidate/count CSV tables "
+                           "(default: <work-dir>/screening). Requires screening.")
     g_an.add_argument("--convergence", action="store_true",
                       help="Report order-independent uncertainty versus ensemble "
                            "size and estimates against declared tolerances.")
@@ -1437,6 +1445,7 @@ def _collect_ensemble_final(quench_dir: str, final_dir: str, output_format: str,
     import glob as _glob
     from ase.io import read, write
     from .pipeline.batch_quench import _run_dir_name
+    from .utils.relaxation import read_relaxation_metadata, write_relaxation_metadata
 
     if output_format not in fmt_map:
         print(f"Warning: unknown format '{output_format}', using 'xyz'")
@@ -1480,11 +1489,13 @@ def _collect_ensemble_final(quench_dir: str, final_dir: str, output_format: str,
         idx = name.removeprefix("run_")
         dest = os.path.join(final_dir, f"{prefix}_{idx}{ext}")
         atoms = read(src)
+        read_relaxation_metadata(src, atoms)
         if ase_format == "vasp":
             atoms = atoms[atoms.numbers.argsort()]
             write(dest, atoms, format=ase_format, sort=True)
         else:
             write(dest, atoms, format=ase_format)
+        write_relaxation_metadata(dest, atoms)
         n_collected += 1
     print(f"  Collected {n_collected} final structures -> {final_dir}/")
 
@@ -1618,6 +1629,9 @@ def _main():
         sys.exit(1)
 
     # ── Fail fast when the requested backend is missing ──────────────────────
+    if (args.screen or args.screening_output is not None) and not args.analyse:
+        print("Error: --screen and --screening-output require --analyse.")
+        sys.exit(1)
     # Calculator-requiring modes abort BEFORE any setup work (no work dir, no
     # structure loading) with a copy-pasteable install hint. Backend knowledge
     # lives in utils.calculators (require_backend); this is just the gate.
@@ -1708,6 +1722,18 @@ def _main():
 
         # Read analysis block from YAML config (if present)
         an_cfg = override.get("analysis", {})
+        from .analysis.screening import validate_screening_config
+        try:
+            screening_spec = an_cfg.get("screening", False)
+            if args.screen and not screening_spec:
+                screening_spec = True
+            screening_config = validate_screening_config(screening_spec)
+            screening_prefix = args.screening_output or an_cfg.get("screening_output")
+            if screening_prefix and not screening_config:
+                raise ValueError("screening_output requires --screen or analysis.screening")
+        except (TypeError, ValueError) as exc:
+            print(f"Error: screening: {exc}")
+            sys.exit(1)
         try:
             cutoff_window = _cutoff_window_option(args, an_cfg)
         except ValueError as exc:
@@ -1735,6 +1761,29 @@ def _main():
             sys.exit(1)
 
         sa = StructureAnalyser(source, cutoff=cutoff)
+        screening = None
+        if screening_config:
+            from .analysis.screening import (
+                format_screening_report, write_screening_outputs,
+                mark_screening_analysed)
+            candidates = sa
+            try:
+                sa, screening = candidates.screened(screening_config)
+            except (TypeError, ValueError) as exc:
+                print(f"Error: screening: {exc}")
+                sys.exit(1)
+            screening_prefix = screening_prefix or os.path.join(args.work_dir, "screening")
+            # Preserve every decision even if a later analysis fails. Only
+            # successful completion below marks retained candidates analysed.
+            write_screening_outputs(screening, screening_prefix)
+            if sa is None:
+                screening_text = format_screening_report(screening)
+                print(screening_text)
+                print("  No structures retained for analysis.")
+                empty_report_path = args.save_report or an_cfg.get("save_report")
+                if empty_report_path:
+                    candidates.save_report(empty_report_path, text=screening_text)
+                return
 
         # Per-structure or grouped analysis
         per_structure = args.per_structure or an_cfg.get("per_structure", False)
@@ -2191,6 +2240,15 @@ def _main():
             if report_path:
                 with open(report_path, "a") as rf:
                     rf.write("\n" + v_text + "\n")
+
+        if screening is not None:
+            mark_screening_analysed(screening, screening["retained_indices"])
+            write_screening_outputs(screening, screening_prefix)
+            screening_text = format_screening_report(screening)
+            print(screening_text)
+            if report_path:
+                with open(report_path, "a", encoding="utf-8") as handle:
+                    handle.write("\n" + screening_text + "\n")
 
         return
 

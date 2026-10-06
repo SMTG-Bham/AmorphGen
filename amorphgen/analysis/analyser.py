@@ -133,11 +133,18 @@ class StructureAnalyser:
         """Return (atoms_list, file_paths). file_paths may be [] if the
         caller passed in-memory Atoms objects rather than disk paths."""
         from ase import Atoms
+        from ..utils.relaxation import read_relaxation_metadata
+
+        def load_file(path):
+            atoms = read(path)
+            read_relaxation_metadata(path, atoms)
+            return atoms
+
         if isinstance(source, list):
             if source and isinstance(source[0], Atoms):
                 return source, []
             file_list = list(source)
-            return [read(f) for f in file_list], file_list
+            return [load_file(f) for f in file_list], file_list
         if os.path.isdir(source):
             # One structure per stem: the optimiser writes s_opt.xyz AND
             # s_opt.cif (and .traj), which must not count twice. Priority
@@ -149,8 +156,40 @@ class StructureAnalyser:
             files = [by_stem[k] for k in sorted(by_stem)]
             if not files:
                 raise FileNotFoundError(f"No structure files in {source}/")
-            return [read(f) for f in files], files
-        return [read(source)], [source]
+            return [load_file(f) for f in files], files
+        return [load_file(source)], [source]
+
+    def screen(self, config=True):
+        """Label candidates and record exclusion decisions without changing them.
+
+        Each screen has an independent ``exclude`` policy (default false).
+        Coordination uses this analyser's resolved chemical cutoffs; default
+        allowed sets come from random generation's inferred targets and
+        tolerance. See :func:`amorphgen.analysis.screen_structures` for settings.
+        The returned audit starts with zero analysed structures.
+        """
+        from .screening import screen_structures
+        return screen_structures(self.atoms_list, config, cutoff=self.cutoff,
+                                 source_names=self._file_list or None)
+
+    def screened(self, config=True):
+        """Return ``(retained_analyser_or_None, audit)`` without mutating inputs.
+
+        Selection keeps the full candidate ensemble's resolved cutoffs fixed
+        and preserves file alignment. Labels alone do not remove a structure.
+        Call ``mark_screening_analysed(audit, audit['retained_indices'])`` after
+        successfully analysing the subset to record its contribution.
+        """
+        from copy import copy
+        report = self.screen(config)
+        indices = report["retained_indices"]
+        if not indices:
+            return None, report
+        selected = copy(self)
+        selected.atoms_list = [self.atoms_list[i] for i in indices]
+        selected._file_list = ([self._file_list[i] for i in indices]
+                               if self._file_list else [])
+        return selected, report
 
     def _get_cutoff(self, s1, s2):
         if isinstance(self.cutoff, (int, float)):

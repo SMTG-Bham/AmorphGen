@@ -153,6 +153,8 @@ _BLOCK_SCHEMA = {
         "seed": (int, type(None)),
     },
     "analysis": {
+        "screening": (dict, bool),
+        "screening_output": _OPTIONAL_STRING,
         "convergence": bool,
         "tolerances": dict,
         "descriptor_bounds": dict,
@@ -335,6 +337,12 @@ def _validate_nested_values(cfg: dict, errors: list[str], path: str) -> None:
     analysis = cfg.get("analysis")
     if not isinstance(analysis, dict):
         return
+    if "screening" in analysis:
+        from ..analysis.screening import validate_screening_config
+        try:
+            validate_screening_config(analysis["screening"])
+        except (TypeError, ValueError) as exc:
+            errors.append(f"analysis.screening: {exc}")
     tolerances = analysis.get("tolerances")
     if isinstance(tolerances, dict):
         for name, value in tolerances.items():

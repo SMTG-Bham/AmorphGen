@@ -19,6 +19,63 @@ API is the ``StructureAnalyser`` class.
    :show-inheritance:
 ```
 
+## Screening
+
+`StructureAnalyser.screen(config)` returns per-candidate screening decisions
+without changing the analyser. `StructureAnalyser.screened(config)` returns
+`(retained_analyser, report)`; the analyser is `None` when all candidates are
+excluded. The retained analyser uses the same resolved neighbour cutoffs as
+the original full ensemble. `crystal_like.cutoff` can independently override
+the order shell and is resolved once using that full ensemble. Neither
+method runs the subsequent analysis or marks structures as analysed.
+
+```python
+from amorphgen.analysis import (
+    StructureAnalyser, format_screening_report, mark_screening_analysed,
+    write_screening_outputs,
+)
+
+sa = StructureAnalyser("ensemble/", cutoff="auto-rdf")
+config = {
+    "coordination": {"allowed": {"Si": [4], "O": [2]}},
+    "close_contacts": {"threshold_frac": 0.7, "exclude": True},
+    "unconverged": {"exclude": False},
+}
+retained, report = sa.screened(config)
+if retained is not None:
+    print(retained.summary())
+    mark_screening_analysed(report, report["retained_indices"])
+print(format_screening_report(report))
+write_screening_outputs(report, "analysis/screening")
+```
+
+Each screen records its label and exclusion decision separately.
+`exclude` defaults to `False`; an unavailable metric yields an explicit
+unavailable label and follows that same exclusion policy. See
+{doc}`/guides/analysis` for the six screens, bounds and thresholds, automatic
+coordination sets, and the generated / passed / labelled / analysed counts.
+The configuration is the screening mapping itself, not its enclosing
+`analysis.screening` YAML keys. `True` enables the default label-only screens.
+
+The standalone `screen_structures(atoms_list, config, *, cutoff="auto-rdf",
+source_names=None)` accepts ASE structures directly. Reports initially have
+`analysed=0`; call `mark_screening_analysed(report, indices)` only after those
+original candidate indices have completed analysis. `write_screening_outputs`
+writes `<prefix>.json`, `<prefix>_structures.csv` and `<prefix>_summary.csv`.
+The CLI manages this bookkeeping and exports automatically.
+
+```{eval-rst}
+.. autofunction:: amorphgen.analysis.validate_screening_config
+
+.. autofunction:: amorphgen.analysis.screen_structures
+
+.. autofunction:: amorphgen.analysis.mark_screening_analysed
+
+.. autofunction:: amorphgen.analysis.format_screening_report
+
+.. autofunction:: amorphgen.analysis.write_screening_outputs
+```
+
 ## Ring sizes and void clearance
 
 ```python
