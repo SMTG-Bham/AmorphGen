@@ -633,8 +633,8 @@ Notes on the options:
   repeated stopping checks statistically valid under the recorded sampling
   assumptions. A resource cap exits with code 2 when precision remains unmet.
   The analysis planning curves above do not provide this stopping guarantee;
-  see [sequential generation](docs/guides/sequential-generation.md) and the
-  [complete example](examples/until_converged.yaml).
+  see [sequential generation](https://smtg-bham.github.io/AmorphGen/guides/sequential-generation.html)
+  and the [complete example](https://github.com/SMTG-Bham/AmorphGen/blob/main/examples/until_converged.yaml).
 - `--sq` computes S(q) at the reciprocal-lattice q-vectors of each cell, so the
   first sharp diffraction peak is resolved without the truncation of a Fourier
   transform of g(r). Weighting is `xray` (q-dependent Waasmaier–Kirfel form
