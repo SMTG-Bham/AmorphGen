@@ -116,10 +116,11 @@ def _native_radii(values: np.ndarray, components: int) -> Any:
     """Round a positive bound outward, including subnormal support ranges."""
     result: list[float | None] = []
     for value in np.asarray(values).reshape(-1):
-        rounded = float(value)
-        # A positive mathematical radius must never underflow to fake zero
-        # uncertainty. One outward step also protects the final conversion.
-        rounded = math.nextafter(rounded, math.inf) if value > 0 else rounded
+        # Every finite radius is mathematically positive (n >= 2), but where
+        # np.longdouble is binary64 (macOS arm64, Windows) the product itself
+        # can underflow to zero. Step outward unconditionally so it never
+        # claims fake zero uncertainty; this also protects the final conversion.
+        rounded = math.nextafter(float(value), math.inf)
         result.append(rounded if math.isfinite(rounded) else None)
     return result[0] if components == 1 else result
 

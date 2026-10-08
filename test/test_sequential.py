@@ -187,7 +187,14 @@ def test_unrepresentable_radius_is_null_and_cannot_pass():
     json.dumps(report, allow_nan=False)
 
 
-def test_smallest_positive_support_range_never_claims_zero_uncertainty():
+@pytest.mark.parametrize("binary64_longdouble", [False, True])
+def test_smallest_positive_support_range_never_claims_zero_uncertainty(
+    monkeypatch, binary64_longdouble
+):
+    # macOS arm64 and Windows have no extended long double; emulate them so
+    # Linux runs catch the radius underflowing to zero there.
+    if binary64_longdouble:
+        monkeypatch.setattr(np, "longdouble", np.float64)
     smallest = float(np.nextafter(0.0, 1.0))
     report = sequential_convergence_report(
         {"x": [0.0] * 1000},
