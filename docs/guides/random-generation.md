@@ -14,7 +14,9 @@ For each element pair, the bond type is classified and the appropriate radii are
 |-----------|-------------|--------------|---------|
 | Ionic (M-O, M-Cl) | Shannon ionic (CN-aware) | 0.80 | In-O: (0.80+1.40)*0.80 = 1.76 |
 | Metallic (M-M) | Metallic radii | 0.85 | Al-Al: (1.43+1.43)*0.85 = 2.43 |
-| M-M in oxide | max(metallic, sqrt(2)*d(M-O)*0.85) | cap 2.80 | In-In: min(2.80, max(2.84, 2.64)) = 2.80 |
+| M-M in oxide (anions with up to 6 cations) | max(metallic, sqrt(2)*d(M-O)*0.85) | cap 2.80 | In-In: min(2.80, max(2.84, 2.64)) = 2.80 |
+| M-M in a cation-rich compound (anions with 7-12 cations) | 1.155*d(M-X)*0.85 (7-8), d(M-X)*0.85 (9-12) | cap 2.80 | Li-Li in Li3N: (0.59+1.46)*0.85 = 1.74 |
+| M-M in a metal-rich compound (anions with over 12 cations) | Metallic radii | 0.85 | Ni-Ni in Ni80P20: (1.24+1.24)*0.85 = 2.11 |
 | Metalloid (Si-Si) in oxide | max(metallic, sqrt(2)*d(Si-O)*0.85) | cap 2.80 | Si-Si: max(1.99, 2.12) = 2.12 |
 | Small anion (O-O) | Shannon ionic | 0.80 | O-O: (1.40+1.40)*0.80 = 2.24 |
 | Large anion (Cl-Cl) | Shannon ionic | 0.70 | Cl-Cl: (1.81+1.81)*0.70 = 2.53 |
@@ -22,6 +24,35 @@ For each element pair, the bond type is classified and the appropriate radii are
 | Nonmetal cation to cation | sqrt(2)*d(X-O), or 2*d(X-O) for the same element | 0.85, cap 2.80 | P-P: 2*(0.17+1.40)*0.85 = 2.67 |
 
 When `--target-cn` is provided, CN-specific Shannon radii are used (e.g. Si CN=4: 0.26 A vs CN=6: 0.40 A), giving tighter minsep values.
+
+#### Why these values
+
+- **Bonds at 0.80 of the radii sum.** Coordination-aware placement puts a bonded neighbour anywhere between minsep and 1.5 × minsep (the default `dmax`). At 0.80 that shell runs from 0.80 to 1.20 times the Shannon bond, centred on it, so placed bonds scatter ±20 % about the ideal length. AIRSS buildcell uses separations at 80-90 % of the equilibrium distances for the same reason. Measured against crystals, every bonded floor sits at 0.70-0.93 of the real bond: oxides, halides, nitrides, carbides, III-V and II-VI semiconductors, borides, hydrides, sulfides and alloys alike.
+- **M-M at 0.85.** Two metals are kept a little stiffer than a bond, so placement does not build metal clusters.
+- **Cations across an anion.** In a compound two cations meet across the anion they share. Where each anion has at most 6 cations (MO, M2O3, MO2), the closest approach is the shared edge of two octahedra: a 90° M-X-M angle, √2 × d(M-X). Where the anions average more cations (antifluorite Li2O and Li2S, anti-perovskite Li3OCl, Li3N, Cu2S), the cation polyhedra share edges of a cube (70.5°, 1.155 × d) or faces (60°, 1.0 × d). The metallic radius drops out there: it belongs to the neutral atom, and Li+ sits 2.11 Å from Li+ in Li3N against 3.04 Å in Li metal. The mean anion coordination is the cations' target CNs (the automatic ones when none are given) weighted by count, per anion. Beyond 12 no anion holds them all (Fe3C, Ni80P20): the metals touch, at their metallic contact.
+- **Anions at packing distance.** Same-element anions are kept at 0.80 of twice their Shannon radius (0.70 for Cl, Br, I, S, Se, Te, which are larger and softer), so they never bond. That is right for oxides, where an O-O bond is a peroxide defect.
+- **The caps.** Random sequential placement jams once hard spheres fill about 38 % of the volume. Treating the floors as hard spheres, the oxides fill 26-36 % at their measured densities (O in SiO2 0.26, O in Al2O3 0.33, In in In2O3 0.36). The 2.80 Å and 3.00 Å caps keep large ions inside that limit.
+
+#### Known limits outside oxides
+
+The same-element anion rule assumes anions never bond, and it is applied unchanged outside oxides. Three families need bonds or contacts it forbids:
+
+| Family | Floor vs the real distance | Effect |
+|---|---|---|
+| Anion-excess compounds: Se-rich Ge-Se, S-rich As-S, FeS2, polysulfides, CaC2, NaN3 | Se-Se 2.77 Å vs 2.34; S-S 2.58 vs 2.05-2.16; C-C 2.24 vs 1.19; N-N 2.34 vs 1.17 | The X-X bonds these need cannot be placed. Ge20Se80 places with no Se-Se bond; FeS2 does not place at its density. `--check-dimers` flags every real S-S or Se-Se bond. |
+| Metal-rich glasses with a nonmetal (Ni80P20) | Ni-P 2.25 Å vs 2.28 | P is sized as P3-, so Ni-P bonds sit at the floor and the glass does not place at its density. |
+| Hydrides | H-H 2.24 Å vs 2.23 in TiH2 and 1.98 in BH4- | TiH2 does not place at its density; BH4- tetrahedra cannot form. |
+
+Stoichiometric chalcogenide glasses (GeSe2, GeS2, As2S3) also exclude their few homopolar bonds (Se-Se, Ge-Ge, As-As). That keeps the network chemically ordered on purpose; melt-quench creates those bonds.
+
+For these systems, pass a full table with the offending pair lowered to about 0.8 of its real distance. `--minsep` replaces the whole automatic table: a pair it leaves out falls back to 1.5 Å and gets no coordination-aware bonds. So copy every pair from the `[auto-derive]` line of `random_gen.log` and change only the one you need:
+
+```bash
+amorphgen --random-gen --composition Ni=80,P=20 --minsep Ni-Ni=2.11,Ni-P=1.85,P-P=2.97
+amorphgen --random-gen --composition Ge=20,Se=80 --minsep Ge-Ge=2.68,Ge-Se=2.06,Se-Se=1.90
+amorphgen --random-gen --composition Fe=32,S=64 --minsep Fe-Fe=2.80,Fe-S=1.99,S-S=1.70
+amorphgen --random-gen --composition Ti=32,H=64 --minsep H-H=1.90,H-Ti=1.60,Ti-Ti=2.50
+```
 
 #### Bond-type classifier
 

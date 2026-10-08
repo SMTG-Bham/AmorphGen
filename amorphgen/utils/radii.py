@@ -819,6 +819,21 @@ _MAX_IONIC_MINSEP = 3.00          # M-X ionic bonds
 _MAX_ANION_MINSEP = 3.00          # X-X anion packing
 
 
+def _cation_contact_factor(anion_cn: float) -> float:
+    """d(M-M) / d(M-X) for two cations sharing an anion at its narrowest angle.
+
+    An anion with up to 6 cations can keep them 90 degrees apart (the shared
+    edge of two octahedra, sqrt(2)). More cations crowd closer: 70.5 degrees
+    across the edge of a cube (8, as in antifluorite Li2O / Li2S), 60 degrees
+    in a cuboctahedron or the hexagonal bipyramid of Li3N (beyond 8).
+    """
+    if anion_cn <= 6:
+        return 2**0.5
+    if anion_cn <= 8:
+        return 2 * np.sin(np.radians(70.5288) / 2)
+    return 1.0
+
+
 # ==============================================================================
 # Bonding classification
 # ==============================================================================
@@ -995,6 +1010,13 @@ def default_minsep(symbols: list[str], scale: float = 0.85,
     a phosphate or the C of a carbonate, is kept at bonding distance from
     its anions (P-O 1.26 A, C-O 1.06 A) and away from the other cations.
 
+    Two metal cations meet across an anion, at sqrt(2) x their bond (two
+    octahedra sharing an edge) and at least their metallic contact. Where the
+    anions average more than 6 cations (Li2O, Li2S, Li3N, Cu2S) the cations
+    come closer than either, and the floor follows the narrower angle alone:
+    Li-Li 1.74 A in Li3N, against 2.11 A in the crystal. Beyond 12 (Fe3C,
+    Ni80P20) the metals touch, at their metallic contact.
+
     A hydrogenated network (a-Si:H, a-C:H) has no anions: see
     :func:`_hydrogenated_network_minsep`.
 
@@ -1023,6 +1045,19 @@ def default_minsep(symbols: list[str], scale: float = 0.85,
     centres = cation_nonmetals(counts)
     anion_syms = [s for s in unique if s in NONMETALS and s not in centres]
     has_anion = bool(anion_syms)
+    # Mean number of cations around an anion, from the cation targets (the
+    # automatic ones where none are given, 6 where neither is). Above 6 the
+    # compound is cation-rich (Li2O, Li2S, Li3N, Cu2S): its cation polyhedra
+    # share faces, and two cations meet across an anion at less than the 90
+    # degrees the M-M floor below assumes. Above 12 no anion can hold them
+    # all (Fe3C, Ni80P20): the metals touch each other.
+    anion_cn = 0.0
+    if has_anion:
+        gate_cn = dict(auto_target_cn(counts)[0] or {})
+        gate_cn.update(cn_map)
+        anion_cn = (sum(gate_cn.get(s, 6) * n for s, n in counts.items()
+                        if s not in anion_syms)
+                    / sum(counts[s] for s in anion_syms))
 
     def _cn_radius(sym):
         if sym in centres:
@@ -1094,19 +1129,48 @@ def default_minsep(symbols: list[str], scale: float = 0.85,
                         # Geometric estimate for edge-sharing polyhedra:
                         # d(M-M) = sqrt(2) * d(M-X) * sf
                         # Uses the same scale factor as ionic/metallic (0.85).
+                        # A cation-rich compound shares narrower edges and
+                        # faces (see _cation_contact_factor).
+                        factor = _cation_contact_factor(anion_cn)
                         if ri1 is not None and r_anion and r_anion > 0:
-                            d_geom_1 = 2**0.5 * (ri1 + r_anion) * sf
+                            d_geom_1 = factor * (ri1 + r_anion) * sf
                         else:
                             d_geom_1 = 0.0
 
                         if ri2 is not None and r_anion and r_anion > 0:
-                            d_geom_2 = 2**0.5 * (ri2 + r_anion) * sf
+                            d_geom_2 = factor * (ri2 + r_anion) * sf
                         else:
                             d_geom_2 = 0.0
 
                         d_geometric = (d_geom_1 + d_geom_2) / 2 if (
                             d_geom_1 > 0 and d_geom_2 > 0
                         ) else max(d_geom_1, d_geom_2)
+
+                        if anion_cn > 12:
+                            # metal-rich: M-M is a metallic contact, as in
+                            # the alloy (Ni-Ni 2.52 A in Ni80P20, Fe-Fe 2.49
+                            # A in Fe3C)
+                            minsep[key] = min(d_metallic,
+                                              _MAX_SAME_ELEMENT_MINSEP)
+                            logger.info(
+                                "  minsep %s = %.2f A  (M-M metal-rich, anion "
+                                "CN=%.1f: metallic %.3f + %.3f, scale=%.2f)",
+                                key, minsep[key], anion_cn, r1, r2, sf
+                            )
+                            continue
+                        if anion_cn > 6 and d_geometric > 0:
+                            # The metallic radius is the neutral atom's: Li+
+                            # sits 2.11 A from Li+ in Li3N, 2.31 A in Li2O,
+                            # against 3.04 A in Li metal.
+                            minsep[key] = min(d_geometric,
+                                              _MAX_SAME_ELEMENT_MINSEP)
+                            logger.info(
+                                "  minsep %s = %.2f A  (M-M cation-rich, anion "
+                                "CN=%.1f: %.3f x d(M-X), met=%.2f unused, "
+                                "scale=%.2f)", key, minsep[key], anion_cn,
+                                factor, d_metallic, sf
+                            )
+                            continue
 
                         d_mm = min(max(d_metallic, d_geometric),
                                    _MAX_SAME_ELEMENT_MINSEP)

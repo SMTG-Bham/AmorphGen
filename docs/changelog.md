@@ -628,6 +628,27 @@
   CH2 pairs of a-C:H. The real hydrides (LiH, MgH2, NaAlH4, TiH2) and all 100
   class-benchmark systems are unchanged. **Behaviour change:** `infer_oxidation_state`
   returns `None` for these networks (Si50H50 gave Si +1).
+- **Random generation could not place cation-rich compounds at their density.** Two
+  metals in a compound were kept at least √2 × their bond apart (two octahedra sharing
+  an edge) and at least their metallic contact. Both are too far when the anions carry
+  more than 6 cations. Li-Li was 2.58 Å in Li3N against 2.11 Å in the crystal, 2.60
+  against 2.31 Å in Li2O, and 2.80 against 2.76 Å in Li3OCl. Li2S sat at 2.80 against
+  2.85 Å, Ni-Ni at 2.80 against 2.52 Å in Ni80P20, and Fe-Fe at 2.46 against 2.49 Å in
+  Fe3C. With every Li treated as a hard sphere, the Li filled 60 % of Li3N and 74 % of
+  Li2O, where random placement jams at about 38 %. Strict placement failed for Li3N
+  even at 0.6 of its density. The floor now follows the narrowest angle at which the
+  anion holds its cations, from the cations' target CNs per anion. With 7-8 cations
+  per anion it is 1.155 × the bond (the edge of a cube, Li3OCl). With 9-12 it is 1.0 ×
+  the bond (shared faces, Li2O, Li2S, Li3N, Cu2S). The metallic radius, which belongs to
+  the neutral atom, drops out of both. Beyond 12 (Fe3C, Ni80P20) the floor is the
+  metallic contact. Li-Li is now 1.74 Å in Li3N, 1.84 in Li2O, 2.21 in Li2S and 2.52 in
+  Li3OCl. Ni-Ni is 2.11 Å and Fe-Fe 2.14 Å. Li3N, Li2S, Na2S and Cu2S now place at their
+  crystal density without the soft-pack fallback, and Li2O does with it. None of the
+  100 class-benchmark systems changes, and neither do hydroxides, phosphates, LiPON,
+  Li4SiO4 or Mg3N2. The random-generation guide now explains the separations. It also
+  lists the non-oxide cases they still exclude (anion-excess compounds such as
+  Se-rich Ge-Se and FeS2, the Ni-P bond of Ni80P20, H-H in hydrides) and the `--minsep`
+  tables that place them.
 
 ## v1.0.0rc3 (2026-09-22)
 
