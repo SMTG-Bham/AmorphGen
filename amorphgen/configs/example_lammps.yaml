@@ -1,0 +1,59 @@
+# ============================================================================
+# AmorphGen — LAMMPS Pair Style YAML Configuration
+# ============================================================================
+# Usage:
+#   amorphgen POSCAR --config lammps.yaml
+#   amorphgen --random-gen --composition "Si*64" -n 10 --relax --config lammps.yaml
+#
+# The same settings on the command line, without a config file:
+#   amorphgen POSCAR --pair-style sw --pair-coeff "* * Si.sw Si"
+#
+# Needs LAMMPS's Python module: pip install "amorphgen[lammps]". That wheel
+# has no pair_style pace; for ACE potentials inside LAMMPS install
+# conda-forge's lammps instead, or use --model-path pot.yace (pyace).
+# LAMMPS runs on the CPU in float64.
+# ============================================================================
+
+# ── Calculator ───────────────────────────────────────────────────────────────
+model: lammps         # implied by lammps_params, so this line is optional
+
+# ── LAMMPS pair style ────────────────────────────────────────────────────────
+# Potential file paths are relative to where amorphgen is run (Si.sw ships in
+# LAMMPS's potentials/ directory). Units are LAMMPS "metal" (eV, Angstrom).
+lammps_params:
+  # Stillinger-Weber silicon (Stillinger & Weber, PRB 1985)
+  pair_style: sw
+  pair_coeff: "* * Si.sw Si"
+  # The element of each LAMMPS type, in type order. Read from the trailing
+  # symbols of a "* * <file> El1 El2 ..." pair_coeff line when omitted; needed
+  # when the pair_coeff lines number the types (e.g. "1 2 ...").
+  # elements: [Si]
+  # commands: ["pair_modify shift yes"]   # run after the pair_coeff lines
+  # masses: {Si: 28.0855}                 # amu; default ASE masses
+  # log_file: lammps.log
+
+# ============================================================================
+# Other examples (replace the lammps_params block above):
+# ============================================================================
+# Tersoff SiC (two elements; type 1 = Si, type 2 = C):
+# lammps_params:
+#   pair_style: tersoff
+#   pair_coeff: "* * SiC.tersoff Si C"
+#
+# Hybrid style (NULL leaves a type to the other sub-style):
+# lammps_params:
+#   pair_style: hybrid/overlay sw tersoff
+#   pair_coeff:
+#     - "* * sw Si.sw Si NULL"
+#     - "* * tersoff C.tersoff NULL C"
+#
+# Lennard-Jones with numbered types (elements is required here):
+# lammps_params:
+#   pair_style: lj/cut 8.0
+#   pair_coeff: ["1 1 0.0104 3.40"]
+#   elements: [Ar]
+#
+# ACE through LAMMPS (needs ML-PACE, e.g. conda-forge's lammps):
+# lammps_params:
+#   pair_style: pace
+#   pair_coeff: "* * potential.yace Si O"

@@ -46,6 +46,7 @@ from ase.io import read
 
 from . import opt_cell, melt_cell, equilibrate, quench, final_opt
 from ..utils import get_calculator, merge_config
+from ..utils.calculators import potential_kwargs
 from ..configs import DEFAULT_CONFIG
 from .manifest import RunManifest, _json_value
 from ..utils.run_lock import run_lock
@@ -178,15 +179,12 @@ class MeltQuenchPipeline:
             from ..utils.common import resolve_device
             device = resolve_device(self.cfg.get("device", "cuda"))
 
-            calc_kwargs = {}
-            if self.cfg.get("classical_params"):
-                calc_kwargs["classical_params"] = self.cfg["classical_params"]
             self._calc = get_calculator(
                 model=self.cfg.get("model", "mace-mpa-0"),
                 device=device,
                 model_path=self.cfg.get("model_path"),
                 default_dtype=self.cfg.get("default_dtype", "auto"),
-                **calc_kwargs,
+                **potential_kwargs(self.cfg),
             )
             from ..utils.run_provenance import calculator_provenance
             # Keep the identity of the weights actually loaded, even if the
@@ -196,9 +194,11 @@ class MeltQuenchPipeline:
         return self._calc
 
     def _calculator_config(self):
-        return _json_value({key: self.cfg.get(key) for key in (
+        config = {key: self.cfg.get(key) for key in (
             "model", "model_path", "device", "default_dtype", "classical_params",
-        )})
+        )}
+        config.update(potential_kwargs(self.cfg))
+        return _json_value(config)
 
     # ─────────────────────────────────────────────────────────────────────────
 

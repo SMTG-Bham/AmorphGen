@@ -341,11 +341,21 @@ def _add_arguments(p):
 
     # ── Calculator ────────────────────────────────────────────────────────────
     g_calc = p.add_argument_group("calculator")
-    model_group = g_calc.add_mutually_exclusive_group()
-    model_group.add_argument("-m", "--model", default="mace-mpa-0", metavar="NAME",
-                             help="Foundation model (mace-mpa-0, chgnet, sevennet, ...).")
-    model_group.add_argument("--model-path", default=None, metavar="PATH",
-                             help="Path to a local .model file.")
+    g_calc.add_argument("-m", "--model", default="mace-mpa-0", metavar="NAME",
+                        help="Foundation model (mace-mpa-0, chgnet, sevennet, ...), "
+                             "or 'ace' / 'lammps' for a potential file.")
+    g_calc.add_argument("--model-path", default=None, metavar="PATH",
+                        help="Potential file: a MACE .model, or an ACE .yaml/.yace/"
+                             ".ace (implies --model ace).")
+    g_calc.add_argument("--pair-style", default=None, metavar="STYLE",
+                        help="LAMMPS pair style, e.g. 'sw' or 'lj/cut 6.0' "
+                             "(implies --model lammps).")
+    g_calc.add_argument("--pair-coeff", action="append", default=None, metavar="ARGS",
+                        help="LAMMPS pair_coeff arguments, e.g. '* * Si.sw Si'; "
+                             "repeat for several lines.")
+    g_calc.add_argument("--lammps-elements", default=None, metavar="EL,EL",
+                        help="Element of each LAMMPS type in order, e.g. 'Si,O'. "
+                             "Needed when no '* * file El ...' pair_coeff line names them.")
     g_calc.add_argument("-d", "--device", default="auto",
                         choices=["auto", "cuda", "cpu", "mps"],
                         help="Device.")
@@ -876,12 +886,36 @@ def _parse_composition(spec: str) -> dict[str, int]:
     return comp
 
 
-def _classical_kwargs(override: dict) -> dict:
-    """Extract classical_params from config override if present."""
-    kw = {}
-    if override.get("classical_params"):
-        kw["classical_params"] = override["classical_params"]
-    return kw
+def _potential_kwargs(override: dict) -> dict:
+    """Extract the potential parameter blocks (classical_params,
+    lammps_params, ace_params) from the config override if present."""
+    from .utils.calculators import potential_kwargs
+    return potential_kwargs(override)
+
+
+def _infer_potential_model(override: dict) -> str | None:
+    """Set ``model`` to ace / lammps when only their settings were given.
+
+    A ``.yaml`` / ``.yace`` / ``.ace`` model_path implies ACE, and a
+    lammps_params block (or --pair-style) implies LAMMPS. Returns an error
+    message when the model was set to something that would ignore them.
+    """
+    from .utils.calculators import is_ace_file
+    model = override.get("model")
+    path = override.get("model_path")
+    if path is not None and is_ace_file(path):
+        if model is None:
+            override["model"] = model = "ace"
+        elif model.lower() != "ace":
+            return (f"{path} is an ACE potential, but the model is '{model}'; "
+                    f"use --model ace (or drop the model setting).")
+    if override.get("lammps_params"):
+        if model is None:
+            override["model"] = model = "lammps"
+        elif model.lower() != "lammps":
+            return (f"LAMMPS settings (--pair-style / --pair-coeff / lammps_params) "
+                    f"were given, but the model is '{model}'; use --model lammps.")
+    return None
 
 
 def _parse_minsep(spec: str) -> dict[str, float]:
@@ -1025,8 +1059,14 @@ def _build_override(args, parser, explicit_only: bool = False,
         def get(key):
             return getattr(args, key)
 
+    lammps = {
+        "pair_style": get("pair_style"),
+        "pair_coeff": get("pair_coeff"),
+        "elements": get("lammps_elements"),
+    }
     mapping = {
         "model": get("model"),
+        "lammps_params": {k: v for k, v in lammps.items() if v is not None} or None,
         "seed": get("seed"),
         "run_index": get("run_index"),
         "engine": get("engine"),
@@ -1313,7 +1353,7 @@ def _run_mq_ensemble(args, override: dict, analysis_config=None) -> None:
     # ── Phase 3: stages 5-6-7 per snapshot (with resume) ─────────────────────
     print(f"\n[Phase 3/3] Stages 5-6-7 (per snapshot) -> {quench_dir}/")
     calc = get_calculator(
-        **_classical_kwargs(override),
+        **_potential_kwargs(override),
         model=override.get("model", args.model),
         device=override.get("device", args.device),
         model_path=override.get("model_path", args.model_path),
@@ -1409,7 +1449,7 @@ def _run_hybrid_ensemble(args, override: dict) -> None:
 
 
     calc = get_calculator(
-        **_classical_kwargs(override),
+        **_potential_kwargs(override),
         model=override.get("model", args.model),
         device=override.get("device", args.device),
         model_path=override.get("model_path", args.model_path),
@@ -1610,6 +1650,11 @@ def _main():
         # documented defaults) fills the rest exactly as in YAML mode.
         override = _build_override(args, _get_parser(), explicit_only=True)
 
+    potential_error = _infer_potential_model(override)
+    if potential_error:
+        print(f"Error: {potential_error}")
+        sys.exit(1)
+
     # --hybrid-ensemble / --batch-opt relax with the stage-7 ("final_opt")
     # settings; let a YAML that only has an `opt:` block drive that relax
     # instead of silently falling back to the defaults.
@@ -1640,14 +1685,18 @@ def _main():
     # 1-4 of MD.
     if until_options is not None or _requires_calculator(args, override.get("analysis", {})):
         from .utils.calculators import (require_backend, require_dtype,
-                                        BackendNotInstalledError)
+                                        require_potential, BackendNotInstalledError)
         model = override.get("model", args.model) or "mace-mpa-0"
         model_path = override.get("model_path", getattr(args, "model_path", None))
+        engine = "torchsim" if until_options is not None else override.get("engine")
         try:
             require_backend(model, model_path=model_path)
             require_dtype(model, override.get("default_dtype", args.default_dtype),
                           model_path=model_path)
-        except (BackendNotInstalledError, ValueError, NotImplementedError) as exc:
+            require_potential(model, model_path, engine=engine,
+                              **_potential_kwargs(override))
+        except (BackendNotInstalledError, ValueError, NotImplementedError,
+                FileNotFoundError) as exc:
             print(f"Error: {exc}")
             sys.exit(1)
 
@@ -2375,6 +2424,10 @@ def _main():
                 "classical_params": override.get("classical_params"),
                 "engine": "torchsim" if use_torchsim else "ase",
             }
+            # Only when set, so runs started before these backends resume.
+            for key in ("lammps_params", "ace_params"):
+                if override.get(key):
+                    relax_settings[key] = override[key]
             if use_torchsim:
                 relax_settings["torchsim"] = {
                     "pressure_tol_gpa": opt_cfg.get("pressure_tol_gpa", 0.02),
@@ -2423,7 +2476,7 @@ def _main():
             calc = None
             if do_relax and not use_torchsim:
                 calc = get_calculator(
-                    **_classical_kwargs(override),
+                    **_potential_kwargs(override),
                     model=override.get("model", args.model),
                     device=override.get("device", args.device),
                     model_path=override.get("model_path", args.model_path),
@@ -2492,7 +2545,7 @@ def _main():
             return
 
         calc = get_calculator(
-            **_classical_kwargs(override),
+            **_potential_kwargs(override),
             model=override.get("model", args.model),
             device=override.get("device", args.device),
             model_path=override.get("model_path", args.model_path),
@@ -2563,7 +2616,7 @@ def _main():
             sys.exit(1)
 
         calc = get_calculator(
-            **_classical_kwargs(override),
+            **_potential_kwargs(override),
             model=override.get("model", args.model),
             device=override.get("device", args.device),
             model_path=override.get("model_path", args.model_path),
@@ -2600,20 +2653,21 @@ def _main():
         from .pipeline.opt_cell import run as opt_run
         from .utils import get_calculator
 
+        # Build the calculator before changing directory, so relative
+        # potential paths resolve against where the command was run.
+        calc = get_calculator(
+            **_potential_kwargs(override),
+            model=override.get("model", args.model),
+            device=override.get("device", args.device),
+            model_path=override.get("model_path", args.model_path),
+            default_dtype=override.get("default_dtype", args.default_dtype),
+        )
         os.makedirs(args.work_dir, exist_ok=True)
         orig_dir = os.getcwd()
         os.chdir(args.work_dir)
 
         try:
             input_path = os.path.join(orig_dir, args.input_file)
-            calc = get_calculator(
-                **_classical_kwargs(override),
-                model=override.get("model", args.model),
-                device=override.get("device", args.device),
-                model_path=override.get("model_path", args.model_path),
-                default_dtype=override.get("default_dtype", args.default_dtype),
-
-            )
             stage_key = "opt" if args.stages == [1] else "final_opt"
             opt_run(input_path, cfg_override=override, calc=calc,
                     stage_key=stage_key)

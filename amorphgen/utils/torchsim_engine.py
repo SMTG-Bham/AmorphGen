@@ -8,8 +8,9 @@ all structures are relaxed together instead of one after another through ASE.
 Install with ``pip install "amorphgen[torchsim]"`` (needs Python >= 3.12 and a
 CUDA GPU or CPU; Apple MPS is not supported by torch-sim). Supported models:
 MACE foundation models and files, SevenNet checkpoints, Lennard-Jones
-(single sigma/epsilon, used for tests). CHGNet and the Buckingham potential have
-no torch-sim implementation; use the default ASE engine for those.
+(single sigma/epsilon, used for tests). CHGNet, the Buckingham potential, ACE
+and LAMMPS have no torch-sim implementation; use the default ASE engine for
+those.
 
 Inputs and outputs are plain ASE ``Atoms`` so every AmorphGen writer, log and
 analysis path is unchanged.
@@ -46,9 +47,24 @@ def resolve_torch_device(device: str):
     return torch.device(dev)
 
 
+def check_model(model: str, model_path: str | None = None) -> None:
+    """Raise ValueError if *model* has no torch-sim implementation.
+
+    Needs neither torch nor torch-sim, so the CLI checks before any work.
+    """
+    from .calculators import is_ace_file
+    name = (model or "").lower()
+    if model_path is not None and is_ace_file(model_path):
+        name = "ace"
+    if name in ("buckingham", "buck", "chgnet", "ace", "lammps"):
+        raise ValueError(f"'{name}' has no torch-sim implementation; use the ASE "
+                         f"engine (drop --engine torchsim) for this model.")
+
+
 def build_model(model: str, device: str = "auto", model_path: str | None = None,
                 classical_params: dict | None = None, dtype: str = "float64"):
     """Build a torch-sim ModelInterface for an AmorphGen model name."""
+    check_model(model, model_path)
     if model_path is not None and not os.path.isfile(model_path):
         raise FileNotFoundError(
             f"Custom MACE model file not found: {model_path}\n"
@@ -71,10 +87,6 @@ def build_model(model: str, device: str = "auto", model_path: str | None = None,
         return LennardJonesModel(sigma=float(p["sigma"]), epsilon=float(p["epsilon"]),
                                  cutoff=float(cp.get("cutoff", 10.0)), device=dev,
                                  dtype=tdtype, compute_stress=True)
-
-    if name in ("buckingham", "buck", "chgnet"):
-        raise ValueError(f"'{model}' has no torch-sim implementation; use the ASE "
-                         f"engine (drop --engine torchsim) for this model.")
 
     if model_path or name.startswith("mace") or _ci_get(MACE_FOUNDATION_MODELS, model) != model:
         from torch_sim.models.mace import MaceModel

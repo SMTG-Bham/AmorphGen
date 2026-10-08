@@ -343,13 +343,13 @@ def run_descriptor_analysis(sa, args, config, override, *, plot_dir=None,
     calculator = None
     if "elastic" in selected or "vdos" in selected:
         from ..utils import get_calculator
+        from ..utils.calculators import potential_kwargs
         calculator = get_calculator(
             model=override.get("model", args.model),
             model_path=override.get("model_path", args.model_path),
             device=override.get("device", args.device),
             default_dtype=override.get("default_dtype", args.default_dtype),
-            **({"classical_params": override["classical_params"]}
-               if "classical_params" in override else {}))
+            **potential_kwargs(override))
     for name in selected:
         print(f"\n  Computing {name.replace('_', ' ')}...")
         if name == "bond_order":

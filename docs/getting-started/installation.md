@@ -21,6 +21,8 @@
 | MLIP relaxation & melt-quench MD | `pip install "amorphgen[mace]"` or `pip install "amorphgen[chgnet]"` |
 | MACE + CHGNet | `pip install "amorphgen[all]"` |
 | batched GPU relaxation and MD of ensembles (`--engine torchsim`) | `pip install "amorphgen[mace,torchsim]"` (Python 3.12+, and a C/C++ compiler) |
+| a published ACE potential (pacemaker `.yaml` / `.yace`) | `pip install "amorphgen[ace]"` (wheels: Linux x86_64, Python 3.10-3.13) |
+| a LAMMPS pair style (Tersoff, SW, EAM, SNAP, ...) | `pip install "amorphgen[lammps]"` |
 
 On a torch-free install, `--device auto` resolves to CPU. Classical potentials
 work on CPU without PyTorch; commands requesting an unavailable MLIP backend report
@@ -55,6 +57,12 @@ pip install "amorphgen[all]"
 
 # torch-sim with MACE (Python 3.12+; also supports SevenNet or Lennard-Jones)
 pip install "amorphgen[mace,torchsim]"
+
+# ACE potential files through pyace (python-ace 0.4.0rc1)
+pip install "amorphgen[ace]"
+
+# LAMMPS pair styles (unofficial PyPI wheel with MPICH; no pair_style pace)
+pip install "amorphgen[lammps]"
 ```
 
 :::{warning}
@@ -164,6 +172,8 @@ pip install -e ".[mace,chgnet]"
 | CHGNet  | `chgnet`    | CUDA yes | CPU + MPS yes |
 | SevenNet | `sevenn`   | CUDA yes | CPU; see MPS note below |
 | Classical (LJ, Buckingham) | built-in | Optional CUDA path with PyTorch | CPU yes |
+| ACE | `python-ace` | No (CPU) | Build from source (no macOS wheels) |
+| LAMMPS | `lammps` (or conda-forge `lammps`) | No (CPU, serial) | CPU yes |
 | torch-sim engine (`--engine torchsim`) | `torch-sim-atomistic` | CUDA yes | CPU only, no MPS |
 
 On Apple Silicon, `--device auto` can select MPS. MACE and SevenNet default

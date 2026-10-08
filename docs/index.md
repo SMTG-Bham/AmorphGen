@@ -17,7 +17,7 @@ Automated amorphous structure generation using machine-learning and classical in
   <a href="https://github.com/SMTG-Bham/AmorphGen/issues"><img src="https://img.shields.io/badge/issues-bug%20tracker-blue?style=flat&logo=github" alt="Issues"></a>
 </p>
 
-AmorphGen exposes three routes to amorphous structures: **random placement** from just a chemical formula, **melt-and-quench MD** from a crystal, and a **hybrid** workflow that anneals disordered inputs and quenches to low temperature. Random placement runs without a potential. Relaxation and MD use machine-learning interatomic potentials (MACE, CHGNet, SevenNet) or classical force fields (Buckingham, Lennard-Jones).
+AmorphGen exposes three routes to amorphous structures: **random placement** from just a chemical formula, **melt-and-quench MD** from a crystal, and a **hybrid** workflow that anneals disordered inputs and quenches to low temperature. Random placement runs without a potential. Relaxation and MD use machine-learning interatomic potentials (MACE, CHGNet, SevenNet), published ACE potentials and LAMMPS pair styles, or classical force fields (Buckingham, Lennard-Jones).
 
 ```{image} images/main_Fig.png
 :alt: AmorphGen workflow: crystalline input or composition to amorphous structure
@@ -123,6 +123,8 @@ For multiple quenches, see {doc}`guides/mq-ensemble` or {doc}`guides/batch-quenc
 | CHGNet | `pip install "amorphgen[chgnet]"` | `chgnet` |
 | SevenNet | `pip install "amorphgen[sevennet]"` | `sevennet`, `7net-mf-ompa` |
 | Classical | Included in `pip install amorphgen` | `buckingham`, `lennard-jones` |
+| ACE (pacemaker file) | `pip install "amorphgen[ace]"` | `ace`, with `--model-path pot.yace` |
+| LAMMPS pair style | `pip install "amorphgen[lammps]"` | `lammps`, with `--pair-style` / `--pair-coeff` |
 
 Classical potentials require parameters appropriate to the system. See
 {doc}`guides/backends` for model selection and backend compatibility, or run
@@ -164,9 +166,9 @@ file; a BibTeX citation is:
 ```
 
 A Zenodo DOI for each tagged release will be added on first stable release.
-Please also cite the underlying machine-learning interatomic potential you
-use (MACE, CHGNet, SevenNet) and any reference structures or experimental
-data you compare against.
+Please also cite the underlying interatomic potential you use (MACE, CHGNet,
+SevenNet, or the ACE or LAMMPS potential and the code that evaluates it) and
+any reference structures or experimental data you compare against.
 
 ---
 

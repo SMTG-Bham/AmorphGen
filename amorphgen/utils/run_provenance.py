@@ -113,6 +113,33 @@ def _state_hash(models):
     return digest.hexdigest()
 
 
+def _file_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _lammps_identity(cfg, calc):
+    """Commands and potential-file hashes of a LAMMPS pair style.
+
+    The ``lammps-v1`` hash covers the commands (absolute file paths included)
+    and the bytes of every potential file they read.
+    """
+    if calc is not None and _attribute(calc, "potential_files") is not None:
+        commands = list(calc.parameters.lmpcmds)
+        paths = list(calc.potential_files)
+    else:
+        from .lammps_potential import lammps_setup
+        setup = lammps_setup(cfg.get("lammps_params"))
+        commands, paths = setup["lmpcmds"], setup["files"]
+    files = {path: _file_sha256(path) for path in paths}
+    payload = json.dumps({"commands": commands, "files": files},
+                         sort_keys=True, separators=(",", ":"))
+    return files, hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def calculator_provenance(cfg, calc=None, *, injected=False):
     """Return JSON-safe identity without making provenance a run dependency.
 
@@ -141,8 +168,14 @@ def calculator_provenance(cfg, calc=None, *, injected=False):
             name = _attribute(base, "name")
             model_info["name"] = name if isinstance(name, str) else _class_name(base)
         else:
-            model_info["name"] = model_name
+            from .calculators import is_ace_file
             path = cfg.get("model_path")
+            # ACE and LAMMPS are named by backend: a .yace model_path loads
+            # ACE whatever (default) model name the config carries.
+            backend = (model_name or "").lower()
+            if path is not None and is_ace_file(path):
+                backend = "ace"
+            model_info["name"] = backend if backend in ("ace", "lammps") else model_name
             if path is None and model_name and model_name.lower().startswith("mace-"):
                 candidate = model_name.split(":", 1)[0]
                 if os.path.isfile(candidate):
@@ -153,7 +186,10 @@ def calculator_provenance(cfg, calc=None, *, injected=False):
                 device = device or _resolved_device(result["device"]["requested"])
             name = (model_name or "").lower()
             classical = path is None and name in {"lj", "lennard-jones", "buck", "buckingham"}
-            if classical and calc is not None:
+            if backend in ("ace", "lammps"):
+                # pyace and LAMMPS evaluate on the CPU in float64.
+                dtype, device = "float64", "cpu"
+            elif classical and calc is not None:
                 # Classical calculators ignore default_dtype; CPU and CUDA
                 # evaluate in float64, and MPS evaluates in float32.
                 dtype = dtype or ("float32" if device == "mps" else "float64")
@@ -174,12 +210,11 @@ def calculator_provenance(cfg, calc=None, *, injected=False):
         result["precision"]["resolved"] = dtype
         result["device"]["resolved"] = device
         if model_info["path"] is not None:
-            digest = hashlib.sha256()
-            with open(model_info["path"], "rb") as handle:
-                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                    digest.update(chunk)
-            model_info["sha256"] = digest.hexdigest()
+            model_info["sha256"] = _file_sha256(model_info["path"])
             model_info["hash_source"] = "file"
+        elif not injected and model_info["name"] == "lammps":
+            model_info["files"], model_info["sha256"] = _lammps_identity(cfg, base)
+            model_info["hash_source"] = "lammps-v1"
         else:
             model_info["sha256"] = _state_hash(models)
             model_info["hash_source"] = "state_dict-v1"

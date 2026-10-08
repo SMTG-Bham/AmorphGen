@@ -173,8 +173,8 @@ def require_stress(calc, context: str) -> None:
         props = getattr(calc, "implemented_properties", []) if calc is not None else []
         raise RuntimeError(
             f"{context} requires a stress tensor, but {name} implements only "
-            f"{list(props)}. Either use a stress-capable MLIP backend "
-            f"(mace / chgnet / sevennet), or run with a fixed cell when using "
+            f"{list(props)}. Either use a stress-capable backend "
+            f"(mace / chgnet / sevennet / ace / lammps), or run with a fixed cell when using "
             f"a classical pair potential (lennard-jones / buckingham): pass "
             f"-C none on the CLI, or set cell_filter: none under opt: (or "
             f"random_gen:) in the YAML, and use an NVT ensemble for MD stages."

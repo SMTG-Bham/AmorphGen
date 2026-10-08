@@ -16,6 +16,9 @@ Supported backends
                    ``mace-mh-*``, ``mace-matpes-*``, ``mace-omol``
 * **CHGNet**    — ``chgnet``  (latest pretrained CHGNet)
 * **SevenNet**  — ``sevennet``, ``7net-mf-ompa``, ``7net-l3i5``, ...
+* **ACE**       — ``ace`` with a pacemaker ``.yaml`` / ``.yace`` / ``.ace``
+                   file via ``--model-path`` (the suffix alone implies ACE)
+* **LAMMPS**    — ``lammps`` with any pair style (``lammps_params``)
 * **Custom**    — any local ``.model`` file via ``--model-path``
 * **External**  — pass your own ASE calculator object directly
 """
@@ -112,6 +115,30 @@ SEVENNET_MODELS: dict[str, str] = {
 # ── Classical potential identifiers ──────────────────────────────────────────
 CLASSICAL_MODELS: set[str] = {"lennard-jones", "lj", "buckingham", "buck"}
 
+# ── Potential-file backends ──────────────────────────────────────────────────
+# ACE reads its potential from --model-path; LAMMPS from lammps_params.
+ACE_MODELS: set[str] = {"ace"}
+LAMMPS_MODELS: set[str] = {"lammps"}
+# The file formats PyACECalculator reads (B-basis .yaml, C-tilde .yace/.ace).
+ACE_SUFFIXES = (".yaml", ".yace", ".ace")
+
+# Parameter blocks a model reads from the config, and the backend each is for.
+POTENTIAL_PARAM_KEYS = {
+    "classical_params": "classical",
+    "lammps_params": "lammps",
+    "ace_params": "ace",
+}
+
+
+def is_ace_file(path) -> bool:
+    """True if *path* names an ACE potential file by its suffix."""
+    return path is not None and os.fspath(path).endswith(ACE_SUFFIXES)
+
+
+def potential_kwargs(cfg) -> dict:
+    """The parameter blocks set in *cfg*, as :func:`get_calculator` kwargs."""
+    return {key: cfg[key] for key in POTENTIAL_PARAM_KEYS if cfg and cfg.get(key)}
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Human-readable model descriptions (for --list-models)
@@ -152,6 +179,9 @@ MODEL_DESCRIPTIONS: dict[str, str] = {
     # Classical
     "lennard-jones":      "Lennard-Jones       | pair potential | no GPU needed",
     "buckingham":         "Buckingham+Coulomb  | rigid-ion | Wolf summation | no GPU needed",
+    # Potential files
+    "ace":                "ACE (pacemaker)     | --model-path pot.yace (.yaml/.ace) | CPU",
+    "lammps":             "LAMMPS pair style   | --pair-style ... --pair-coeff ... | CPU",
 }
 
 
@@ -398,6 +428,56 @@ def _load_classical(model: str, device: str = "cpu", **kwargs) -> Any:
         )
 
 
+def _cpu_float64_note(tag: str, device: str, default_dtype: str | None) -> None:
+    """ACE and LAMMPS evaluate on the CPU in float64 whatever was requested."""
+    if device != "cpu":
+        print(f"[{tag}] Runs on the CPU (device '{device}' is not used)")
+    if default_dtype == "float32":
+        print(f"[{tag}] Evaluates in float64 (default_dtype 'float32' is not used)")
+
+
+def _load_ace(model_path: str, device: str = "cpu",
+              default_dtype: str | None = None,
+              ace_params: dict | None = None) -> Any:
+    """Load an ACE potential file (pacemaker .yaml / .yace / .ace) with pyace.
+
+    ``ace_params`` holds PyACECalculator evaluator options
+    (``recursive_evaluator``, ``recursive``, ``fast_nl``).
+    """
+    if not os.path.isfile(model_path):
+        raise FileNotFoundError(
+            f"ACE potential file not found: {model_path}\n"
+            f"Give a pacemaker {' / '.join(ACE_SUFFIXES)} file with --model-path.")
+    try:
+        from .ace_potential import ACE_PARAM_KEYS, ACECalculator
+    except ImportError:
+        raise BackendNotInstalledError(_install_message("ace", "ace"))
+    options = dict(ace_params or {})
+    unknown = sorted(set(options) - ACE_PARAM_KEYS)
+    if unknown:
+        raise ValueError(f"Unknown ace_params key(s): {', '.join(unknown)}")
+    _cpu_float64_note("ACE", device, default_dtype)
+    path = os.path.abspath(model_path)
+    print(f"[ACE] Loading potential: {path}")
+    return ACECalculator(path, **options)
+
+
+def _load_lammps(device: str = "cpu", default_dtype: str | None = None,
+                 lammps_params: dict | None = None) -> Any:
+    """Build a LAMMPS calculator for the pair style in ``lammps_params``.
+
+    See :func:`amorphgen.utils.lammps_potential.lammps_setup` for the keys.
+    LAMMPS itself starts on the first calculation.
+    """
+    from .lammps_potential import make_lammps_calculator
+
+    calc = make_lammps_calculator(lammps_params)
+    _cpu_float64_note("LAMMPS", device, default_dtype)
+    print(f"[LAMMPS] {calc.parameters.lmpcmds[0]}, types "
+          f"{' '.join(f'{t}={el}' for el, t in calc.parameters.atom_types.items())}")
+    return calc
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Backend detection
 # ═════════════════════════════════════════════════════════════════════════════
@@ -406,8 +486,9 @@ def _detect_backend(model: str) -> str:
     """
     Determine which backend a model name belongs to.
 
-    Returns one of: "mace", "chgnet", "sevennet", "classical".
-    Raises ValueError if the model is not recognised.
+    Returns one of: "mace", "chgnet", "sevennet", "classical", "ace",
+    "lammps". Raises ValueError if the model is not recognised. A model
+    path changes the answer; use :func:`backend_for` when there may be one.
     """
     lower = model.lower()
 
@@ -419,6 +500,12 @@ def _detect_backend(model: str) -> str:
     # Classical pair potentials
     if lower in CLASSICAL_MODELS:
         return "classical"
+
+    # Potential-file backends
+    if lower in ACE_MODELS:
+        return "ace"
+    if lower in LAMMPS_MODELS:
+        return "lammps"
 
     # MACE — explicit registry match only
     if lower in MACE_FOUNDATION_MODELS:
@@ -448,6 +535,28 @@ def _detect_backend(model: str) -> str:
     )
 
 
+def backend_for(model: str, model_path: str | None = None) -> str:
+    """The backend that :func:`get_calculator` uses for *model* / *model_path*.
+
+    A model path means MACE (it takes priority over *model*), except for an
+    ACE potential: ``model='ace'`` or a ``.yaml`` / ``.yace`` / ``.ace`` path.
+    """
+    name = (model or "").lower()
+    if model_path is not None:
+        if name in ACE_MODELS or is_ace_file(model_path):
+            return "ace"
+        if name in LAMMPS_MODELS:
+            raise ValueError(
+                "Model 'lammps' takes its potential files in the pair_coeff "
+                "lines (--pair-coeff or lammps_params), not --model-path.")
+        return "mace"
+    if name in ACE_MODELS:
+        raise ValueError(
+            "Model 'ace' needs its potential file: --model-path pot.yace "
+            "(or a pacemaker .yaml / .ace file).")
+    return _detect_backend(model)
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Backend availability for fail-fast checks and model-list install hints
 # ═════════════════════════════════════════════════════════════════════════════
@@ -455,8 +564,19 @@ def _detect_backend(model: str) -> str:
 # Import name and pip-extra per MLIP backend. Single source of backend
 # knowledge: the CLI fail-fast, --list-models markers, and error messages all
 # derive from these two dicts.
-_BACKEND_IMPORT = {"mace": "mace", "chgnet": "chgnet", "sevennet": "sevenn"}
-_BACKEND_EXTRA = {"mace": "mace", "chgnet": "chgnet", "sevennet": "sevennet"}
+_BACKEND_IMPORT = {"mace": "mace", "chgnet": "chgnet", "sevennet": "sevenn",
+                   "ace": "pyace", "lammps": "lammps"}
+_BACKEND_EXTRA = {"mace": "mace", "chgnet": "chgnet", "sevennet": "sevennet",
+                  "ace": "ace", "lammps": "lammps"}
+# Where the pip extra is not the whole story.
+_BACKEND_NOTE = {
+    "ace": ("python-ace has wheels for Linux x86_64, Python 3.10-3.13; "
+            "elsewhere build it from\n"
+            "                          https://github.com/ICAMS/python-ace"),
+    "lammps": ("the PyPI lammps wheel has no pair_style pace; for that use "
+               "conda-forge's\n"
+               "                          lammps (conda install -c conda-forge lammps)"),
+}
 
 
 class BackendNotInstalledError(ImportError):
@@ -485,6 +605,24 @@ def available_backends() -> dict[str, bool]:
     return {b: backend_available(b) for b in (*_BACKEND_IMPORT, "classical")}
 
 
+def _install_message(model: str, backend: str) -> str:
+    extra = _BACKEND_EXTRA[backend]
+    installed = [b for b, ok in available_backends().items() if ok]
+    note = (f"  Note:                   {_BACKEND_NOTE[backend]}\n"
+            if backend in _BACKEND_NOTE else "")
+    return (
+        f"Model '{model}' needs the {backend.upper()} backend, which is not "
+        f"installed.\n"
+        f"  Install it:             pip install \"amorphgen[{extra}]\"\n"
+        f"{note}"
+        f"  Installed backends:     {', '.join(installed)}\n"
+        f"  Torch-free alternative: classical potentials (--model lj or "
+        f"buckingham,\n"
+        f"                          with classical_params in a YAML config)\n"
+        f"  See all models:         amorphgen --list-models"
+    )
+
+
 def require_backend(model: str, model_path: str | None = None) -> str:
     """Fail-fast check that *model*'s backend is importable.
 
@@ -494,21 +632,33 @@ def require_backend(model: str, model_path: str | None = None) -> str:
     The CLI calls this BEFORE any setup work; :func:`get_calculator` keeps its
     own lazy import errors as the API-level backstop.
     """
-    backend = "mace" if model_path is not None else _detect_backend(model)
+    backend = backend_for(model, model_path)
     if backend_available(backend):
         return backend
-    extra = _BACKEND_EXTRA[backend]
-    installed = [b for b, ok in available_backends().items() if ok]
-    raise BackendNotInstalledError(
-        f"Model '{model}' needs the {backend.upper()} backend, which is not "
-        f"installed.\n"
-        f"  Install it:             pip install \"amorphgen[{extra}]\"\n"
-        f"  Installed backends:     {', '.join(installed)}\n"
-        f"  Torch-free alternative: classical potentials (--model lj or "
-        f"buckingham,\n"
-        f"                          with classical_params in a YAML config)\n"
-        f"  See all models:         amorphgen --list-models"
-    )
+    raise BackendNotInstalledError(_install_message(model, backend))
+
+
+def require_potential(model: str, model_path: str | None = None, *,
+                      engine: str | None = None,
+                      lammps_params: dict | None = None, **_params) -> None:
+    """Fail-fast check of the ACE / LAMMPS potential before any work starts.
+
+    ACE needs an existing potential file and LAMMPS a usable
+    ``lammps_params`` block (the same check its loader runs); neither runs
+    on the torch-sim engine. Other backends pass.
+    """
+    backend = backend_for(model, model_path)
+    if backend not in ("ace", "lammps"):
+        return
+    if engine == "torchsim":
+        from .torchsim_engine import check_model
+        check_model(model, model_path)
+    if backend == "ace":
+        if not os.path.isfile(model_path):
+            raise FileNotFoundError(f"ACE potential file not found: {model_path}")
+    else:
+        from .lammps_potential import lammps_setup
+        lammps_setup(lammps_params)
 
 
 def require_dtype(model: str, default_dtype: str | None = None,
@@ -553,9 +703,12 @@ def get_calculator(
         * CHGNet:    ``"chgnet"``
         * SevenNet:  ``"sevennet"``, ``"7net-mf-ompa"``, ``"7net-l3i5"``
         * Classical: ``"lennard-jones"``, ``"buckingham"``
+        * ACE:       ``"ace"`` (with *model_path*)
+        * LAMMPS:    ``"lammps"`` (with ``lammps_params``)
 
         Use :func:`list_models` or ``--list-models`` to see all options.
-        Ignored if *model_path* is provided (defaults to MACE backend).
+        Ignored if *model_path* is provided (defaults to MACE backend),
+        unless it is ``"ace"``.
 
     device : str
         ``"auto"`` (default), ``"cuda"``, ``"mps"``, or ``"cpu"``.
@@ -564,12 +717,14 @@ def get_calculator(
 
     model_path : str, optional
         Path to a local ``.model`` file (e.g. a fine-tuned MACE model).
-        Takes priority over *model*.  Currently only MACE ``.model``
-        files are supported for custom paths.
+        Takes priority over *model*. A pacemaker ``.yaml`` / ``.yace`` /
+        ``.ace`` file loads an ACE potential instead.
 
     **kwargs
         Extra keyword arguments forwarded to the backend-specific
-        calculator constructor.
+        calculator constructor. The parameter blocks ``classical_params``,
+        ``lammps_params`` and ``ace_params`` are only accepted by their own
+        backend.
 
     Returns
     -------
@@ -592,8 +747,28 @@ def get_calculator(
     >>> calc = get_calculator("7net-mf-ompa", device="cuda")
     >>> calc = get_calculator(model_path="/data/my_finetuned.model")
     >>> calc = get_calculator("buckingham", classical_params={...})
+    >>> calc = get_calculator(model_path="potential.yace")
+    >>> calc = get_calculator("lammps", lammps_params={
+    ...     "pair_style": "sw", "pair_coeff": "* * Si.sw Si"})
     """
     device = resolve_device(device)
+    backend = backend_for(model, model_path)
+    for key, owner in POTENTIAL_PARAM_KEYS.items():
+        if key in kwargs and not kwargs[key]:
+            del kwargs[key]
+        elif key in kwargs and owner != backend:
+            raise ValueError(
+                f"'{key}' is for {owner} models, but model '{model}' "
+                f"uses the {backend} backend.")
+
+    # ── Potential files: ACE (model_path) and LAMMPS (lammps_params) ──────
+    # Both always evaluate in float64; an explicit dtype only gets a note.
+    if backend in ("ace", "lammps"):
+        if kwargs.get("default_dtype") == "auto":
+            del kwargs["default_dtype"]
+        if backend == "ace":
+            return _load_ace(model_path, device=device, **kwargs)
+        return _load_lammps(device=device, **kwargs)
 
     # ── Resolve "auto" default_dtype per backend ──────────────────────────
     # CHGNet only supports float32; passing float64 raises NotImplementedError
@@ -601,7 +776,6 @@ def get_calculator(
     # precision in their training and published benchmarks). Classical
     # potentials use float32 (faster, accuracy doesn't matter for LJ /
     # Buckingham force evaluations).
-    backend = _detect_backend(model) if model_path is None else "mace"
     requested_dtype = kwargs.get("default_dtype", "auto")
     if requested_dtype == "auto":
         kwargs["default_dtype"] = (
@@ -698,6 +872,8 @@ def list_models() -> None:
         ("Classical (requires classical_params in YAML)", "classical", {
             k: v for k, v in MODEL_DESCRIPTIONS.items()
             if k in ("lennard-jones", "buckingham")}),
+        ("ACE (pacemaker potential file)", "ace", {"ace": MODEL_DESCRIPTIONS["ace"]}),
+        ("LAMMPS (any pair style)", "lammps", {"lammps": MODEL_DESCRIPTIONS["lammps"]}),
     ]
 
     for backend_name, backend_key, models in sections:
@@ -707,5 +883,7 @@ def list_models() -> None:
             print(f"  {name:<25s}  {desc}")
 
     print(f"\n{bar}")
-    print("  Custom model:  --model-path /path/to/my_finetuned.model")
+    print("  Custom model:  --model-path /path/to/my_finetuned.model  (MACE)")
+    print("                 --model-path /path/to/potential.yace    "
+          "(ACE: .yaml / .yace / .ace)")
     print(f"{bar}\n")

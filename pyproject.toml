@@ -30,6 +30,8 @@ keywords = [
     "MACE",
     "CHGNet",
     "SevenNet",
+    "ACE",
+    "LAMMPS",
     "ASE",
     "materials-science",
     "DFT",
@@ -89,6 +91,17 @@ chgnet = [
 ]
 torchsim = [
     "torch-sim-atomistic>=0.6; python_version >= '3.12'",
+]
+# ACE potential files (pacemaker .yaml/.yace/.ace) through pyace. python-ace
+# has no stable release for Python >= 3.10 on PyPI; 0.4.0rc1 has wheels for
+# Linux x86_64, Python 3.10-3.13 (elsewhere pip builds it from source).
+ace = [
+    "python-ace>=0.4.0rc1",
+]
+# Any LAMMPS pair style through ASE's LAMMPSlib. The PyPI wheel needs MPICH
+# from its `mpi` extra, and has no pair_style pace (conda-forge's lammps does).
+lammps = [
+    "lammps[mpi]>=2025.7.22",
 ]
 # SevenNet pulls in e3nn>=0.5, which conflicts with the MACE pin above.
 # Install SevenNet in its own environment, or with `[full]` if you accept

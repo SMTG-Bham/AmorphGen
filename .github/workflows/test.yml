@@ -81,7 +81,8 @@ jobs:
         path: pytest-results.xml
 
   # The optional backends on CPU: the torch-sim engine (with its Lennard-Jones
-  # model), CHGNet, and the pymatgen Ewald cross-check that CHGNet brings in.
+  # model), CHGNet, and the pymatgen Ewald cross-check that CHGNet brings in,
+  # plus pyace and LAMMPS (their tests build their own small potentials).
   # Their tests skip in the torch-free jobs. The CPU-only torch wheel keeps
   # the install near 2 GB instead of 6 GB. The MACE tests (foundation-model
   # download, see canary.yml) and the CUDA tests still skip.
@@ -98,16 +99,18 @@ jobs:
         cache: pip
         cache-dependency-path: pyproject.toml
 
-    - name: Install CPU torch, then the torch-sim and CHGNet extras
+    - name: Install CPU torch, then the torch-sim, CHGNet, ACE and LAMMPS extras
       run: |
         python -m pip install --upgrade pip
         pip install torch --index-url https://download.pytorch.org/whl/cpu
-        pip install -e ".[torchsim,chgnet,dev]"
+        pip install -e ".[torchsim,chgnet,ace,lammps,dev]"
 
-    # importorskip would otherwise turn a broken backend install into skips
+    # importorskip would otherwise turn a broken backend install into skips;
+    # LAMMPS only loads its library (and MPI) when an instance starts.
     - name: Check the backends import
       run: |
-        python -c "import torch_sim, chgnet, pymatgen.analysis.ewald"
+        python -c "import torch_sim, chgnet, pymatgen.analysis.ewald, pyace"
+        python -c "from amorphgen.utils.lammps_potential import LAMMPSCalculator as L; L(lmpcmds=['pair_style zero 2.0', 'pair_coeff * *'], atom_types={'Si': 1}).start_lammps()"
 
     - name: Run the full suite with coverage
       env:

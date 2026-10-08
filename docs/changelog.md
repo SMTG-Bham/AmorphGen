@@ -24,8 +24,16 @@
   vibrational DOS through Python, CLI and YAML. Each supports per-structure
   JSON, CSV and figure exports. Elasticity and VDOS use the selected live
   ASE/MLIP calculator; geometric descriptors remain calculator-free.
-
-### Fixed
+- ACE and LAMMPS backends for every calculator mode (#66). `--model-path` with
+  a pacemaker `.yaml` / `.yace` / `.ace` file evaluates an ACE potential with
+  pyace (`pip install "amorphgen[ace]"`), and `--pair-style` / `--pair-coeff`
+  (or a `lammps_params` YAML block) run any LAMMPS pair style through ASE's
+  LAMMPSlib (`pip install "amorphgen[lammps]"`). Elements always map to the
+  LAMMPS types named by the `pair_coeff` lines, whatever the atom order;
+  potential paths are resolved where `amorphgen` runs; run manifests hash the
+  potential files. Both run on the CPU in float64 and supply stress; neither
+  runs on the torch-sim engine. `--model` and `--model-path` can now be given
+  together.
 
 - Stage 3 preserves the input cell and bond lengths before heating. Cubic
   reshaping now requires an explicit `melt: make_cubic: true` setting.
@@ -48,6 +56,10 @@
   without complete settings provenance require a fresh directory. Exclusive
   `.amorphgen.lock` files prevent concurrent writers and release ownership
   automatically on exit or process termination.
+- `--stages 1` and `--stages 7` resolve a relative `--model-path` against the
+  directory `amorphgen` runs in, not the work directory.
+- Stage functions called without a calculator pass `classical_params` (and the
+  new `lammps_params` / `ace_params`) to the calculator they build.
 
 ## v1.0.0rc4 (2026-09-24)
 

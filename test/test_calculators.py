@@ -158,7 +158,7 @@ class TestBackendAvailability:
     def test_available_backends_shape(self):
         from amorphgen.utils.calculators import available_backends
         avail = available_backends()
-        assert set(avail) == {"mace", "chgnet", "sevennet", "classical"}
+        assert set(avail) == {"mace", "chgnet", "sevennet", "classical", "ace", "lammps"}
         assert all(isinstance(v, bool) for v in avail.values())
         assert avail["classical"] is True
 

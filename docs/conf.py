@@ -51,6 +51,8 @@ autodoc_mock_imports = [
     "chgnet",
     "sevenn",
     "torch",
+    "pyace",
+    "lammps",
 ]
 
 # -- Autosummary configuration -----------------------------------------------

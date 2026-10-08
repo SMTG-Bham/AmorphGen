@@ -93,7 +93,7 @@ separate jobs on every push and pull request to `main` and `dev`:
 |---|---|
 | `lint` | syntax errors and undefined names (ruff) in the package, tests, docs config and tutorial notebooks; unused imports/variables and redefined names in tests |
 | `test` | the torch-free suite on Python 3.10 to 3.14 on Linux, and on 3.14 on macOS |
-| `backends` | the full suite with CPU-only PyTorch, the torch-sim engine and CHGNet, with a coverage report |
+| `backends` | the full suite with CPU-only PyTorch, the torch-sim engine, CHGNet, pyace (ACE) and LAMMPS, with a coverage report |
 | `min-deps` | the core suite on Python 3.10 with direct dependencies at their lowest allowed versions |
 | `package` | the sdist and wheel build, the README links as PyPI renders them, and the sdist's tests run against the installed wheel |
 | `light-install` | a bare `pip install` (no extras) stays torch-free |
@@ -111,7 +111,7 @@ To run the `backends` or `min-deps` job locally:
 # backends, in a Python 3.12 environment; torch-sim tests need a C/C++
 # compiler on PATH (the conda development environment installs one)
 pip install torch --index-url https://download.pytorch.org/whl/cpu
-pip install -e ".[torchsim,chgnet,dev]"
+pip install -e ".[torchsim,chgnet,ace,lammps,dev]"
 pytest test/
 
 # min-deps, in a fresh Python 3.10 environment (needs uv)
@@ -172,6 +172,11 @@ AmorphGen is designed to be model-agnostic. To add a new backend:
 3. Add dispatch / smoke tests in `test/test_calculators.py` (see
    `TestBackendRouting` for the pattern).
 4. Update the README with the new backend.
+
+A backend that reads a potential file rather than a named model (as ACE and
+LAMMPS do) also needs `backend_for` and `require_potential` updated, and its
+calculator must survive `copy.deepcopy` (the stages deep-copy their input
+`Atoms` with the calculator attached); see `amorphgen/utils/lammps_potential.py`.
 
 ### Tutorials
 

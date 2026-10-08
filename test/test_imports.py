@@ -89,7 +89,8 @@ import sys
 
 class BlockMLImports(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split(".")[0] in {"torch", "torch_sim", "mace", "chgnet", "sevenn"}:
+        if fullname.split(".")[0] in {"torch", "torch_sim", "mace", "chgnet", "sevenn",
+                                        "pyace", "lammps"}:
             raise AssertionError(f"Unexpected optional backend import: {fullname}")
 
 sys.meta_path.insert(0, BlockMLImports())

@@ -1,7 +1,8 @@
 # Calculator backends
 
 AmorphGen supports three machine-learning interatomic potential (MLIP)
-backends and two classical pair potentials through one calculator factory.
+backends, two classical pair potentials, and ACE and LAMMPS potential files
+through one calculator factory.
 
 The Python examples on this page use:
 
@@ -106,6 +107,9 @@ e3nn 0.5+. CHGNet is unaffected (no e3nn dependency).
 calc = get_calculator(model="mace", model_path="/path/to/finetuned.model")
 ```
 
+A pacemaker `.yaml` / `.yace` / `.ace` file passed as `model_path` loads an
+ACE potential instead; see [ACE](#ace-pacemaker) below.
+
 ## Classical potentials
 
 Built-in pair potentials for initial structure preparation. CPU calculations
@@ -172,6 +176,101 @@ See the bundled
 [`example_classical.yaml`](https://github.com/SMTG-Bham/AmorphGen/blob/main/amorphgen/configs/example_classical.yaml)
 for a complete example.
 
+## Potential files: ACE and LAMMPS
+
+Potentials fitted for one system are often published as an ACE potential file
+or as a LAMMPS pair style rather than as a named foundation model. Both
+backends run on the CPU in float64; a GPU `--device` or `--dtype float32` is
+noted and not used. Both supply stress, so cell relaxation and NPT stages
+work. Neither runs on the torch-sim engine.
+
+### ACE (pacemaker)
+
+Atomic cluster expansion potentials fitted with
+[pacemaker](https://pacemaker.readthedocs.io/) are evaluated with pyace's
+`PyACECalculator`. Pass the potential file: a B-basis `.yaml` (pacemaker's
+`output_potential.yaml`) or a C-tilde `.yace` / `.ace` file.
+
+```bash
+amorphgen POSCAR -m ace --model-path output_potential.yaml
+amorphgen --random-gen --composition "SiO2*64" -n 10 --relax --model-path potential.yace
+```
+
+The suffix alone selects ACE, so `-m ace` is optional; a `--model` set to
+anything else is an error. In Python:
+
+```python
+calc = get_calculator(model_path="potential.yace")
+```
+
+`ace_params` in the YAML sets pyace's evaluator options: `recursive_evaluator`,
+`recursive` and `fast_nl`.
+
+Install: `pip install "amorphgen[ace]"`. python-ace has no stable release for
+Python 3.10+ on PyPI; the extra installs 0.4.0rc1, which has wheels for Linux
+x86_64 and Python 3.10 to 3.13. Elsewhere pip builds it from source (CMake and
+a C++ compiler needed); see the
+[python-ace repository](https://github.com/ICAMS/python-ace).
+
+### LAMMPS pair styles
+
+Any pair style compiled into your LAMMPS runs through ASE's `LAMMPSlib`, inside
+the AmorphGen process, in LAMMPS `metal` units. Give the pair style and its
+`pair_coeff` lines:
+
+```bash
+amorphgen POSCAR --pair-style sw --pair-coeff "* * Si.sw Si"
+amorphgen POSCAR --pair-style tersoff --pair-coeff "* * SiC.tersoff Si C"
+```
+
+`--pair-style` implies `-m lammps`; repeat `--pair-coeff` for several lines.
+The YAML form is a `lammps_params` block:
+
+```yaml
+model: lammps
+lammps_params:
+  pair_style: hybrid/overlay sw tersoff
+  pair_coeff:
+    - "* * sw Si.sw Si NULL"
+    - "* * tersoff C.tersoff NULL C"
+  # elements: [Si, C]                    # type 1 = Si, type 2 = C
+  # commands: ["pair_modify shift yes"]  # run after the pair_coeff lines
+  # masses: {Si: 28.0855}                # amu; default ASE masses
+```
+
+```python
+calc = get_calculator("lammps", lammps_params={
+    "pair_style": "sw", "pair_coeff": "* * Si.sw Si"})
+```
+
+LAMMPS numbers the atom types, and each `pair_coeff` line assigns parameters by
+type. AmorphGen reads the element of each type from the trailing symbols of the
+`* *` lines (`NULL` leaves a type to another hybrid sub-style) and maps every
+structure's atoms to those types, whatever order the atoms come in. When the
+lines number the types instead (`pair_coeff 1 2 ...`), give the order with
+`elements` (CLI: `--lammps-elements Si,O`). A structure containing an element
+the potential does not cover is an error.
+
+Potential file paths are read relative to where `amorphgen` is run and stored
+as absolute paths, so the stages can change into the run directory. The run
+manifest records each potential file's SHA-256 and a hash over the pair
+commands.
+
+`lammps_header` and `amendments` are passed to `LAMMPSlib` unchanged, for styles
+that need more than `atom_style atomic`. A charged rigid-ion model, for
+example, needs `atom_style charge` in the header and per-type
+`set type N charge q` amendments. The tests do not cover this use.
+
+Install: `pip install "amorphgen[lammps]"`, the unofficial PyPI LAMMPS wheel
+with MPICH. It includes most LAMMPS packages (MANYBODY, KSPACE, ML-SNAP, ...)
+but not ML-PACE, so `pair_style pace` needs another build such as
+conda-forge's (`conda install -c conda-forge lammps`). AmorphGen runs LAMMPS
+serially.
+
+See the bundled
+[`example_lammps.yaml`](https://github.com/SMTG-Bham/AmorphGen/blob/main/amorphgen/configs/example_lammps.yaml)
+for more examples.
+
 ## Listing available models
 
 ```python
@@ -221,8 +320,8 @@ YAML/Python as `optimizer: gradient_descent`; ASE-only choices such as `MDMin`
 and `BFGSLineSearch` are rejected by this engine. Supported models: MACE foundation
 models and `.model` files, SevenNet checkpoints, and Lennard-Jones with a
 single sigma/epsilon pair. For mixtures with different pair parameters, use
-ASE. CHGNet and Buckingham+Coulomb have no torch-sim implementation and
-raise a clear error; use the ASE engine for those.
+ASE. CHGNet, Buckingham+Coulomb, ACE and LAMMPS have no torch-sim
+implementation and raise a clear error; use the ASE engine for those.
 
 With a cell filter, convergence also requires the absolute mean pressure to
 be below `pressure_tol_gpa` (0.02 GPa by default, settable under `opt:`).
