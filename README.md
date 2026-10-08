@@ -627,6 +627,14 @@ Notes on the options:
   in neighbours). Curves use full-ensemble variance and are independent of
   input order. Estimated additional counts assume independent structures
   with unchanged variance; see the [convergence guide](https://smtg-bham.github.io/AmorphGen/guides/analysis.html#declared-tolerances-and-ensemble-convergence).
+- `--random-gen --relax --engine torchsim --until-converged` generates batches
+  until every predeclared bounded descriptor reaches its precision target.
+  Empirical Bernstein confidence sequences with alpha spending make these
+  repeated stopping checks statistically valid under the recorded sampling
+  assumptions. A resource cap exits with code 2 when precision remains unmet.
+  The analysis planning curves above do not provide this stopping guarantee;
+  see [sequential generation](https://smtg-bham.github.io/AmorphGen/guides/sequential-generation.html)
+  and the [complete example](https://github.com/SMTG-Bham/AmorphGen/blob/main/examples/until_converged.yaml).
 - `--sq` computes S(q) at the reciprocal-lattice q-vectors of each cell, so the
   first sharp diffraction peak is resolved without the truncation of a Fourier
   transform of g(r). Weighting is `xray` (q-dependent Waasmaier–Kirfel form
@@ -638,6 +646,10 @@ Notes on the options:
   system like IGZO.
 - `--rings` counts the shortest ring per network edge, with the network former
   (Si, Ge, ...) as nodes; `--rings Ge-O` sets the pair explicitly.
+  `--ring-max-size` sets the search limit (12 by default), and `--ring-cutoff`
+  sets a separate bond cutoff. Reports include size summaries and unresolved
+  edges; counts are edge observations, not unique rings. `--save-plot` adds
+  full JSON and per-structure CSVs.
 - `--connectivity` reports corner-, edge- and face-sharing between cation-centred
   polyhedra and the fraction of cations in edge-sharing pairs, which separates a
   corner-sharing network glass from a random packing with the same coordination.
@@ -651,6 +663,9 @@ Notes on the options:
   crystal and liquid references for the material; they do not identify a phase.
   `--save-plot` exports JSON, per-structure and per-atom CSVs, and a figure.
 - `--voids` samples periodic point clearance using configurable atomic radii;
+  it reports clearance quantiles and accessible volume. `--void-probe-radii
+  0 0.5 1.0` adds a probe-radius curve from the same samples, with sampling
+  errors, a plot and CSV. This describes local free space, not connected pores.
   `--oxygen-speciation` counts each oxygen's selected network-former neighbours.
 - `--elastic` computes the stiffness tensor and Voigt/Reuss/Hill moduli from
   stresses; `--elastic-relax` adds fixed-cell atomic relaxation. `--vdos` uses

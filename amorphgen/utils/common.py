@@ -266,6 +266,7 @@ def build_md_dynamics(atoms, ensemble: str = "NVT", T: float = 300.0,
     ASE dynamics object
     """
     from ase.md.langevin import Langevin
+    from .relaxation import clear_relaxation_metadata
 
     dt = timestep * units.fs
 
@@ -282,6 +283,7 @@ def build_md_dynamics(atoms, ensemble: str = "NVT", T: float = 300.0,
         kwargs.setdefault("fixcm", False)
         dyn = Langevin(atoms, timestep=dt, temperature_K=T,
                        friction=friction / units.fs, **kwargs)
+        clear_relaxation_metadata(atoms)
         return dyn
 
     if ensemble.upper() != "NPT":
@@ -348,6 +350,7 @@ def build_md_dynamics(atoms, ensemble: str = "NVT", T: float = 300.0,
             pfactor=pfactor,
             **kwargs,
         )
+    clear_relaxation_metadata(atoms)
     return dyn
 
 

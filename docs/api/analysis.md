@@ -19,6 +19,141 @@ API is the ``StructureAnalyser`` class.
    :show-inheritance:
 ```
 
+## Screening
+
+`StructureAnalyser.screen(config)` returns per-candidate screening decisions
+without changing the analyser. `StructureAnalyser.screened(config)` returns
+`(retained_analyser, report)`; the analyser is `None` when all candidates are
+excluded. The retained analyser uses the same resolved neighbour cutoffs as
+the original full ensemble. `crystal_like.cutoff` can independently override
+the order shell and is resolved once using that full ensemble. Neither
+method runs the subsequent analysis or marks structures as analysed.
+
+```python
+from amorphgen.analysis import (
+    StructureAnalyser, format_screening_report, mark_screening_analysed,
+    write_screening_outputs,
+)
+
+sa = StructureAnalyser("ensemble/", cutoff="auto-rdf")
+config = {
+    "coordination": {"allowed": {"Si": [4], "O": [2]}},
+    "close_contacts": {"threshold_frac": 0.7, "exclude": True},
+    "unconverged": {"exclude": False},
+}
+retained, report = sa.screened(config)
+if retained is not None:
+    print(retained.summary())
+    mark_screening_analysed(report, report["retained_indices"])
+print(format_screening_report(report))
+write_screening_outputs(report, "analysis/screening")
+```
+
+Each screen records its label and exclusion decision separately.
+`exclude` defaults to `False`; an unavailable metric yields an explicit
+unavailable label and follows that same exclusion policy. See
+{doc}`/guides/analysis` for the six screens, bounds and thresholds, automatic
+coordination sets, and the generated / passed / labelled / analysed counts.
+The configuration is the screening mapping itself, not its enclosing
+`analysis.screening` YAML keys. `True` enables the default label-only screens.
+
+The standalone `screen_structures(atoms_list, config, *, cutoff="auto-rdf",
+source_names=None)` accepts ASE structures directly. Reports initially have
+`analysed=0`; call `mark_screening_analysed(report, indices)` only after those
+original candidate indices have completed analysis. `write_screening_outputs`
+writes `<prefix>.json`, `<prefix>_structures.csv` and `<prefix>_summary.csv`.
+The CLI manages this bookkeeping and exports automatically.
+
+```{eval-rst}
+.. autofunction:: amorphgen.analysis.validate_screening_config
+
+.. autofunction:: amorphgen.analysis.screen_structures
+
+.. autofunction:: amorphgen.analysis.mark_screening_analysed
+
+.. autofunction:: amorphgen.analysis.format_screening_report
+
+.. autofunction:: amorphgen.analysis.write_screening_outputs
+```
+
+## Ring sizes and void clearance
+
+```python
+from amorphgen.analysis import StructureAnalyser
+from amorphgen.analysis.descriptors import save_descriptor
+
+sa = StructureAnalyser("structures/", cutoff={"Si-O": 2.0})
+rings = sa.ring_statistics(bond_pair=("Si", "O"), max_ring=16)
+voids = sa.void_distribution(n_samples=20000, probe_radius=0.5, seed=42,
+                             probe_radii=[0, 0.25, 0.5, 0.75, 1.0])
+save_descriptor("rings", rings, "analysis/")
+save_descriptor("voids", voids, "analysis/")
+```
+
+Ring `counts` and legacy `total_rings` count shortest-cycle observations per
+network edge, not unique cycles. `mean_ring_size`, `std_ring_size` (population
+spread), `min_ring_size` and `max_ring_size` summarize the resolved edges.
+`n_network_edges`, `n_ring_edges`, `n_unresolved_edges` and `ring_edge_fraction`
+report search coverage. An unresolved edge may close beyond `max_ring`;
+undefined size statistics and coverage are `None`. The resolved cutoff,
+counting convention and per-structure observations accompany the result.
+
+Void `probe_curve` contains sorted unique `radii` and the aligned
+`accessible_fraction`, `accessible_volume` and corresponding `*_stderr`
+arrays. All thresholds use the same samples; these errors quantify Monte
+Carlo noise. Omitting `probe_radii` uses the histogram bin edges. The curve
+can include radii below the base `probe_radius`, independently of the
+histogram. `clearance_quantiles` gives empirical p10/p50/p90 clearances
+conditional on the base probe, using cell-volume weights across structures.
+No accessible samples gives `None` quantiles. Clearance describes local free
+space, not connected pores or maximal cavities.
+
+Both results include `per_structure` observations and separate `uncertainty`
+summaries of equal-weight structure means. See {doc}`/guides/analysis` for
+normalization, interpretation and exported files.
+
+## Cutoff robustness
+
+`StructureAnalyser.cutoff_robustness(window=0.1, points=5)` measures contact
+and coordination sensitivity around the analyser's resolved pair cutoffs.
+`window` is a finite positive half-width in Å; `points` is an odd integer
+of at least three. Automatic cutoffs are resolved once and frozen while
+the same offset is applied to each positive pair cutoff. Values are clipped
+at zero and zero cutoffs stay zero throughout the sweep.
+
+The report includes pooled undirected periodic contact counts and the share
+whose inclusion changes from the lower to the upper endpoint, using the
+upper endpoint contact count as denominator. No contacts gives an undefined
+share. Coordination is directional, with pooled central-site means,
+per-structure means and equal-weight structure means retained. The ordinary
+`distance <= pair cutoff` and `distance < largest cutoff` boundary rules
+apply at every point. See {doc}`/guides/analysis` for interpretation.
+
+`summary(show_angles=True, cutoff_window=0.1)` and
+`per_structure_summary(cutoff_window=0.1)` include the five-point report by
+default. `plot(..., cutoff_window=0.1)` exports it when `save_csv=True`.
+
+```python
+from amorphgen.analysis import (
+    StructureAnalyser, format_cutoff_robustness, save_cutoff_robustness,
+)
+
+sa = StructureAnalyser("structures/", cutoff="auto-rdf")
+report = sa.cutoff_robustness(window=0.15, points=7)
+print(format_cutoff_robustness(report))
+paths = save_cutoff_robustness(report, output_dir="analysis/", prefix="analysis")
+```
+
+`save_cutoff_robustness(report, output_dir=".", prefix="analysis")` writes
+`analysis_cutoff_robustness.json`, `analysis_cutoff_robustness_pairs.csv`
+and `analysis_cutoff_robustness_coordination.csv` with the default prefix.
+
+```{eval-rst}
+.. autofunction:: amorphgen.analysis.format_cutoff_robustness
+
+.. autofunction:: amorphgen.analysis.save_cutoff_robustness
+```
+
 ## Measured scattering and XRD
 
 `StructureAnalyser.compare_experiment()` loads measured S(q) or T(r),

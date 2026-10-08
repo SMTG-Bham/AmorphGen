@@ -27,6 +27,9 @@ from ..utils.common import stage_file
 from ..utils.safety import SafetyMonitor
 from ..utils.repulsion import with_repulsive_core
 from ..utils.preemption import stop_if_requested
+from ..utils.relaxation import (
+    clear_relaxation_metadata, record_relaxation_metadata, write_relaxation_metadata,
+)
 from ..configs import DEFAULT_CONFIG
 
 OPTIMIZERS = {
@@ -108,6 +111,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt",
         )
     calc = with_repulsive_core(calc, global_cfg.get("repulsive_core"))
     atoms.calc = calc
+    clear_relaxation_metadata(atoms)
 
     formula = atoms.get_chemical_formula(mode="hill")
     monitor = SafetyMonitor(global_cfg.get("safety"), context=f"optimisation of {formula}")
@@ -185,6 +189,8 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt",
             _log(header, lf)
             _log(sep, lf)
 
+            steps_done = 0
+            max_f = None
             for step in range(max_steps):
                 stop_if_requested()
                 optimizer.step()
@@ -199,6 +205,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt",
                 optimizer.call_observers()
                 stop_if_requested()
                 max_f = float((forces ** 2).sum(axis=1).max() ** 0.5)
+                steps_done = step + 1
                 cp = cell_to_cellpar(atoms.cell)
                 a, b, c = cp[:3]
                 vol = atoms.get_volume()
@@ -212,6 +219,16 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt",
             else:
                 _log(sep, lf)
                 _log(f"\n  WARNING: did not converge in {max_steps} steps.", lf)
+
+        if max_f is None:
+            forces = target.get_forces()
+            max_f = float((forces ** 2).sum(axis=1).max() ** 0.5)
+            monitor.check(atoms, step=0)
+        record_relaxation_metadata(
+            atoms, converged=max_f < fmax, fmax=fmax, max_force=max_f,
+            steps=steps_done, max_steps=max_steps, engine="ase",
+            force_criterion="max_filtered_force_norm", cell_filter=filter_name,
+        )
 
     # ── Write output files ────────────────────────────────────────────────────
     # Derive base name from input file (if provided) for unique outputs
@@ -228,6 +245,8 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt",
     out_xyz = stage_file(cfg.get("output_xyz", default_xyz), work_dir)
     write(out_cif, atoms)
     write(out_xyz, atoms, format="extxyz")
+    write_relaxation_metadata(out_cif, atoms)
+    write_relaxation_metadata(out_xyz, atoms)
     final_density = compute_density_gcm3(atoms)
     print(f"[Opt] Final density: {final_density:.2f} g/cm3")
     print(f"[Opt] Saved -> {out_cif}, {out_xyz}")
@@ -248,6 +267,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt",
                 write(out_fmt, sorted_atoms, format=fmt_str, sort=True)
             else:
                 write(out_fmt, atoms, format=fmt_str)
+            write_relaxation_metadata(out_fmt, atoms)
             print(f"[Opt] Saved -> {out_fmt}")
 
     return atoms
@@ -493,8 +513,11 @@ def _write_torchsim_outputs(files, relaxed, output_dir, ext, ase_fmt):
             write(dest, a, format="vasp", sort=True, direct=True)
         else:
             write(dest, a, format=ase_fmt)
+        write_relaxation_metadata(dest, a)
         if ase_fmt != "cif":               # same convenience copy the ASE path writes
-            write(os.path.join(output_dir, f"{stem}_opt.cif"), a, format="cif")
+            cif_path = os.path.join(output_dir, f"{stem}_opt.cif")
+            write(cif_path, a, format="cif")
+            write_relaxation_metadata(cif_path, a)
         with open(os.path.join(output_dir, f"{stem}_opt.log"), "w") as lf:
             lf.write(f"torch-sim FIRE batch relaxation\nE = {a.get_potential_energy():.6f} eV  "
                      f"max|F| = {a.info.get('max_force', float('nan')):.4f} eV/A  "

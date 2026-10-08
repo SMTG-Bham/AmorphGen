@@ -43,9 +43,8 @@ autodoc_default_options = {
     "member-order": "bysource",
 }
 autodoc_typehints = "description"
-# Only the optional MLIP backends are mocked. numpy, scipy and ase are core
-# dependencies installed with the docs extra; mocking numpy breaks scipy's
-# import-time version check (analysis/uncertainty.py imports scipy.stats).
+# Core dependencies are installed with the docs extra. Only mock optional
+# ML backends: mocking NumPy breaks SciPy's import-time version checks.
 autodoc_mock_imports = [
     "mace",
     "mace_torch",

@@ -193,6 +193,9 @@ amorphgen --batch-quench \
 # Basic analysis (RDF, CN, bond angles, density)
 amorphgen --analyse --input-dir optimised/
 
+# Change the half-window for the default cutoff robustness report (Angstrom)
+amorphgen --analyse --input-dir optimised/ --cutoff-window 0.15
+
 # Per-structure comparison table + total RDF + Gaussian smearing for experimental comparison
 amorphgen --analyse --input-dir optimised/ \
     --cutoff auto-rdf --per-structure --total-rdf --smearing 0.05 \

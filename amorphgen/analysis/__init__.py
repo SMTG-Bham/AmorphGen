@@ -43,7 +43,12 @@ Usage
 
 from .analyser import StructureAnalyser
 from .convergence import convergence_report
+from .sequential import sequential_convergence_report
 from .convergence_output import format_convergence_report, save_convergence_report
+from .robustness import format_cutoff_robustness, save_cutoff_robustness
+from .screening import (screen_structures, validate_screening_config,
+                        format_screening_report, write_screening_outputs,
+                        mark_screening_analysed)
 from .energy import rank_from_log, format_log_ranking
 from .oxygen import compute_oxygen_speciation
 from .bond_order import compute_bond_order
@@ -66,9 +71,17 @@ from .comparison_plots import (
 
 __all__ = [
     "StructureAnalyser",
+    "screen_structures",
+    "validate_screening_config",
+    "format_screening_report",
+    "write_screening_outputs",
+    "mark_screening_analysed",
     "convergence_report",
+    "sequential_convergence_report",
     "format_convergence_report",
     "save_convergence_report",
+    "format_cutoff_robustness",
+    "save_cutoff_robustness",
     "compute_oxygen_speciation",
     "compute_bond_order",
     "compute_melt_memory",

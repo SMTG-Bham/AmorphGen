@@ -10,6 +10,8 @@ RMS of subset maxima). Larger sizes extrapolate the same variance model.
 Missing data use a separately labelled availability-rate approximation.
 No finite-population correction is applied:
 the target is the generating distribution's mean, not the finite sample mean.
+These fixed-sample planning intervals do not support adaptive stopping; use
+``sequential_convergence_report`` with predeclared bounded targets for that.
 """
 
 from __future__ import annotations
@@ -231,6 +233,8 @@ def convergence_report(descriptors, tolerances=None, confidence=0.95, sizes=None
     endpoint always included. By default, at most 64 observed sizes are used.
     ``max_structures`` caps sample-size forecasts, not the observed ensemble.
     Results contain only JSON-native values, with undefined numbers as null.
+    This planning report is explicitly not sequentially valid: repeated looks
+    do not preserve its nominal confidence coverage.
     """
     confidence_message = "confidence must be a finite number between 0 and 1"
     confidence = _finite_real(confidence, confidence_message)
@@ -324,6 +328,8 @@ def convergence_report(descriptors, tolerances=None, confidence=0.95, sizes=None
     return {
         "confidence": confidence, "method": "all_subset_rms_student_t",
         "sampling_unit": "structure", "band_type": "pointwise",
+        "sequentially_valid": False,
+        "optional_stopping_coverage_guaranteed": False,
         "tolerance_type": "absolute", "n_structures": n_total,
         "max_structures": max_structures, "status": status,
         "estimated_total_structures": total,

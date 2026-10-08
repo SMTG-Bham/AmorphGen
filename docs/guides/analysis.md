@@ -19,6 +19,113 @@ directory. Files with the same stem count once, in that format priority
 order. Each file contributes its last frame; to analyse a trajectory as an
 ensemble, first extract snapshots or pass a list of frames to the Python API.
 
+## Screening and analysis inclusion
+
+Screening records a label independently of whether a structure is excluded
+from analysis. Run the default screens with:
+
+```bash
+amorphgen --analyse --input-dir ensemble/ --screen \
+    --screening-output analysis/screening --save-plot analysis/
+```
+
+`--screen` enables coordination, crystal-like order, close-contact and
+relaxation-convergence checks. All screens default to `exclude: false`, so
+labels alone retain structures in the analysis. Density and energy need
+material-specific bounds and are enabled through YAML. For example:
+
+```yaml
+analysis:
+  screening:
+    coordination:
+      allowed: auto
+      max_fraction: 0.05
+    crystal_like:
+      qbar6_threshold: 0.3
+      min_neighbors: 4
+      max_fraction: 0.2
+    close_contacts:
+      threshold_frac: 0.7
+      exclude: true
+    density:
+      min: 2.1
+      max: 2.3
+    unconverged:
+      exclude: false
+```
+
+Run this configuration with `--config examples/screening.yaml`; a screening
+mapping enables screening without requiring `--screen`. `analysis.screening:
+true` selects the default screens; `false` disables screening unless
+overridden by `--screen`. In a mapping, only listed screens are enabled, and
+`enabled: false` disables an individual screen. `exclude: true` applies
+exclusion for that screen's labels. The
+example thresholds above illustrate silica and must be chosen for the
+material and neighbour shell being assessed.
+
+| Screen | What triggers a label |
+|---|---|
+| `coordination` | More than `max_fraction` of assessed sites have a total coordination outside their species' `allowed` set; the default fraction is `0.0`. Counts use chemically bonding neighbour pairs. Set `allowed: {Si: [4], O: [2]}` explicitly, or use `auto`. |
+| `crystal_like` | The ordered atom fraction exceeds `max_fraction` (default `0.0`), or the largest ordered cluster fraction exceeds an optional `max_cluster_fraction`. Atom labels use `qbar6_threshold` (default `0.3`) and `min_neighbors` (default `4`). |
+| `close_contacts` | Any periodic interatomic separation is strictly below its threshold. By default this is `threshold_frac: 0.7` times the radii-based minimum separation for each pair. `min_distance` supplies an explicit distance in Å, either a scalar or a pair mapping covering every pair present. Every pair type is assessed, including unlike species and periodic self-images. |
+| `density` | Density lies outside the inclusive `min`/`max` bounds in g/cm³. Supply at least one bound. |
+| `energy` | Stored energy per atom lies outside the inclusive `min`/`max` bounds in eV/atom. Supply at least one bound and use energies from a consistent calculator and reference. Screening reads existing energy metadata or calculator results without evaluating a calculator. |
+| `unconverged` | Explicit `relaxation_converged` or `relax_converged` metadata is false. Missing convergence metadata is unavailable, rather than an assumed successful relaxation. |
+
+Automatic coordination sets reuse `auto_target_cn()` from
+`amorphgen.utils.radii`, the same composition-based targets used by
+`--random-gen`. Each returned target expands to the integer set from
+`target - tolerance` to `target + tolerance`, inclusive. Species without an
+inferred target are unassessed; this is not a full list of acceptable
+coordinations for every species. Use explicit sets when needed, for example
+to assess oxygen as well as silicon in silica. The coordination fraction
+uses assessed sites as its denominator. Automatic neighbour cutoffs are
+resolved once using the full candidate ensemble and remain fixed for both
+screening and analysis of the retained structures.
+Crystal-like screening shares this cutoff by default. An optional
+`crystal_like.cutoff` selects a separate order shell using the same scalar,
+pair, `auto` or `auto-rdf` forms as `--cutoff`; it is also resolved once over
+the full candidate ensemble. Screening settings are independent of the
+optional `--bond-order` descriptor's CLI options.
+
+Unavailable metrics produce a `<screen>_unavailable` label. They exclude a
+structure only if that screen has `exclude: true`. This preserves the
+difference between a measured failure and missing evidence. Structure files
+that do not retain energy or relaxation metadata can therefore receive
+unavailable labels even when their geometry is valid.
+
+Newly relaxed structures, including `--random-gen --relax` outputs, retain
+the optimiser's convergence evidence in extended XYZ metadata. CIF and VASP
+outputs use a companion `<structure>.relaxation.json` file; keep it beside
+the structure. The loader verifies the structure file's hash before using
+the companion, so replaced files do not acquire stale convergence results.
+Earlier files without evidence remain unavailable. Starting new MD clears
+the previous relaxation status; a later relaxation records its own result.
+
+The CLI prints a generated / passed / labelled / analysed table and writes
+three files, even when every candidate is excluded:
+
+| Count | Meaning |
+|---|---|
+| `generated` | Candidates supplied to this analysis, after normal input loading; it does not reconstruct historical generation attempts. |
+| `passed` | Candidates with no triggered or unavailable screen labels. |
+| `labelled` | Candidates with at least one label, whether retained or excluded. |
+| `analysed` | Retained candidates whose analysis completed. |
+| `excluded` | Candidates removed by at least one screen configured with `exclude: true`. |
+
+Labelled and analysed counts can overlap. For example, ten candidates with
+three labelled and one excluded can give `generated=10`, `passed=7`,
+`labelled=3`, `analysed=9`, `excluded=1`. Analysis describes the retained
+population; changing exclusions can change its means and uncertainty.
+
+`--screening-output PREFIX` writes `PREFIX.json`,
+`PREFIX_structures.csv` and `PREFIX_summary.csv`, containing the full
+decisions, individual structure records and count table respectively.
+The default prefix is `<work-dir>/screening`; YAML can set
+`analysis.screening_output`. The Python API exposes the same decisions via
+`StructureAnalyser.screen()` and a retained analyser via `.screened()`;
+see {doc}`/api/analysis`.
+
 ## Spread and uncertainty of the mean
 
 Each input structure is one independent sampling unit. Pooled site, bond and
@@ -110,6 +217,13 @@ remains `n/a`. Reports include intervals and count inconclusive verdicts.
 
 (ensemble-convergence)=
 ## Declared tolerances and ensemble convergence
+
+This section describes uncertainty and sample-size planning for an existing
+ensemble. Repeatedly stopping when a Student-t planning interval passes does
+not preserve its nominal coverage. For generation with an anytime-valid
+stopping rule, use `--random-gen --relax --engine torchsim --until-converged`,
+with predeclared population support bounds and tolerances; see
+{doc}`sequential-generation`.
 
 Declare an absolute tolerance for the uncertainty of each descriptor's
 **ensemble mean**, in its native units. A tolerance of `0.02` for density
@@ -505,6 +619,65 @@ second-shell oxygens. The report header lists the cutoff in force for
 every pair, so a per-pair override is easy to check. These numerical values are an
 example, not fixed cutoffs for every IGZO ensemble.
 
+### Cutoff robustness
+
+Every summary reports how sensitive the pair contacts and directional
+coordination are to the selected cutoffs. The default half-window is 0.1 Å:
+the report shows five coordination means at offsets −0.10, −0.05, 0,
++0.05 and +0.10 Å, plus the change from the lowest to the highest cutoff.
+Set the half-window with `--cutoff-window` or `analysis.cutoff_window` in YAML:
+
+```bash
+amorphgen --analyse --input-dir structures/ --cutoff-window 0.15 \
+    --save-report report.txt --save-plot analysis/
+```
+
+For each unordered element pair, the **near-cutoff share** is the number
+of contacts whose inclusion changes between the lower and upper endpoints,
+divided by the number included at the upper endpoint. Counts pool the
+structures and count each undirected periodic contact once; different
+periodic images count separately, as they do in coordination. A pair with
+no contacts at the upper endpoint has an undefined share, printed as `n/a`.
+This denominator makes the reported fraction local to the candidate
+neighbour shell, rather than to all possible atom pairs in the cell.
+
+The selected cutoffs are resolved once, including automatic RDF minima.
+The sweep adds the same offset to every positive pair cutoff, clipping
+negative values to zero; zero cutoffs stay zero throughout the sweep.
+Automatic cutoffs are not refitted during the sweep. Each point
+uses the ordinary coordination boundary rules: a contact must satisfy
+`distance <= pair cutoff` and `distance < largest cutoff`.
+
+Coordination remains directional: Si–O is O neighbours per Si, while O–Si
+is Si neighbours per O. The text shows means pooled over central sites.
+The returned data also retain per-structure means and an ensemble mean
+that weights structures equally, so unequal structure sizes need not be
+treated as equal site populations. A larger near-cutoff share or coordination
+change signals greater sensitivity to the chosen shell boundary; these are
+sensitivity measures, not confidence intervals.
+
+```python
+from amorphgen.analysis import (
+    StructureAnalyser, format_cutoff_robustness, save_cutoff_robustness,
+)
+
+sa = StructureAnalyser("structures/", cutoff="auto-rdf")
+report = sa.cutoff_robustness(window=0.1, points=5)
+print(format_cutoff_robustness(report))
+save_cutoff_robustness(report, output_dir="analysis/")
+sa.summary(cutoff_window=0.1)
+```
+
+`window` must be finite and positive; `points` must be an odd integer of at
+least three so the grid includes the selected cutoff. Summary methods and
+`sa.plot(cutoff_window=...)` use five points. With `--save-plot`, the default
+CSV export also writes `analysis_cutoff_robustness.json`,
+`analysis_cutoff_robustness_pairs.csv` and
+`analysis_cutoff_robustness_coordination.csv`. In Python,
+`sa.plot(save_csv=False)` suppresses these exports.
+
+### Total coordination
+
 For elements bonded to more than one partner type (O in IGZO, bonded to
 Ga, In and Zn) the report adds a `Total coordination` block with the
 first-shell count over all bonded partners, next to the per-pair O–Ga,
@@ -813,6 +986,41 @@ PDF with `--save-pdf`. Figures show the overlay and residuals; JSON retains
 per-structure curves and reproducibility metadata, and CSV contains values,
 residuals, counts and interval bounds.
 
+## Ring sizes and search coverage
+
+```bash
+amorphgen --analyse --input-dir silica/ --rings Si-O \
+    --ring-cutoff 2.0 --ring-max-size 16 \
+    --save-report rings.txt --save-plot rings/
+```
+
+The network uses the first element as nodes and the second as bridges;
+single-element networks use direct bonds. A ring size counts network nodes
+(for example, Si sites for Si–O), and periodic paths must close at the same
+image. The default pair is selected by electronegativity. Set it explicitly
+for mixed chemistries. `--ring-cutoff` overrides the analyser's resolved pair
+cutoff for this calculation only; `--ring-max-size` defaults to 12.
+
+Each undirected network edge contributes its shortest cycle, if one closes
+within the limit. **Counts describe edges, not unique rings**: a lone
+six-node polygon contributes six observations of size six. Multiple bridges
+between the same pair of node images collapse to one network edge. Thus
+this projected network is not an enumeration of atom-level cycles.
+
+Reports give the mean, population standard deviation, observed size range,
+and counts of resolved and unresolved edges. An unresolved edge has no
+closure within the chosen limit; it may belong to a longer ring. Increase
+the limit to check convergence. Percentages use only resolved edges, while
+`ring_edge_fraction` uses all network edges. No edges gives an undefined
+coverage; no resolved rings gives undefined size summaries (JSON `null`).
+Ensemble counts pool edges, while uncertainty summaries give each structure
+equal weight.
+
+`--save-plot` writes `analysis_rings.json`, the existing size/count/percent
+CSV and PNG, `analysis_rings_structures.csv` for per-structure summaries,
+and `analysis_rings_per_structure.csv` for per-structure distributions.
+`--save-pdf` adds a PDF plot.
+
 ## Crystal-like order and the largest ordered cluster
 
 Use `--bond-order` to look for residual or newly formed crystal-like regions
@@ -935,6 +1143,7 @@ insufficient.
 ```bash
 amorphgen --analyse --input-dir silica/ --voids \
     --void-samples 20000 --void-probe-radius 0.5 --void-seed 42 \
+    --void-probe-radii 0 0.25 0.5 0.75 1.0 \
     --save-plot descriptors/
 ```
 
@@ -953,6 +1162,26 @@ to the accessible fraction. Ensemble fractions are weighted by cell volume;
 errors describe Monte Carlo sampling only. Per-structure 95% Wilson intervals
 also cover cases where no accessible points were found; neither measure
 captures variation between structures. All cells must be fully periodic in 3D.
+
+`--void-probe-radii` evaluates an accessible-fraction and accessible-volume
+curve from the **same sampled points**, including thresholds below the
+histogram's `--void-probe-radius`. Radii must be finite and nonnegative;
+they are sorted and duplicates removed. Without this option the curve uses
+the histogram bin edges. Fractions decrease as the probe grows. Thresholds
+share samples, so their errors are correlated; the shaded plot shows one
+Monte Carlo standard error at each threshold, not a simultaneous interval.
+
+The result also includes `clearance_quantiles` (`p10`, `p50`, `p90`) for
+points admitting the base probe. These are empirical inverse-CDF quantiles,
+weighted by cell volume in the pooled ensemble. They are `null` when no
+points are accessible. Each structure retains its own quantiles and probe
+curve, including Wilson intervals. The nested `uncertainty` summaries
+estimate equal-weight structure means separately from sampling errors.
+
+In addition to the histogram and full JSON, `--save-plot` writes
+`analysis_voids_probe.csv` and `analysis_voids_probe.png` for the curve,
+plus `analysis_voids_structures.csv` for per-structure volumes, clearances
+and quantiles. `--save-pdf` adds a PDF of each figure.
 
 ### Bridging and non-bridging oxygen
 
@@ -1035,7 +1264,11 @@ from amorphgen.analysis import StructureAnalyser
 from amorphgen.analysis.descriptors import save_descriptor
 
 sa = StructureAnalyser("silica/", cutoff={"Si-O": 2.0})
-voids = sa.void_distribution(n_samples=20000, probe_radius=0.5, seed=42)
+voids = sa.void_distribution(n_samples=20000, probe_radius=0.5, seed=42,
+                             probe_radii=[0, 0.25, 0.5, 0.75, 1.0])
+print(voids["clearance_quantiles"], voids["probe_curve"])
+rings = sa.ring_statistics(bond_pair=("Si", "O"), max_ring=16)
+save_descriptor("rings", rings, "descriptors/", save_pdf=True)
 oxygen = sa.oxygen_speciation(network_formers=["Si"])
 save_descriptor("voids", voids, "descriptors/", save_pdf=True)
 
@@ -1062,7 +1295,9 @@ the command.
 amorphgen --analyse \
     --input-dir DIR_OF_STRUCTURES \
     [--cutoff MODE_OR_NUMBER] \
+    [--cutoff-window FLOAT] \
     [--per-structure] \
+    [--screen] [--screening-output PREFIX] \
     [--save-report FILE] \
     [--save-plot DIR] \
     [--save-pdf] \
@@ -1084,7 +1319,10 @@ amorphgen --analyse \
 |---|---|
 | `--input-dir DIR` | Read structure files in this directory. Same-stem duplicates count once, preferring ``.xyz``, then ``.extxyz``, ``.vasp`` and ``.cif``. |
 | `--cutoff MODE` | `auto-rdf` (default: first minimum of each partial g(r)), `auto` (radii table), a number in Å, or per-pair overrides such as `"In-O=2.6,Zn-O=2.3"` that keep `auto-rdf` for the other pairs (`"auto,In-O=2.6"` or `"2.4,In-O=2.6"` change the base). |
+| `--cutoff-window FLOAT` | Finite positive half-window in Å for the default near-cutoff contact shares and five-point coordination sweep (default 0.1). CLI overrides `analysis.cutoff_window`. |
 | `--per-structure` | Print a per-structure table (one row per file: density, E/atom, CN). |
+| `--screen` | Label candidates before analysis with the default screens, or apply `analysis.screening` settings. Exclusion is configured independently for each screen. |
+| `--screening-output PREFIX` | Save screening JSON, per-structure CSV and summary CSV (default `<work-dir>/screening`). |
 | `--save-report FILE` | Write the full text report (densities, bond distances, coordination, angles) to a file. |
 | `--save-plot DIR` | Save available standard figures (RDF, CN, angles, density) plus CSV data into ``DIR``. |
 | `--save-pdf` | Also save vector PDF copies alongside the PNGs. |
@@ -1107,7 +1345,8 @@ amorphgen --analyse \
 | `--pair-panels` | One small panel per element pair for the partial g(r) (`analysis_rdf_panels.png`) and, with `--sq-partials`, for S_ab(q) (`analysis_sq_partials_panels.png`). |
 | `--total-cn SPEC` | Total first-shell coordination of one element over several partner types, repeatable: `O` counts every bonded partner, `O:In+Ga` only the named ones. Printed, and plotted as `analysis_cn_total.png` + CSV. |
 | `--check-dimers` | Report unphysical close contacts (O–O peroxide, N–N) per structure. |
-| `--rings [PAIR]` | Ring statistics (shortest ring per network edge). Nodes default to the least electronegative element; `--rings Ge-O` sets nodes–bridge explicitly. Added to the report; `analysis_rings.{csv,png}` under ``--save-plot``. |
+| `--rings [PAIR]` | Shortest ring per network edge, size summaries and search coverage; `--rings Ge-O` sets nodes–bridge explicitly. |
+| `--ring-max-size INT`, `--ring-cutoff FLOAT` | Maximum searched size in network nodes (default 12) and ring-specific bond cutoff in Å (default: analyser pair cutoff). |
 | `--voronoi [ELEMENT]` | Voronoi indices <n3 n4 n5 n6> for all atoms or one element. Added to the report; `analysis_voronoi.csv` under ``--save-plot``. |
 | `--connectivity` | Corner/edge/face sharing between cation-centred polyhedra (two cations sharing one anion = corner, two = edge, three or more = face) and the percentage of cations in at least one edge- or face-sharing pair, which is near zero in a corner-sharing network glass and tens of percent in a random packing. Added to the report; `analysis_connectivity.csv` under ``--save-plot``. |
 | `--bond-order` | Steinhardt $q_6$, Lechner–Dellago $\bar q_6$, ordered atom fraction and largest connected ordered cluster. |
@@ -1117,6 +1356,7 @@ amorphgen --analyse \
 | `--voids` | Periodic point-clearance distribution and accessible volume. |
 | `--void-samples INT`, `--void-bins INT` | Monte Carlo points per cell (default 10000) and histogram bins (50). |
 | `--void-probe-radius FLOAT`, `--void-seed INT` | Probe radius in Å (default 0) and sampling seed (0). |
+| `--void-probe-radii FLOAT [FLOAT ...]` | Threshold radii in Å for the accessible-volume curve from the same samples; defaults to histogram bin edges. |
 | `--oxygen-speciation`, `--network-formers Si,Al` | Oxygen connectivity classes; formers default to the Al/B/Ge/P/Si present. |
 | `--elastic`, `--elastic-strain FLOAT` | Stress-derived tensor and isotropic moduli; strain amplitude defaults to 0.005. |
 | `--elastic-relax` | Relax internal positions at each fixed cell, using `--fmax` and `--opt-steps`. |
@@ -1139,6 +1379,8 @@ listed flags.
 | `analysis_sq_partials.png`, `analysis_sq_partials_panels.png` | With ``--sq --sq-partials``: the Faber-Ziman partials S_ab(q) on one axis and, with ``--pair-panels``, one panel per pair. |
 | `analysis_cn.png` / `.pdf` | Coordination distribution of the bonded pairs. Binary AB systems (SiO₂) as **mirrored bars**: A-B on top, B-A reflected below the zero line. Multi-cation compounds (IGZO) as one panel per cation-centred pair (Ga-O, In-O, Zn-O) plus the anion total over all its cations (O-(Ga+In+Zn)). Mono-element systems (a-Si) and alloys side-by-side. |
 | `analysis_cn.csv` | Per-pair CN counts as percentages of the centred atom population, plus the anion-total rows. |
+| `analysis_cutoff_robustness.json` | Resolved cutoffs, near-cutoff contact counts/shares and the coordination sweep, including per-structure values. |
+| `analysis_cutoff_robustness_pairs.csv`, `analysis_cutoff_robustness_coordination.csv` | Per-pair endpoint contact counts and near-cutoff shares; directional coordination across the cutoff window. |
 | `analysis_cn_total.png` / `.csv` | With ``--total-cn``: one panel per requested total (``O``, ``O:In+Ga``). |
 | `analysis_angles.png` / `.pdf` | Bond-angle histograms (normalised). One line per triplet. |
 | `analysis_angles.csv` | Raw angle values, one row per triplet observation. |
@@ -1146,11 +1388,13 @@ listed flags.
 | `analysis_density.csv` | One row per structure: ``structure_index, density_g_per_cm3`` (at least two structures). |
 | `analysis_sq.png` / `.pdf`, `analysis_sq.csv` | With ``--sq``: S(q) and, for the direct method, the number of q-vectors per bin; raw values are also saved when smoothing is enabled. |
 | `analysis_tr.png` / `.pdf`, `analysis_tr.csv` | With ``--tr``: the total correlation function and its scattering-weighted g(r) and reduced PDF G(r). |
-| `analysis_rings.png` / `.csv` | With ``--rings``: ring-size distribution (size, count, percent of edges). |
+| `analysis_rings.{json,csv,png,pdf}` | With ``--rings``: shortest-cycle size distribution (size, edge count, percent of resolved edges); full JSON includes coverage and uncertainty. PDF requires `--save-pdf`. |
+| `analysis_rings_structures.csv`, `analysis_rings_per_structure.csv` | Ring-size summaries and search coverage per structure; per-structure size distributions. |
 | `analysis_voronoi.csv` | With ``--voronoi``: the ten most common Voronoi indices with counts and percentages. |
 | `analysis_connectivity.csv` | With ``--connectivity``: corner/edge/face link percentages and the edge-sharing cation fraction, overall and per structure. |
 | `analysis_bond_order.{json,csv,png,pdf}`, `analysis_bond_order_atoms.csv` | With `--bond-order`: per-structure ordered fraction and largest ordered cluster, a $\bar q_6$ histogram, and per-atom $q_6$, $\bar q_6$, neighbour counts and cluster labels in JSON and the atom CSV. PDF requires `--save-pdf`. |
 | `analysis_voids.{json,csv,png,pdf}` | With `--voids`: clearance density and volume fractions; JSON includes sampling uncertainties and per-structure statistics. PDF requires `--save-pdf`. |
+| `analysis_voids_probe.{csv,png,pdf}`, `analysis_voids_structures.csv` | Probe-radius curve with sampling errors; per-structure volumes, clearances and quantiles. PDF requires `--save-pdf`. |
 | `analysis_oxygen_speciation.{json,csv,png,pdf}` | Oxygen counts/fractions by class; JSON also contains each oxygen's former coordination. |
 | `analysis_elastic.{json,csv,png,pdf}`, `analysis_elastic_tensor.csv` | Modulus means/std/counts and mean stiffness heatmap; JSON includes raw/symmetrized tensors and diagnostics per structure. |
 | `analysis_vdos.{json,csv,png,pdf}` | Total and element-projected DOS; JSON includes individual mode frequencies and per-structure diagnostics. |

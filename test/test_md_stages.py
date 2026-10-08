@@ -499,11 +499,15 @@ class TestStageWorkDir:
         final_opt.run(cu_supercell, cfg, emt_calc, work_dir="final")
         assert sorted(os.listdir(".")) == ["final", "opt"]
         assert sorted(os.listdir("opt")) == [
-            "stage1_opt.cif", "stage1_opt.log", "stage1_opt.traj",
-            "stage1_opt.vasp", "stage1_opt.xyz"]
+            "stage1_opt.cif", "stage1_opt.cif.relaxation.json",
+            "stage1_opt.log", "stage1_opt.traj", "stage1_opt.vasp",
+            "stage1_opt.vasp.relaxation.json", "stage1_opt.xyz",
+            "stage1_opt.xyz.relaxation.json"]
         assert sorted(os.listdir("final")) == [
-            "stage7_opt.cif", "stage7_opt.log", "stage7_opt.traj",
-            "stage7_opt.vasp", "stage7_opt.xyz"]
+            "stage7_opt.cif", "stage7_opt.cif.relaxation.json",
+            "stage7_opt.log", "stage7_opt.traj", "stage7_opt.vasp",
+            "stage7_opt.vasp.relaxation.json", "stage7_opt.xyz",
+            "stage7_opt.xyz.relaxation.json"]
 
     def test_resume_reads_the_work_dir_trajectory(self, tmp_work_dir, capsys):
         from amorphgen.pipeline import equilibrate

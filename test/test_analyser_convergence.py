@@ -76,13 +76,26 @@ def test_analyser_rejects_overwriting_core_and_misaligned_additions():
         sa.convergence_report({"custom": 1}, descriptors={"custom": [0, 1]})
 
 
+def summaries(uncertainty):
+    """Flatten grouped summaries (probe_curve, clearance_quantiles) to dotted names."""
+    flat = {}
+    for key, value in uncertainty.items():
+        if "per_structure" in value:
+            flat[key] = value
+        else:
+            flat.update({f"{key}.{name}": summary for name, summary in value.items()})
+    return flat
+
+
 def test_seeded_void_observations_and_convergence_survive_structure_reordering():
     structures = silica_ensemble()
     forward = compute_void_distribution(structures, n_samples=50, nbins=5, seed=19)
     reverse = compute_void_distribution(structures[::-1], n_samples=50, nbins=5, seed=19)
-    for key, summary in forward["uncertainty"].items():
-        assert summary["per_structure"] == reverse["uncertainty"][key]["per_structure"][::-1]
-    descriptors = {key: value for key, value in forward["uncertainty"].items()}
+    descriptors = summaries(forward["uncertainty"])
+    reversed_descriptors = summaries(reverse["uncertainty"])
+    assert "probe_curve.accessible_fraction" in descriptors
+    for key, summary in descriptors.items():
+        assert summary["per_structure"] == reversed_descriptors[key]["per_structure"][::-1]
     assert convergence_report(descriptors, {"accessible_fraction": 0.01}) == (
-        convergence_report(reverse["uncertainty"], {"accessible_fraction": 0.01}))
+        convergence_report(reversed_descriptors, {"accessible_fraction": 0.01}))
     np.testing.assert_array_equal(structures[0].positions, silica_ensemble()[0].positions)

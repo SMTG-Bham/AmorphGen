@@ -122,6 +122,7 @@ def batch_nvt(atoms_list, model, temperatures, n_steps: int, timestep_fs: float 
     import torch_sim as ts
     from torch_sim.integrators.nvt import nvt_langevin_init, nvt_langevin_step
     from .repulsion import wrap_torch_model
+    from .relaxation import clear_relaxation_metadata
 
     atoms_list = list(atoms_list)
     n = len(atoms_list)
@@ -133,6 +134,11 @@ def batch_nvt(atoms_list, model, temperatures, n_steps: int, timestep_fs: float 
         raise ValueError("interval must be a positive integer")
     if writers is not None and len(writers) != n:
         raise ValueError("writers must contain one writer per structure")
+    # The MD frames no longer describe the relaxed geometry. Keep the caller's
+    # original structures intact while dropping inherited convergence results.
+    atoms_list = [atoms.copy() for atoms in atoms_list]
+    for atoms in atoms_list:
+        clear_relaxation_metadata(atoms)
     guard = _TorchSafetyBridge(atoms_list, safety, f"torch-sim NVT stage {stage}")
     model = guard.wrap_model(wrap_torch_model(model, repulsive_core))
     T_sched = np.asarray(temperatures, dtype=float)

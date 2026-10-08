@@ -43,7 +43,8 @@ def test_portable_array_executes_literal_arguments_and_isolates_tasks(tmp_path):
     assert not list(Path(data["root"]).rglob("*INJECTED*"))
 
 
-def test_submission_topological_ids_dependencies_and_failure(tmp_path):
+@pytest.mark.parametrize("mktemp_style", ["native", "bsd"])
+def test_submission_topological_ids_dependencies_and_failure(tmp_path, mktemp_style):
     jobs = [
         {"name": "collect", "needs": ["relax"], "commands": [["true"]]},
         {"name": "relax", "array": "0-4:2%2", "work_dir": "relax/{task_id}",
@@ -54,6 +55,27 @@ def test_submission_topological_ids_dependencies_and_failure(tmp_path):
     paths = generate(data, tmp_path / "jobs")
     fakebin = tmp_path / "bin"
     fakebin.mkdir()
+    if mktemp_style == "bsd":
+        # Model BSD's trailing-X substitution on every platform. With a .tsv
+        # suffix it instead creates the literal template, so reuse fails.
+        mktemp = fakebin / "mktemp"
+        mktemp.write_text(f"#!{sys.executable}\n" + '''import os,sys,tempfile
+from pathlib import Path
+template = sys.argv[1]
+prefix = template.rstrip('X')
+if prefix == template:
+    try:
+        fd = os.open(template, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        print(f'mktemp: {template}: File exists', file=sys.stderr)
+        sys.exit(1)
+    path = template
+else:
+    fd, path = tempfile.mkstemp(prefix=Path(prefix).name, dir=Path(prefix).parent)
+os.close(fd)
+print(path)
+''')
+        mktemp.chmod(0o755)
     sbatch = fakebin / "sbatch"
     calls = tmp_path / "calls.jsonl"
     sbatch.write_text(f"#!{sys.executable}\n" + '''import json,os,sys
@@ -79,11 +101,12 @@ print(str(101+len(previous))+';cluster-a')
     calls.unlink()
     env["FAIL"] = "1"
     result = subprocess.run(["bash", str(paths[-1])], env=env, capture_output=True, timeout=10)
-    assert result.returncode == 9
+    assert result.returncode == 9, result.stderr
     assert len(calls.read_text().splitlines()) == 2  # downstream was not submitted
     receipts = list((tmp_path / "jobs").glob("submitted.*.tsv"))
     assert len(receipts) == 2
-    assert any(p.read_text() == "gen\t101\n" for p in receipts)
+    assert {p.read_text() for p in receipts} == {
+        "gen\t101\nrelax\t102\ncollect\t103\n", "gen\t101\n"}
 
 
 @pytest.mark.parametrize("expression", ["", "1-0", "0-5:0", "-1", "0%0", "0%1%2", "0;true", "1,", "0-2:foo"])

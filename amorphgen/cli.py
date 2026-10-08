@@ -132,6 +132,134 @@ def _convergence_options(args, config):
     return enabled, tolerances, confidence, max_structures
 
 
+def _parse_descriptor_bounds(value):
+    """Parse fixed population support bounds for sequential inference."""
+    import math
+
+    name, separator, raw = value.partition("=")
+    name = name.strip()
+    try:
+        bounds = [float(part) for part in raw.split(",")]
+    except ValueError:
+        bounds = []
+    if (not separator or not name or len(bounds) != 2
+            or not all(math.isfinite(part) for part in bounds)
+            or not bounds[0] < bounds[1]
+            or not math.isfinite(bounds[1] - bounds[0])):
+        raise argparse.ArgumentTypeError(
+            "descriptor bounds must be NAME=LOW,HIGH with finite LOW < HIGH")
+    return name, bounds
+
+
+def _until_convergence_options(args, config):
+    """Resolve the immutable sequential sampling contract before model setup."""
+    import math
+
+    random_cfg = config.get("random_gen", {})
+    analysis = config.get("analysis", {})
+    enabled = bool(args.until_converged or random_cfg.get("until_converged", False))
+    if not enabled:
+        if (args.descriptor_bounds or args.convergence_batch_size is not None
+                or args.convergence_min_structures is not None):
+            raise ValueError("descriptor bounds and sampling controls require --until-converged")
+        return None
+    if not args.random_gen:
+        raise ValueError("--until-converged requires --random-gen")
+    if not (args.relax or random_cfg.get("relax", False)):
+        raise ValueError("--until-converged requires --relax")
+    if config.get("engine", "ase") != "torchsim":
+        raise ValueError("--until-converged requires --engine torchsim")
+    if args.indices is not None:
+        raise ValueError("--until-converged cannot use --indices; sampling must retain its complete prefix")
+    if _typed("-n", "--n-structures"):
+        raise ValueError("--until-converged uses --convergence-max-structures instead of --n-structures")
+    output_format = (args.format if _typed("--format")
+                     else random_cfg.get("output_format", args.format))
+    if output_format != "xyz" or config.get("opt", {}).get("output_format", "xyz") != "xyz":
+        raise ValueError("--until-converged requires xyz output to preserve descriptor and seed metadata")
+    seed = (args.seed if args.seed is not None
+            else random_cfg.get("seed", config.get("seed")))
+    if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
+        raise ValueError("--until-converged requires an explicit nonnegative integer --seed")
+    tolerances = dict(analysis.get("tolerances", {}))
+    tolerances.update(args.tolerance or [])
+    bounds = dict(analysis.get("descriptor_bounds", {}))
+    bounds.update(args.descriptor_bounds or [])
+    if not tolerances:
+        raise ValueError("--until-converged requires at least one declared --tolerance")
+    if set(bounds) != set(tolerances):
+        raise ValueError("every convergence tolerance requires matching descriptor bounds, with no extra bounds")
+    from ase.data import atomic_numbers
+    for name, tolerance in tolerances.items():
+        if not isinstance(name, str):
+            raise ValueError("convergence descriptor names must be strings")
+        if name not in {"density", "energy.total", "energy.per_atom"}:
+            kind, separator, label = name.partition(".")
+            count = {"coordination": 2, "total_coordination": 1,
+                     "bond_distance": 2, "bond_angle": 3}.get(kind)
+            elements = label.split("-")
+            if (not separator or count is None or len(elements) != count
+                    or any(element not in atomic_numbers for element in elements)):
+                raise ValueError(f"Unsupported sequential descriptor {name!r}")
+        if (isinstance(tolerance, bool) or not isinstance(tolerance, (int, float))
+                or not math.isfinite(tolerance) or tolerance <= 0):
+            raise ValueError(f"Tolerance for {name!r} must be finite and positive")
+        support = bounds[name]
+        if (not isinstance(support, (list, tuple)) or len(support) != 2
+                or any(isinstance(x, bool) or not isinstance(x, (int, float))
+                       or not math.isfinite(x) for x in support)
+                or not support[0] < support[1]
+                or not math.isfinite(support[1] - support[0])):
+            raise ValueError(f"Descriptor bounds for {name!r} require finite lower < upper")
+    targets = {name: {"bounds": bounds[name], "tolerance": tolerance, "components": 1}
+               for name, tolerance in tolerances.items()}
+    confidence = (args.convergence_confidence if args.convergence_confidence is not None
+                  else analysis.get("convergence_confidence", .95))
+    if (isinstance(confidence, bool) or not isinstance(confidence, (int, float))
+            or not math.isfinite(confidence) or not 0 < confidence < 1):
+        raise ValueError("convergence confidence must be finite and between 0 and 1")
+    batch_size = (args.convergence_batch_size if args.convergence_batch_size is not None
+                  else random_cfg.get("convergence_batch_size", 8))
+    minimum = (args.convergence_min_structures if args.convergence_min_structures is not None
+               else random_cfg.get("convergence_min_structures", 2))
+    maximum = (args.convergence_max_structures if args.convergence_max_structures is not None
+               else analysis.get("convergence_max_structures", 1000))
+    for name, value, lower in (("batch size", batch_size, 1),
+                               ("min structures", minimum, 2),
+                               ("max structures", maximum, 2)):
+        if isinstance(value, bool) or not isinstance(value, int) or value < lower:
+            raise ValueError(f"convergence {name} must be an integer >= {lower}")
+    if maximum < minimum:
+        raise ValueError("convergence max structures must be >= min structures")
+    cutoff = args.cutoff if _typed("--cutoff") else analysis.get("cutoff", args.cutoff)
+    needs_cutoff = any(name not in {"density", "energy.total", "energy.per_atom"}
+                       for name in targets)
+    try:
+        numeric_cutoff = float(cutoff)
+    except (ValueError, TypeError):
+        numeric_cutoff = None
+    if (isinstance(cutoff, bool) or numeric_cutoff is None
+            or not math.isfinite(numeric_cutoff) or numeric_cutoff <= 0):
+        if needs_cutoff:
+            raise ValueError("--until-converged requires an explicit positive numeric --cutoff for structural targets")
+        numeric_cutoff = None
+    return {"targets": targets, "batch_size": batch_size, "min_structures": minimum,
+            "max_structures": maximum, "confidence": confidence, "cutoff": numeric_cutoff}
+
+
+def _cutoff_window_option(args, config):
+    """Resolve the positive cutoff half-window: CLI > YAML > 0.1 A."""
+    import math
+
+    window = args.cutoff_window
+    if window is None:
+        window = config.get("cutoff_window", 0.1)
+    if (isinstance(window, bool) or not isinstance(window, (int, float))
+            or not math.isfinite(window) or window <= 0):
+        raise ValueError("cutoff window must be a finite positive number in A")
+    return float(window)
+
+
 def _collect_convergence_summaries(target, prefix, summaries):
     """Flatten selected descriptor uncertainty trees to their public names."""
     if not isinstance(summaries, dict):
@@ -336,6 +464,13 @@ def _add_arguments(p):
                         help="Number of structures.")
     g_rand.add_argument("--relax", action="store_true",
                         help="Relax each generated structure.")
+    g_rand.add_argument("--until-converged", action="store_true",
+                        help="Generate and relax independent torch-sim batches until all "
+                             "declared descriptor precision targets pass an anytime-valid rule.")
+    g_rand.add_argument("--convergence-batch-size", type=int, default=None, metavar="N",
+                        help="Independent structures per sequential convergence look (default 8).")
+    g_rand.add_argument("--convergence-min-structures", type=int, default=None, metavar="N",
+                        help="Minimum structures before sequential stopping (default 2).")
     g_rand.add_argument("--target-density", type=float, default=None,
                         help="Target density (g/cm3); auto if omitted.")
     g_rand.add_argument("--density-scale", type=float, default=1.0,
@@ -428,6 +563,14 @@ def _add_arguments(p):
 
     # ── Analysis ──────────────────────────────────────────────────────────────
     g_an = p.add_argument_group("analyse", "Used with --analyse.")
+    g_an.add_argument("--screen", action="store_true",
+                      help="Label candidates before analysis using YAML "
+                           "analysis.screening, or default coordination, "
+                           "crystal-like, close-contact and relaxation screens. "
+                           "Only screens with exclude: true remove structures.")
+    g_an.add_argument("--screening-output", default=None, metavar="PREFIX",
+                      help="Write screening JSON and candidate/count CSV tables "
+                           "(default: <work-dir>/screening). Requires screening.")
     g_an.add_argument("--convergence", action="store_true",
                       help="Report order-independent uncertainty versus ensemble "
                            "size and estimates against declared tolerances.")
@@ -441,10 +584,14 @@ def _add_arguments(p):
                       metavar="LEVEL",
                       help="Confidence level for convergence uncertainty "
                            "(default 0.95).")
+    g_an.add_argument("--descriptor-bounds", action="append", type=_parse_descriptor_bounds,
+                      default=None, metavar="NAME=LOW,HIGH",
+                      help="Fixed population support for an --until-converged descriptor. "
+                           "Repeat once per tolerance; CLI overrides YAML per descriptor.")
     g_an.add_argument("--convergence-max-structures", type=int, default=None,
                       metavar="N",
-                      help="Maximum ensemble size to consider when estimating "
-                           "additional structures (default 1000000).")
+                      help="Maximum structures: sequential generation cap with --until-converged "
+                           "(default 1000), or analysis projection cap (default 1000000).")
     g_an.add_argument("--cutoff", default="auto-rdf",
                       help="Bond cutoff. 'auto-rdf' (default): first minimum "
                            "of each partial g(r), so every pair gets its own "
@@ -453,6 +600,10 @@ def _add_arguments(p):
                            "overrides keep auto-rdf for the rest: "
                            "'In-O=2.6,Zn-O=2.3'; prefix a base to change it: "
                            "'auto,In-O=2.6' or '2.4,In-O=2.6'.")
+    g_an.add_argument("--cutoff-window", type=float, default=None, metavar="FLOAT",
+                      help="Positive half-window in A for cutoff robustness: "
+                           "report nearby contact shares and coordination at "
+                           "five cutoffs across +/- this value (default 0.1).")
     g_an.add_argument("--sq", action="store_true",
                       help="Compute the total structure factor S(q) via the "
                            "direct (Debye) method: correct FSDP intensities "
@@ -524,7 +675,12 @@ def _add_arguments(p):
                            "Optional PAIR such as Ge-O selects the node-bridge "
                            "pair; default auto (least electronegative element as "
                            "nodes). Printed, appended to --save-report, and "
-                           "written as analysis_rings.{csv,png} under --save-plot.")
+                           "written as analysis_rings.{json,csv,png} with "
+                           "per-structure CSVs under --save-plot.")
+    g_an.add_argument("--ring-max-size", type=int, default=None, metavar="N",
+                      help="Largest ring to search in network nodes (default 12).")
+    g_an.add_argument("--ring-cutoff", type=float, default=None, metavar="A",
+                      help="Bond cutoff in A for rings only (default: analyser pair cutoff).")
     g_an.add_argument("--voronoi", nargs="?", const="all", default=None, metavar="ELEMENT",
                       help="Voronoi indices <n3 n4 n5 n6> for all atoms or for "
                            "ELEMENT only. Printed, appended to --save-report, and "
@@ -554,6 +710,9 @@ def _add_arguments(p):
                       help="Random points per cell for --voids (default 10000).")
     g_an.add_argument("--void-probe-radius", type=float, default=None,
                       help="Probe radius in A for --voids (default 0).")
+    g_an.add_argument("--void-probe-radii", type=float, nargs="+", default=None,
+                      metavar="A", help="Probe radii in A for a free-volume curve "
+                      "from the same samples (default: histogram bin edges).")
     g_an.add_argument("--void-bins", type=int, default=None,
                       help="Clearance histogram bins (default 50).")
     g_an.add_argument("--void-seed", type=int, default=None,
@@ -1286,6 +1445,7 @@ def _collect_ensemble_final(quench_dir: str, final_dir: str, output_format: str,
     import glob as _glob
     from ase.io import read, write
     from .pipeline.batch_quench import _run_dir_name
+    from .utils.relaxation import read_relaxation_metadata, write_relaxation_metadata
 
     if output_format not in fmt_map:
         print(f"Warning: unknown format '{output_format}', using 'xyz'")
@@ -1329,11 +1489,13 @@ def _collect_ensemble_final(quench_dir: str, final_dir: str, output_format: str,
         idx = name.removeprefix("run_")
         dest = os.path.join(final_dir, f"{prefix}_{idx}{ext}")
         atoms = read(src)
+        read_relaxation_metadata(src, atoms)
         if ase_format == "vasp":
             atoms = atoms[atoms.numbers.argsort()]
             write(dest, atoms, format=ase_format, sort=True)
         else:
             write(dest, atoms, format=ase_format)
+        write_relaxation_metadata(dest, atoms)
         n_collected += 1
     print(f"  Collected {n_collected} final structures -> {final_dir}/")
 
@@ -1460,14 +1622,23 @@ def _main():
     override = _apply_amorphous_cubic_default(
         args, override, _get_parser().get_default("cell_filter"))
 
+    try:
+        until_options = _until_convergence_options(args, override)
+    except ValueError as exc:
+        print(f"Error: sequential convergence: {exc}")
+        sys.exit(1)
+
     # ── Fail fast when the requested backend is missing ──────────────────────
+    if (args.screen or args.screening_output is not None) and not args.analyse:
+        print("Error: --screen and --screening-output require --analyse.")
+        sys.exit(1)
     # Calculator-requiring modes abort BEFORE any setup work (no work dir, no
     # structure loading) with a copy-pasteable install hint. Backend knowledge
     # lives in utils.calculators (require_backend); this is just the gate.
     # The same gate refuses a precision the model can't run (CHGNet + float64),
     # which --mq-ensemble would otherwise only hit in phase 3, after stages
     # 1-4 of MD.
-    if _requires_calculator(args, override.get("analysis", {})):
+    if until_options is not None or _requires_calculator(args, override.get("analysis", {})):
         from .utils.calculators import (require_backend, require_dtype,
                                         BackendNotInstalledError)
         model = override.get("model", args.model) or "mace-mpa-0"
@@ -1551,6 +1722,23 @@ def _main():
 
         # Read analysis block from YAML config (if present)
         an_cfg = override.get("analysis", {})
+        from .analysis.screening import validate_screening_config
+        try:
+            screening_spec = an_cfg.get("screening", False)
+            if args.screen and not screening_spec:
+                screening_spec = True
+            screening_config = validate_screening_config(screening_spec)
+            screening_prefix = args.screening_output or an_cfg.get("screening_output")
+            if screening_prefix and not screening_config:
+                raise ValueError("screening_output requires --screen or analysis.screening")
+        except (TypeError, ValueError) as exc:
+            print(f"Error: screening: {exc}")
+            sys.exit(1)
+        try:
+            cutoff_window = _cutoff_window_option(args, an_cfg)
+        except ValueError as exc:
+            print(f"Error: cutoff robustness: {exc}")
+            sys.exit(1)
         try:
             convergence_enabled, tolerances, convergence_confidence, convergence_max = (
                 _convergence_options(args, an_cfg))
@@ -1573,13 +1761,36 @@ def _main():
             sys.exit(1)
 
         sa = StructureAnalyser(source, cutoff=cutoff)
+        screening = None
+        if screening_config:
+            from .analysis.screening import (
+                format_screening_report, write_screening_outputs,
+                mark_screening_analysed)
+            candidates = sa
+            try:
+                sa, screening = candidates.screened(screening_config)
+            except (TypeError, ValueError) as exc:
+                print(f"Error: screening: {exc}")
+                sys.exit(1)
+            screening_prefix = screening_prefix or os.path.join(args.work_dir, "screening")
+            # Preserve every decision even if a later analysis fails. Only
+            # successful completion below marks retained candidates analysed.
+            write_screening_outputs(screening, screening_prefix)
+            if sa is None:
+                screening_text = format_screening_report(screening)
+                print(screening_text)
+                print("  No structures retained for analysis.")
+                empty_report_path = args.save_report or an_cfg.get("save_report")
+                if empty_report_path:
+                    candidates.save_report(empty_report_path, text=screening_text)
+                return
 
         # Per-structure or grouped analysis
         per_structure = args.per_structure or an_cfg.get("per_structure", False)
         if per_structure:
-            text = sa.per_structure_summary()
+            text = sa.per_structure_summary(cutoff_window=cutoff_window)
         else:
-            text = sa.summary()
+            text = sa.summary(cutoff_window=cutoff_window)
 
         # Dimer check: CLI flag > YAML. summary() prints itself, so print the
         # dimer section too; the concatenated text feeds --save-report.
@@ -1628,7 +1839,7 @@ def _main():
             plot_dir = an_cfg["save_plot"]
 
         # Plot settings from YAML
-        plot_kwargs = {}
+        plot_kwargs = {"cutoff_window": cutoff_window}
         if "rdf_pairs" in an_cfg:
             plot_kwargs["rdf_pairs"] = an_cfg["rdf_pairs"]
         if "angle_triplets" in an_cfg:
@@ -1840,31 +2051,32 @@ def _main():
                 rings_opt = y
         if rings_opt:
             pair = None if rings_opt == "auto" else tuple(rings_opt.split("-"))
-            rings = sa.ring_statistics(bond_pair=pair)
+            ring_max_size = (args.ring_max_size if args.ring_max_size is not None
+                             else an_cfg.get("ring_max_size", 12))
+            ring_cutoff = (args.ring_cutoff if args.ring_cutoff is not None
+                           else an_cfg.get("ring_cutoff"))
+            try:
+                rings = sa.ring_statistics(bond_pair=pair, cutoff=ring_cutoff,
+                                           max_ring=ring_max_size)
+            except ValueError as exc:
+                print(f"Error: ring analysis: {exc}")
+                sys.exit(1)
+            if sa._file_list:
+                rings["structure_files"] = [str(f) for f in sa._file_list]
             if convergence_enabled:
                 _collect_convergence_summaries(
                     convergence_descriptors, "rings", rings.get("uncertainty"))
-            label = f"{pair[0]}-{pair[1]}" if pair else "auto"
-            lines = [f"\n  Ring statistics (nodes-bridge: {label}, shortest ring per edge):"]
-            for sz, c, f in zip(rings["ring_sizes"], rings["counts"], rings["fractions"]):
-                lines.append(f"    {sz:2d}-ring: {c:6d}  ({f:5.1f}%)")
-            ring_text = "\n".join(lines)
+            from .analysis.descriptors import format_descriptor, save_descriptor
+            ring_text = format_descriptor("rings", rings)
             print(ring_text)
             if report_path:
                 with open(report_path, "a") as rf:
                     rf.write("\n" + ring_text + "\n")
             if plot_dir:
-                os.makedirs(plot_dir, exist_ok=True)
-                with open(os.path.join(plot_dir, "analysis_rings.csv"), "w") as fh:
-                    fh.write("ring_size,count,fraction_percent\n")
-                    for sz, c, f in zip(rings["ring_sizes"], rings["counts"], rings["fractions"]):
-                        fh.write(f"{sz},{c},{f:.4f}\n")
-                from .analysis.plotting import plot_rings
-                plot_rings(rings, output_dir=plot_dir, label=label,
-                           dpi=plot_kwargs.get("dpi", 300),
-                           save_pdf=plot_kwargs.get("save_pdf", False),
-                           show_title=plot_kwargs.get("show_title", False))
-                print(f"  Saved: {os.path.join(plot_dir, 'analysis_rings.csv')} / .png")
+                save_descriptor("rings", rings, plot_dir,
+                                dpi=plot_kwargs.get("dpi", 300),
+                                save_pdf=plot_kwargs.get("save_pdf", False),
+                                show_title=plot_kwargs.get("show_title", False))
 
         if args.connectivity or an_cfg.get("connectivity", False):
             from .analysis.structure import format_connectivity_report
@@ -2029,6 +2241,15 @@ def _main():
                 with open(report_path, "a") as rf:
                     rf.write("\n" + v_text + "\n")
 
+        if screening is not None:
+            mark_screening_analysed(screening, screening["retained_indices"])
+            write_screening_outputs(screening, screening_prefix)
+            screening_text = format_screening_report(screening)
+            print(screening_text)
+            if report_path:
+                with open(report_path, "a", encoding="utf-8") as handle:
+                    handle.write("\n" + screening_text + "\n")
+
         return
 
     # ── Random generation mode ────────────────────────────────────────────────
@@ -2160,6 +2381,41 @@ def _main():
                     "output_format": opt_cfg.get("output_format", "xyz"),
                     "batch_size": args.batch_size or opt_cfg.get("batch_size") or "auto",
                 }
+
+        if until_options is not None:
+            from .pipeline.until_converged import run_until_converged
+
+            sequential_override = dict(override)
+            sequential_override["opt"] = {
+                **opt_cfg, "fmax": fmax, "max_steps": max_relax_steps,
+                "optimizer": optimizer, "cell_filter": cell_filter,
+            }
+            if args.batch_size is not None:
+                sequential_override["opt"]["batch_size"] = (
+                    int(args.batch_size) if str(args.batch_size).isdigit() else args.batch_size)
+            generation = {
+                "target_density": target_density, "density_scale": density_scale,
+                "minsep": minsep, "max_attempts_per_atom": args.max_attempts,
+                "target_cn": target_cn, "dmax": dmax_dict,
+                "cn_tolerance": cn_tolerance, "dmax_factor": args.dmax_factor,
+                "repair_iters": args.repair_iters, "retry_mode": args.retry_mode,
+                "seed": (args.seed if args.seed is not None
+                         else rg_cfg.get("seed", override.get("seed"))),
+            }
+            try:
+                result = run_until_converged(
+                    composition, args.work_dir, **until_options, generation=generation,
+                    cfg_override=sequential_override, resume=args.resume)
+            except (ValueError, RuntimeError, OSError, ImportError) as exc:
+                print(f"Error: sequential convergence: {exc}")
+                sys.exit(1)
+            print(f"Sequential convergence: {result['status']} "
+                  f"after {result['n_structures']} structures.")
+            if result["status"] == "max_structures_reached":
+                sys.exit(2)
+            if result["status"] != "converged":
+                sys.exit(1)
+            return
 
         # Placement and the optional separate torch-sim phase share ownership
         # of the whole output tree, including resume metadata validation.

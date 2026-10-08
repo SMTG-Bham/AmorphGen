@@ -396,6 +396,7 @@ analysis:
   cutoff: auto-rdf        # or auto, a number in A, or a dict of per-pair
                           # overrides such as {In-O: 2.6}; unlisted pairs
                           # keep auto-rdf, or the dict's "default" entry
+  cutoff_window: 0.1     # finite positive half-window in A for robustness
   smearing: 0.05          # RDF Gaussian smearing (A); 0 = raw histogram
   per_structure: true
   check_dimers: true
@@ -413,9 +414,18 @@ analysis:
   tr_window: lorch        # lorch | none
   tr_scan: true           # sweep qmax / window and report the spread
   rings: true             # or a nodes-bridge pair such as Ge-O
+  ring_max_size: 12        # maximum searched ring size in network nodes
+  # ring_cutoff: 2.0       # optional A, otherwise uses the analyser pair cutoff
   voronoi: Ge             # or true for all atoms
   connectivity: true      # corner/edge/face sharing of cation polyhedra
 ```
+
+The structural summary always reports near-cutoff contact shares and a
+five-point coordination sweep over `cutoff ± cutoff_window`. The default
+half-window is 0.1 Å; `--cutoff-window` overrides the YAML value. Cutoffs are
+resolved once, then swept without refitting automatic RDF minima. With
+`save_plot`, the robustness JSON and two CSV tables are exported alongside
+the plots. See {doc}`analysis` for contact counting and averaging conventions.
 
 ### Ensemble precision targets
 
@@ -464,6 +474,7 @@ analysis:
   voids: true
   void_samples: 10000    # independent uniform points per cell
   void_probe_radius: 0.0 # A
+  void_probe_radii: [0, 0.25, 0.5, 0.75, 1.0]  # A; same samples at every threshold
   void_bins: 50
   void_seed: 42          # separate from the top-level simulation seed
   # void_radii: {Si: 1.11, O: 0.66}  # optional A; other elements keep ASE covalent radii

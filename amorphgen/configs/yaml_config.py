@@ -147,14 +147,21 @@ _BLOCK_SCHEMA = {
         "dmax_factor": _NUMBER,
         "cell_filter": _OPTIONAL_STRING,
         "relax": bool,
+        "until_converged": bool,
+        "convergence_batch_size": int,
+        "convergence_min_structures": int,
         "seed": (int, type(None)),
     },
     "analysis": {
+        "screening": (dict, bool),
+        "screening_output": _OPTIONAL_STRING,
         "convergence": bool,
         "tolerances": dict,
+        "descriptor_bounds": dict,
         "convergence_confidence": _NUMBER,
         "convergence_max_structures": int,
         "cutoff": (str, int, float, dict),
+        "cutoff_window": _NUMBER,
         "per_structure": bool,
         "check_dimers": bool,
         "total_cn": (str, list),
@@ -193,6 +200,8 @@ _BLOCK_SCHEMA = {
         "xrd_nq": int,
         "rings": (bool, str, list, type(None)),
         "ring_bond_pair": (bool, str, list, type(None)),
+        "ring_max_size": int,
+        "ring_cutoff": _OPTIONAL_NUMBER,
         "connectivity": bool,
         "voronoi": (bool, str, type(None)),
         "voronoi_element": (bool, str, type(None)),
@@ -205,6 +214,7 @@ _BLOCK_SCHEMA = {
         "order_min_neighbors": int,
         "void_samples": int,
         "void_probe_radius": _NUMBER,
+        "void_probe_radii": (list, type(None)),
         "void_bins": int,
         "void_seed": (int, type(None)),
         "void_radii": _OPTIONAL_DICT,
@@ -316,9 +326,23 @@ def _validate_nested_values(cfg: dict, errors: list[str], path: str) -> None:
                 errors, path, cutoff=(block_name == "analysis"
                                       and field in ("cutoff", "order_cutoff")))
 
+    random_cfg = cfg.get("random_gen")
+    if isinstance(random_cfg, dict):
+        for name, minimum in (("convergence_batch_size", 1),
+                              ("convergence_min_structures", 2)):
+            value = random_cfg.get(name)
+            if type(value) is int and value < minimum:
+                errors.append(f"random_gen.{name} must be at least {minimum}")
+
     analysis = cfg.get("analysis")
     if not isinstance(analysis, dict):
         return
+    if "screening" in analysis:
+        from ..analysis.screening import validate_screening_config
+        try:
+            validate_screening_config(analysis["screening"])
+        except (TypeError, ValueError) as exc:
+            errors.append(f"analysis.screening: {exc}")
     tolerances = analysis.get("tolerances")
     if isinstance(tolerances, dict):
         for name, value in tolerances.items():
@@ -328,6 +352,25 @@ def _validate_nested_values(cfg: dict, errors: list[str], path: str) -> None:
             if _check_type(value, _NUMBER, key, errors):
                 if not math.isfinite(value) or value <= 0:
                     errors.append(f"{key} must be finite and positive")
+    descriptor_bounds = analysis.get("descriptor_bounds")
+    if isinstance(descriptor_bounds, dict):
+        for name, bounds in descriptor_bounds.items():
+            key = f"analysis.descriptor_bounds.{name}"
+            if not isinstance(name, str) or not name.strip():
+                errors.append("analysis.descriptor_bounds keys must be nonempty descriptor names")
+            if not isinstance(bounds, list) or len(bounds) != 2:
+                errors.append(f"{key} must be a [lower, upper] list")
+                continue
+            valid = True
+            for index, value in enumerate(bounds):
+                if not _check_type(value, _NUMBER, f"{key}[{index}]", errors):
+                    valid = False
+                elif not math.isfinite(value):
+                    errors.append(f"{key}[{index}] must be finite")
+                    valid = False
+            if valid and (not bounds[0] < bounds[1]
+                          or not math.isfinite(bounds[1] - bounds[0])):
+                errors.append(f"{key} must have finite lower < upper and range")
     confidence = analysis.get("convergence_confidence")
     if type(confidence) in _NUMBER:
         if not math.isfinite(confidence) or not 0 < confidence < 1:
@@ -335,7 +378,27 @@ def _validate_nested_values(cfg: dict, errors: list[str], path: str) -> None:
     max_structures = analysis.get("convergence_max_structures")
     if type(max_structures) is int and max_structures < 2:
         errors.append("analysis.convergence_max_structures must be at least 2")
+    cutoff_window = analysis.get("cutoff_window")
+    if (type(cutoff_window) in _NUMBER
+            and (not math.isfinite(cutoff_window) or cutoff_window <= 0)):
+        errors.append("analysis.cutoff_window must be finite and positive")
     _validate_scattering_values(analysis, errors)
+    ring_max_size = analysis.get("ring_max_size")
+    if type(ring_max_size) is int and ring_max_size < 3:
+        errors.append("analysis.ring_max_size must be at least 3")
+    ring_cutoff = analysis.get("ring_cutoff")
+    if (type(ring_cutoff) in _NUMBER
+            and (not math.isfinite(ring_cutoff) or ring_cutoff <= 0)):
+        errors.append("analysis.ring_cutoff must be finite and positive")
+    probe_radii = analysis.get("void_probe_radii")
+    if isinstance(probe_radii, list):
+        if not probe_radii:
+            errors.append("analysis.void_probe_radii must contain at least one radius")
+        for index, radius in enumerate(probe_radii):
+            key = f"analysis.void_probe_radii[{index}]"
+            if _check_type(radius, _NUMBER, key, errors):
+                if not math.isfinite(radius) or radius < 0:
+                    errors.append(f"{key} must be finite and non-negative")
     for key in ("total_cn", "rdf_pairs", "angle_triplets", "tr_qrange",
                 "rings", "ring_bond_pair", "network_formers"):
         value = analysis.get(key)
