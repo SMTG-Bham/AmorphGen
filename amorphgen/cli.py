@@ -193,17 +193,12 @@ def _until_convergence_options(args, config):
     if set(bounds) != set(tolerances):
         raise ValueError("every convergence tolerance requires matching descriptor bounds, with no extra bounds")
     from ase.data import atomic_numbers
+    from .configs.descriptor_names import supports_sequential_descriptor
     for name, tolerance in tolerances.items():
         if not isinstance(name, str):
             raise ValueError("convergence descriptor names must be strings")
-        if name not in {"density", "energy.total", "energy.per_atom"}:
-            kind, separator, label = name.partition(".")
-            count = {"coordination": 2, "total_coordination": 1,
-                     "bond_distance": 2, "bond_angle": 3}.get(kind)
-            elements = label.split("-")
-            if (not separator or count is None or len(elements) != count
-                    or any(element not in atomic_numbers for element in elements)):
-                raise ValueError(f"Unsupported sequential descriptor {name!r}")
+        if not supports_sequential_descriptor(name, atomic_numbers):
+            raise ValueError(f"Unsupported sequential descriptor {name!r}")
         if (isinstance(tolerance, bool) or not isinstance(tolerance, (int, float))
                 or not math.isfinite(tolerance) or tolerance <= 0):
             raise ValueError(f"Tolerance for {name!r} must be finite and positive")

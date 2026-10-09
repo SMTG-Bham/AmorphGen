@@ -23,6 +23,7 @@ from ase.io import read, write
 from ..analysis import StructureAnalyser
 from ..analysis.sequential import sequential_convergence_report
 from ..configs.default_config import DEFAULT_CONFIG
+from ..configs.descriptor_names import SCALAR_DESCRIPTORS, supports_sequential_descriptor
 from ..utils.common import merge_config
 from ..utils.persistence import sha256_file as _hash_file
 from ..utils.repulsion import validate_repulsive_core_config
@@ -99,14 +100,9 @@ def _validate_targets(targets, composition, cutoff, confidence):
     for name, target in targets.items():
         if target.get("components", 1) != 1:
             raise ValueError("The generation controller currently accepts scalar descriptors only")
-        if name in {"density", "energy.per_atom", "energy.total"}:
+        if name in SCALAR_DESCRIPTORS:
             continue
-        prefix, separator, suffix = name.partition(".")
-        count = {"coordination": 2, "total_coordination": 1,
-                 "bond_distance": 2, "bond_angle": 3}.get(prefix)
-        symbols = suffix.split("-")
-        if (not separator or count is None or len(symbols) != count
-                or any(symbol not in composition for symbol in symbols)):
+        if not supports_sequential_descriptor(name, composition):
             raise ValueError(f"Unsupported sequential descriptor {name!r}; use density, "
                              "energy.per_atom, energy.total, coordination.X-Y, "
                              "total_coordination.X, bond_distance.X-Y or bond_angle.X-Y-Z")
