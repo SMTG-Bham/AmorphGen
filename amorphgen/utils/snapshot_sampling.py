@@ -15,6 +15,8 @@ import numpy as np
 from ase.geometry import find_mic
 from ase.neighborlist import neighbor_list
 
+from .common import select_frame_indices
+
 
 _CORRELATION_THRESHOLD = 0.1
 _MIN_FRAMES = 8
@@ -333,10 +335,8 @@ def analyze_snapshot_sampling(frames, n_snapshots=20, select="decorrelated",
             # measured minimum spacing; a singleton uses the latest frame.
             indices = (np.linspace(burn, n - 1, number, dtype=int).tolist()
                        if number > 1 else [n - 1])
-    elif select == "uniform":
-        indices = np.linspace(burn, n - 1, min(n_snapshots, count), dtype=int).tolist()
     else:
-        indices = list(range(max(burn, n - n_snapshots), n))
+        indices = select_frame_indices(n, n_snapshots, select, burn)
     if len(indices) < n_snapshots:
         warnings.append(f"Requested {n_snapshots} snapshots, selected {len(indices)}. "
                         "Extend stage 4 (--eq-high-steps) to obtain more decorrelated starting frames.")

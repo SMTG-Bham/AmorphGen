@@ -82,15 +82,10 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt",
 
     if calc is None:
         from ..utils.common import resolve_device
-        device = resolve_device(global_cfg.get("device", "cuda"))
-        from ..utils.calculators import potential_kwargs
-        calc = get_calculator(
-            model=global_cfg.get("model", "mace-mpa-0"),
-            device=device,
-            model_path=global_cfg.get("model_path"),
-            default_dtype=global_cfg.get("default_dtype", "auto"),
-            **potential_kwargs(global_cfg),
-        )
+        from ..utils.calculators import calculator_kwargs
+        arguments = calculator_kwargs(global_cfg)
+        arguments["device"] = resolve_device(arguments["device"])
+        calc = get_calculator(**arguments)
     calc = with_repulsive_core(calc, global_cfg.get("repulsive_core"))
     atoms.calc = calc
     clear_relaxation_metadata(atoms)

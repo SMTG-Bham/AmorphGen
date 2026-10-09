@@ -22,11 +22,10 @@ import time
 import numpy as np
 
 from .torchsim_engine import _require, resolve_torch_device, _TorchSafetyBridge  # noqa: F401
-from .common import TRAJ_LOG_INTERVAL
+from .common import TRAJ_LOG_INTERVAL, MD_LOG_HEADER, format_md_log_row
 from .preemption import stop_if_requested
 
-_LOG_HEADER = (f"{'Step':>8}  {'Time_ps':>10}  {'T_K':>8}  {'Epot_eV':>12}  "
-               f"{'Ekin_eV':>12}  {'Etot_eV':>12}  {'Vol_A3':>10}\n" + "-" * 84 + "\n")
+_LOG_HEADER = MD_LOG_HEADER + "\n" + "-" * len(MD_LOG_HEADER) + "\n"
 
 
 def _derive_seed(seed, stage: int, tag: int = 0, run_index: int = 0) -> int:
@@ -41,25 +40,6 @@ def _derive_seed(seed, stage: int, tag: int = 0, run_index: int = 0) -> int:
     else:
         ss = np.random.SeedSequence([int(seed), int(stage), int(tag), int(run_index)])
     return int(ss.generate_state(1, dtype=np.uint32)[0])
-
-
-def _state_to_atoms_with_momenta(state, model):
-    """torch-sim MDState -> list of ASE Atoms carrying momenta, energy, forces."""
-    import torch_sim as ts
-    from ase.calculators.singlepoint import SinglePointCalculator
-    atoms_list = ts.io.state_to_atoms(state)
-    sys_idx = state.system_idx.detach().cpu().numpy()
-    mom = state.momenta.detach().cpu().numpy()
-    forces = state.forces.detach().cpu().numpy() if getattr(state, "forces", None) is not None else None
-    energy = state.energy.detach().cpu().numpy().reshape(-1) if getattr(state, "energy", None) is not None else None
-    for k, a in enumerate(atoms_list):
-        m = sys_idx == k
-        a.set_momenta(mom[m])
-        if forces is not None or energy is not None:
-            a.calc = SinglePointCalculator(
-                a, energy=float(energy[k]) if energy is not None else None,
-                forces=forces[m] if forces is not None else None)
-    return atoms_list
 
 
 class _RunWriter:
@@ -82,8 +62,9 @@ class _RunWriter:
         epot = atoms.get_potential_energy() if atoms.calc is not None else float("nan")
         ekin = atoms.get_kinetic_energy()
         with open(self.log, "a") as fh:
-            fh.write(f"{step:8d}  {step * timestep_fs / 1000.0:10.4f}  {atoms.get_temperature():8.1f}  "
-                     f"{epot:12.4f}  {ekin:12.4f}  {epot + ekin:12.4f}  {atoms.get_volume():10.2f}\n")
+            fh.write(format_md_log_row(step, step * timestep_fs / 1000.0,
+                                       atoms.get_temperature(), epot, ekin,
+                                       atoms.get_volume()) + "\n")
         img = atoms.copy(); img.wrap()
         if atoms.calc is not None:
             from ase.calculators.singlepoint import SinglePointCalculator

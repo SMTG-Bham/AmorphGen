@@ -527,6 +527,22 @@ def resolve_ramp(T_start: float, T_end: float, T_step: float) -> list[float]:
     return temps
 
 
+def resolve_ramp_schedule(T_start, T_end, T_step, *, timestep_fs, rate=None,
+                          steps_per_T=1000):
+    """Return temperature targets and segment steps for ASE or torch-sim.
+
+    A rate in K/ps overrides the configured segment length. Its sign is
+    irrelevant; the endpoints determine direction. Keep the established
+    nearest-integer rounding and minimum of one MD step per segment.
+    """
+    if rate is not None:
+        rate = abs(float(rate))
+        if rate == 0:
+            raise ValueError("rate (K/ps) must be non-zero")
+        steps_per_T = max(1, int(round(abs(T_step) / (rate * timestep_fs / 1000))))
+    return resolve_ramp(T_start, T_end, T_step), steps_per_T
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Trajectory formats
 # ═════════════════════════════════════════════════════════════════════════════
@@ -542,6 +558,16 @@ _TRAJ_ALIASES = {"xyz": "extxyz"}
 # MD Logger
 # ═════════════════════════════════════════════════════════════════════════════
 
+MD_LOG_HEADER = (f"{'Step':>8}  {'Time_ps':>10}  {'T_K':>8}  {'Epot_eV':>12}  "
+                 f"{'Ekin_eV':>12}  {'Etot_eV':>12}  {'Vol_A3':>10}")
+
+
+def format_md_log_row(step, time_ps, temperature, epot, ekin, volume):
+    """Format the shared MD table, with times in ps and energies in eV."""
+    return (f"{step:8d}  {time_ps:10.4f}  {temperature:8.1f}  "
+            f"{epot:12.4f}  {ekin:12.4f}  {epot + ekin:12.4f}  {volume:10.2f}")
+
+
 class MDLogger:
     """
     Per-step MD logger that writes to both a file and stdout.
@@ -554,11 +580,8 @@ class MDLogger:
         self.step_offset = int(step_offset)
         self._fh = open(logfile, mode)
         if mode != "a":     # resumed runs continue the existing table
-            header = (f"{'Step':>8s}  {'Time_ps':>10s}  {'T_K':>8s}  "
-                      f"{'Epot_eV':>12s}  {'Ekin_eV':>12s}  "
-                      f"{'Etot_eV':>12s}  {'Vol_A3':>10s}")
-            self._fh.write(header + "\n")
-            self._fh.write("-" * len(header) + "\n")
+            self._fh.write(MD_LOG_HEADER + "\n")
+            self._fh.write("-" * len(MD_LOG_HEADER) + "\n")
             self._fh.flush()
 
     def log(self, dyn, atoms):
@@ -567,11 +590,8 @@ class MDLogger:
         T = atoms.get_temperature()
         epot = atoms.get_potential_energy()
         ekin = atoms.get_kinetic_energy()
-        etot = epot + ekin
         vol = atoms.get_volume()
-        line = (f"{step:8d}  {t_ps:10.4f}  {T:8.1f}  "
-                f"{epot:12.4f}  {ekin:12.4f}  "
-                f"{etot:12.4f}  {vol:10.2f}")
+        line = format_md_log_row(step, t_ps, T, epot, ekin, vol)
         self._fh.write(line + "\n")
         self._fh.flush()
         print(line)
@@ -859,6 +879,20 @@ def stage_file(name: str, work_dir=None) -> str:
     return os.path.join(work_dir, name)
 
 
+def select_frame_indices(n_frames, n_requested, select="uniform", burn_in_frames=0):
+    """Select uniform or trailing indices without calculating diagnostics.
+
+    Entry points retain responsibility for validating their arguments and
+    reporting requested counts larger than the available trajectory tail.
+    """
+    if select == "uniform":
+        return np.linspace(burn_in_frames, n_frames - 1,
+                           min(n_requested, n_frames - burn_in_frames), dtype=int).tolist()
+    if select == "last":
+        return list(range(max(burn_in_frames, n_frames - n_requested), n_frames))
+    raise ValueError(f"Unknown selection strategy '{select}'.")
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Snapshot extraction
 # ═════════════════════════════════════════════════════════════════════════════
@@ -975,14 +1009,7 @@ def extract_snapshots(traj_file: str, n_snapshots: int = 20,
                   f"{available} frames are available after burn-in. "
                   f"Using all available frames.")
             n_snapshots = available
-        if select == "uniform":
-            indices = np.linspace(burn_in_frames, n_frames - 1, n_snapshots,
-                                  dtype=int)
-        elif select == "last":
-            indices = list(range(max(burn_in_frames, n_frames - n_snapshots),
-                                 n_frames))
-        else:
-            raise ValueError(f"Unknown selection strategy '{select}'.")
+        indices = select_frame_indices(n_frames, n_snapshots, select, burn_in_frames)
 
     os.makedirs(output_dir, exist_ok=True)
     paths = []

@@ -8,13 +8,8 @@ Ensemble is configurable: NVT (default) or NPT.
 
 from __future__ import annotations
 
-from copy import deepcopy
-from ase.io import read, write
-
-from ..utils import (get_calculator, build_md_dynamics,
-                     attach_outputs, merge_config)
-from ..utils.common import thermalize_momenta, stage_file
-from ..configs import DEFAULT_CONFIG
+from ..utils import get_calculator
+from .md_ramp import run_ramp
 
 
 def run(atoms_or_file, cfg_override=None, calc=None, work_dir=None, **kwargs):
@@ -34,120 +29,5 @@ def run(atoms_or_file, cfg_override=None, calc=None, work_dir=None, **kwargs):
     -------
     ase.Atoms — quenched structure at T_end
     """
-    global_cfg = merge_config(DEFAULT_CONFIG, cfg_override)
-    from ..utils.common import stage_rng, run_index_for
-    rng = stage_rng(global_cfg.get("seed"), 5, run_index_for(global_cfg))
-    cfg = global_cfg["quench"]
-    ensemble = cfg.get("ensemble", "NVT").upper()
-
-    if isinstance(atoms_or_file, str):
-        atoms = read(atoms_or_file)
-        print(f"[Stage 5] Loaded from {atoms_or_file}")
-    else:
-        atoms = deepcopy(atoms_or_file)
-        print("[Stage 5] Using provided Atoms object")
-
-    logfile = stage_file(cfg.get("log_file", "stage5_quench.log"), work_dir)
-    trajfile = stage_file(cfg.get("traj_file", "stage5_quench_traj.xyz"), work_dir)
-
-    # Frame-level resume: continue a walltime-killed quench from the last
-    # trajectory frame (momenta included); ramp position recovered via
-    # ramp_resume_position. The legacy filename lets a run interrupted
-    # under a pre-rename AmorphGen still resume after upgrade.
-    from ..utils.common import (resume_md_stage, needs_velocity_init,
-                                ramp_resume_position, resolve_ramp, set_md_temperature)
-    ck_atoms, elapsed = resume_md_stage(trajfile, kwargs.get("resume"), "5",
-                                        legacy_trajfile=stage_file("stage5_quench.xyz", work_dir))
-    if ck_atoms is not None:
-        atoms = ck_atoms
-
-    if calc is None:
-        from ..utils.common import resolve_device
-        device = resolve_device(global_cfg.get("device", "cuda"))
-        from ..utils.calculators import potential_kwargs
-        calc = get_calculator(
-            model=global_cfg.get("model", "mace-mpa-0"),
-            device=device,
-            model_path=global_cfg.get("model_path"),
-            default_dtype=global_cfg.get("default_dtype", "auto"),
-            **potential_kwargs(global_cfg),
-        )
-    from ..utils.repulsion import with_repulsive_core
-    calc = with_repulsive_core(calc, global_cfg.get("repulsive_core"))
-    atoms.calc = calc
-
-    T_start = cfg["T_start"]
-    if needs_velocity_init(atoms, elapsed):
-        thermalize_momenta(atoms, temperature_K=T_start, rng=rng)
-
-    dyn = build_md_dynamics(
-        atoms, ensemble=ensemble, T=T_start,
-        timestep=cfg.get("timestep", 1.0),
-        friction=cfg.get("friction", 0.01),
-        ttime=cfg.get("ttime", 25.0),
-        npt_method=cfg.get("npt_method", "berendsen"),
-        taup_factor=cfg.get("taup_factor", 10.0),
-        compressibility_GPa=cfg.get("compressibility_GPa", 100.0),
-        rng=rng,
-    )
-
-    # Ramp schedule resolved BEFORE attach_outputs so a bad schedule (e.g.
-    # T_step: 0) raises before any existing trajectory/log is truncated.
-    T_end = cfg["T_end"]
-    T_step = cfg.get("T_step", -100)
-    timestep_fs = cfg.get("timestep", 1.0)
-
-    # Allow rate (K/ps) to auto-calculate steps_per_T
-    rate = cfg.get("rate")
-    if rate is not None:
-        rate = abs(float(rate))          # sign is set by the endpoints
-        if rate == 0:
-            raise ValueError("rate (K/ps) must be non-zero")
-        steps = int(round(abs(T_step) / (rate * timestep_fs / 1000)))
-        steps = max(steps, 1)
-    else:
-        steps = cfg.get("steps_per_T", 1000)
-
-    # Build temperature list (cooling). resolve_ramp is float-safe, infers the
-    # cooling direction from the endpoints (so a mis-signed or zero T_step can
-    # no longer loop forever), always lands on T_end, and never overshoots.
-    temps = resolve_ramp(T_start, T_end, T_step)
-
-    logger, traj = attach_outputs(dyn, atoms, logfile, trajfile,
-                                  fmt=global_cfg.get("traj_format", "extxyz"),
-                                  append=elapsed > 0, step_offset=elapsed,
-                                  safety=global_cfg.get("safety"))
-
-    from ..utils.common import compute_density_gcm3
-    density = compute_density_gcm3(atoms)
-    actual_rate = abs(T_step) / (steps * timestep_fs / 1000)
-    print(f"[Stage 5] {ensemble} quench: {T_start} -> {T_end} K  "
-          f"({T_step} K/step, {steps} steps each, {actual_rate:.1f} K/ps)  "
-          f"density={density:.2f} g/cm3")
-
-    # Recover the ramp position on resume: k0 full segments done, offset
-    # steps into segment k0 (see ramp_resume_position for the
-    # elapsed==total edge semantics).
-    try:
-        ran = False
-        k0, offset = ramp_resume_position(elapsed, steps, len(temps))
-        for idx, T in enumerate(temps):
-            if idx < k0:
-                continue
-            set_md_temperature(dyn, T)
-            run_steps = steps - offset if idx == k0 else steps
-            note = f"  (resumed, {run_steps} steps left)" if (idx == k0 and offset) else ""
-            print(f"  -> T = {T:7.1f} K{note}")
-            dyn.run(run_steps)
-            ran = True
-        if not ran:
-            # A completed resume still validates its final state before saving.
-            dyn.run(0)
-    finally:
-        logger.close()
-        traj.close()
-
-    out_xyz = stage_file(cfg.get("output_xyz", "stage5_quenched.xyz"), work_dir)
-    write(out_xyz, atoms, format="extxyz")
-    print(f"[Stage 5] Saved -> {out_xyz}\n")
-    return atoms
+    return run_ramp(atoms_or_file, cfg_override, calc, work_dir, stage=5,
+                    calculator_factory=get_calculator, resume=kwargs.get("resume"))
