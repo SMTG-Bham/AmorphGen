@@ -125,6 +125,7 @@ class TestBatchNVT:
 
     def test_temperature_momenta_files_and_seed(self, tmp_path):
         from amorphgen.utils.torchsim_md import batch_nvt, _RunWriter
+        from amorphgen.utils.common import compute_pressure_GPa, compute_density_gcm3
         m = self._model()
         ws = [_RunWriter(str(tmp_path / f"run_{k:04d}"), "stage4_eq.log", "stage4_eq_traj.xyz") for k in range(2)]
         out = batch_nvt(self._cells(), m, 300.0, n_steps=400, timestep_fs=1.0, seed=1,
@@ -133,6 +134,14 @@ class TestBatchNVT:
         assert all(150 < a.get_temperature() < 450 for a in out)            # 32-atom cells: wide band
         assert len(read(str(tmp_path / "run_0000" / "stage4_eq_traj.xyz"), index=":")) == 4
         assert len((tmp_path / "run_0000" / "stage4_eq.log").read_text().splitlines()) == 6   # header(2) + 4 frames
+        row = np.loadtxt(tmp_path / "run_0000" / "stage4_eq.log", skiprows=2)[-1]
+        assert np.isfinite(row[7])
+        assert row[7] == pytest.approx(compute_pressure_GPa(out[0]), abs=5e-7)
+        assert row[8] == pytest.approx(compute_density_gcm3(out[0]), abs=5e-7)
+        assert "stress" in read(tmp_path / "run_0000" / "stage4_eq_traj.xyz").calc.results
+        fresh = m(ts.initialize_state(out, m.device, m.dtype))["stress"].detach().cpu().numpy()
+        for atoms, stress in zip(out, fresh):
+            np.testing.assert_allclose(atoms.get_stress(voigt=False), stress, atol=1e-12)
         again = batch_nvt(self._cells(), m, 300.0, n_steps=400, timestep_fs=1.0, seed=1, log=lambda *a: None)
         assert np.allclose(out[0].positions, again[0].positions)              # seeded noise
         other = batch_nvt(self._cells(), m, 300.0, n_steps=400, timestep_fs=1.0, seed=2, log=lambda *a: None)
@@ -296,18 +305,30 @@ class TestPhase3:
         """A 350-step stage writes frames at 100/200/300/350; resume must clamp to
         the stage length, and a complete trajectory whose end file was lost
         counts as complete (the end file is rewritten from the last frame)."""
+        import json
         run_torchsim, src, cfg, w = self._stage4_runs(tmp_path, steps=350)
         run_torchsim(src, cfg_override=cfg, work_dir=w, stages=[4], batch_size=2)
         r0, r1 = (os.path.join(w, f"run_000{k}") for k in range(2))
         for r in (r0, r1):
             assert self._log_steps(os.path.join(r, "stage4_eq.log")) == [100, 200, 300, 350]
+            with open(os.path.join(r, "stage4_eq_diagnostics.json")) as fh:
+                diagnostics = json.load(fh)
+            assert diagnostics["engine"] == "torchsim"
+            assert diagnostics["sample_steps"] == [100, 200, 300, 350]
+            np.testing.assert_allclose(diagnostics["sample_time_ps"], [.1, .2, .3, .35])
+            assert diagnostics["total_time_ps"] == pytest.approx(.25)
+            assert os.path.isfile(os.path.join(r, "stage4_eq_diagnostics.txt"))
             os.remove(os.path.join(r, "final_amorphous.xyz")); os.remove(os.path.join(r, "stage4_eq.xyz"))
+            os.remove(os.path.join(r, "stage4_eq_diagnostics.json"))
         run_torchsim(src, cfg_override=cfg, work_dir=w, stages=[4], batch_size=2, resume=True)
         out = capsys.readouterr().out
         assert "[Stage 4] already complete for this chunk -- skipping" in out
         for r in (r0, r1):
             assert os.path.isfile(os.path.join(r, "stage4_eq.xyz"))
             assert self._log_steps(os.path.join(r, "stage4_eq.log")) == [100, 200, 300, 350]
+            with open(os.path.join(r, "stage4_eq_diagnostics.json")) as fh:
+                diagnostics = json.load(fh)
+            np.testing.assert_allclose(diagnostics["sample_time_ps"], [.1, .2, .3, .35])
         # now cut both back to 3 frames: 50 steps remain, not -50
         for r in (r0, r1):
             os.remove(os.path.join(r, "final_amorphous.xyz")); os.remove(os.path.join(r, "stage4_eq.xyz"))
@@ -317,6 +338,10 @@ class TestPhase3:
         assert "resuming from step 300/350" in capsys.readouterr().out
         for r in (r0, r1):
             assert self._log_steps(os.path.join(r, "stage4_eq.log")) == [100, 200, 300, 350]
+            with open(os.path.join(r, "stage4_eq_diagnostics.json")) as fh:
+                diagnostics = json.load(fh)
+            assert diagnostics["sample_steps"] == [100, 200, 300, 350]
+            np.testing.assert_allclose(diagnostics["sample_time_ps"], [.1, .2, .3, .35])
 
     def test_auto_chunk_size_is_persisted_for_resume(self, tmp_path, capsys):
         import json

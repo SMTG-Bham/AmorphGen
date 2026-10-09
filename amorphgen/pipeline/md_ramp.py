@@ -107,6 +107,11 @@ def run_ramp(atoms_or_file, cfg_override, calc, work_dir, *, stage,
     finally:
         logger.close()
         traj.close()
+    from ..utils.md_diagnostics import write_stage_diagnostics
+    write_stage_diagnostics(
+        logfile, trajfile, timestep_fs=timestep_fs, stage=stage,
+        temperatures=temps, steps_per_T=steps,
+        traj_format=global_cfg.get("traj_format", "extxyz"))
     out_xyz = stage_file(cfg.get("output_xyz", output), work_dir)
     write(out_xyz, atoms, format="extxyz")
     print(f"[Stage {stage}] Saved -> {out_xyz}\n")

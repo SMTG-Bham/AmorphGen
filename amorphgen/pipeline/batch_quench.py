@@ -302,6 +302,7 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
     from ..utils.torchsim_engine import build_model, batch_relax
     from ..utils.torchsim_md import batch_nvt, _RunWriter
     from ..utils.common import TRAJ_LOG_INTERVAL
+    from ..utils.md_diagnostics import write_stage_diagnostics
 
     stages = stages or [4, 5, 6, 7]
     cfg = merge_config(DEFAULT_CONFIG, cfg_override)
@@ -400,12 +401,24 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
             else:
                 temperatures = float(c["T"])
                 n = int(c["steps"])
+
+            def diagnose_stage():
+                for directory in dirs:
+                    write_stage_diagnostics(
+                        os.path.join(directory, stem + ".log"),
+                        os.path.join(directory, stem + "_traj.xyz"),
+                        timestep_fs=dt, stage=stage, engine="torchsim",
+                        T_target=None if stage == 5 else float(c["T"]),
+                        temperatures=temps if stage == 5 else None,
+                        steps_per_T=spt if stage == 5 else None)
+
             start, done, complete = _batched_stage_checkpoint(
                 dirs, stem + ".log", stem + "_traj.xyz", endname,
                 n, TRAJ_LOG_INTERVAL, resume, validate=validate_checkpoint)
             if complete:
                 print(f"  [Stage {stage}] already complete for this chunk -- skipping")
                 atoms = start
+                diagnose_stage()
                 continue
             if start is not None:
                 print(f"  [Stage {stage}] resuming from step {done}/{n}")
@@ -425,6 +438,7 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
                 stage=stage, tag=ci * 1_000_000 + done, run_index=job_index,
                 writers=ws, safety=cfg.get("safety"),
                 repulsive_core=cfg.get("repulsive_core"))
+            diagnose_stage()
             for d, a in zip(dirs, atoms):
                 write(os.path.join(d, endname), a, format="extxyz")
         if 7 in stages:

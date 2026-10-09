@@ -131,6 +131,12 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high",
         logger.close()
         traj.close()
 
+    from ..utils.md_diagnostics import write_stage_diagnostics
+    write_stage_diagnostics(
+        logfile, trajfile, timestep_fs=cfg.get("timestep", 1.0),
+        stage=int(stage_label), T_target=T,
+        traj_format=global_cfg.get("traj_format", "extxyz"))
+
     out_xyz = stage_file(cfg.get("output_xyz", f"stage{stage_label}_eq.xyz"), work_dir)
     write(out_xyz, atoms, format="extxyz")
     print(f"[Stage {stage_label}] Saved -> {out_xyz}\n")

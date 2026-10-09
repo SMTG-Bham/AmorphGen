@@ -90,6 +90,41 @@ The input must be appropriate for the first requested stage; selecting stages 5�
 
 See the {doc}`/api/config` page for all available configuration keys.
 
+## MD diagnostics
+
+Each completed MD stage (2–6) writes a JSON report and a readable text report
+beside its MD log. For example, `stage4_eq.log` produces
+`stage4_eq_diagnostics.json` and `stage4_eq_diagnostics.txt`. The same reports
+are written for stages 4–6 in the batched TorchSim workflow. These checks use
+the saved trajectory and do not generate plots during the pipeline run.
+
+The reports include mean-square displacement (MSD), diffusion coefficients in
+cm²/s, an MSD-based liquid test, energy block averages, and early-versus-late
+energy and diffusion stationarity. MSD excludes centre-of-mass drift and
+affine cell changes; in three dimensions, the fitted MSD slope gives
+`D = slope / 6` (see [ASE's diffusion analysis](https://docs.ase-lib.org/_modules/ase/md/analysis.html)).
+Timing uses the saved MD steps and configured timestep,
+including resumed stages, rather than treating consecutive saved frames as
+consecutive MD steps.
+
+The liquid test uses a diffusion threshold of `1e-6 cm²/s`. This is a
+heuristic for motion on the sampled timescale, not proof of melting or a
+thermodynamic glass-transition temperature. Heating and cooling ramps are
+analysed in separate temperature holds so deliberate changes in temperature
+are not mistaken for failed stationarity. A cooling report estimates where
+diffusion freezes only when a resolved diffusive hold is followed by a
+resolved frozen hold; it includes the temperature bracket. Short or
+undersampled holds are reported as insufficient data, with no freezing
+temperature inferred. A diffusion fit needs at least eight saved frames per
+hold; early-versus-late diffusion needs sixteen. Unavailable numeric results
+are `null` in JSON. The report records the stationarity thresholds used;
+the energy SEM test does not correct for autocorrelation.
+
+MD logs also contain pressure in GPa (positive for compression, including
+the kinetic contribution) and density in g/cm³. A calculator that cannot
+provide stress records pressure as `NaN`; this does not stop NVT dynamics.
+Existing logs without the new columns remain readable.
+
 ## Run manifest
 
 `MeltQuenchPipeline.run()` writes `run_manifest.json` in its output directory,

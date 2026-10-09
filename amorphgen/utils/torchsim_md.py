@@ -22,10 +22,9 @@ import time
 import numpy as np
 
 from .torchsim_engine import _require, resolve_torch_device, _TorchSafetyBridge  # noqa: F401
-from .common import TRAJ_LOG_INTERVAL, MD_LOG_HEADER, format_md_log_row
+from .common import (TRAJ_LOG_INTERVAL, compute_density_gcm3,
+                     compute_pressure_GPa, format_md_log_row, open_md_log)
 from .preemption import stop_if_requested
-
-_LOG_HEADER = MD_LOG_HEADER + "\n" + "-" * len(MD_LOG_HEADER) + "\n"
 
 
 def _derive_seed(seed, stage: int, tag: int = 0, run_index: int = 0) -> int:
@@ -50,9 +49,9 @@ class _RunWriter:
         self.log = os.path.join(run_dir, logname)
         self.traj = os.path.join(run_dir, trajname)
         self.step_offset = int(step_offset)
+        with open_md_log(self.log, "a" if append else "w"):
+            pass
         if not append:
-            with open(self.log, "w") as fh:
-                fh.write(_LOG_HEADER)
             if os.path.exists(self.traj):
                 os.remove(self.traj)
 
@@ -64,12 +63,13 @@ class _RunWriter:
         with open(self.log, "a") as fh:
             fh.write(format_md_log_row(step, step * timestep_fs / 1000.0,
                                        atoms.get_temperature(), epot, ekin,
-                                       atoms.get_volume()) + "\n")
+                                       atoms.get_volume(), compute_pressure_GPa(atoms),
+                                       compute_density_gcm3(atoms)) + "\n")
         img = atoms.copy(); img.wrap()
         if atoms.calc is not None:
             from ase.calculators.singlepoint import SinglePointCalculator
             img.calc = SinglePointCalculator(img, **{k: v for k, v in atoms.calc.results.items()
-                                                    if k in ("energy", "forces")})
+                                                    if k in ("energy", "forces", "stress")})
         write(self.traj, img, format="extxyz", append=True)
 
 

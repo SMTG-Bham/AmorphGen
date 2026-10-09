@@ -559,13 +559,47 @@ _TRAJ_ALIASES = {"xyz": "extxyz"}
 # ═════════════════════════════════════════════════════════════════════════════
 
 MD_LOG_HEADER = (f"{'Step':>8}  {'Time_ps':>10}  {'T_K':>8}  {'Epot_eV':>12}  "
-                 f"{'Ekin_eV':>12}  {'Etot_eV':>12}  {'Vol_A3':>10}")
+                 f"{'Ekin_eV':>12}  {'Etot_eV':>12}  {'Vol_A3':>10}  "
+                 f"{'P_GPa':>12}  {'density_g_cm3':>14}")
 
 
-def format_md_log_row(step, time_ps, temperature, epot, ekin, volume):
-    """Format the shared MD table, with times in ps and energies in eV."""
+def compute_pressure_GPa(atoms) -> float:
+    """Hydrostatic pressure including kinetic stress, positive in compression.
+
+    Calculators without a stress implementation can still run fixed-cell MD;
+    record their unavailable pressure as NaN instead of failing the run.
+    """
+    from ase.calculators.calculator import PropertyNotImplementedError
+
+    if atoms.calc is None:
+        return float("nan")
+    try:
+        stress = atoms.get_stress(include_ideal_gas=True)
+    except PropertyNotImplementedError:
+        return float("nan")
+    return float(-np.mean(stress[:3]) / units.GPa)
+
+
+def open_md_log(logfile, mode="w"):
+    """Open an MD table and label its columns, including resumed legacy logs."""
+    needs_header = mode != "a" or not os.path.exists(logfile)
+    if not needs_header:
+        with open(logfile) as existing:
+            needs_header = existing.readline().strip() != MD_LOG_HEADER.strip()
+    fh = open(logfile, mode)
+    if needs_header:
+        fh.write(MD_LOG_HEADER + "\n")
+        fh.write("-" * len(MD_LOG_HEADER) + "\n")
+        fh.flush()
+    return fh
+
+
+def format_md_log_row(step, time_ps, temperature, epot, ekin, volume,
+                      pressure=float("nan"), density=float("nan")):
+    """Format MD time (ps), energies (eV), pressure (GPa), density (g/cm³)."""
     return (f"{step:8d}  {time_ps:10.4f}  {temperature:8.1f}  "
-            f"{epot:12.4f}  {ekin:12.4f}  {epot + ekin:12.4f}  {volume:10.2f}")
+            f"{epot:12.4f}  {ekin:12.4f}  {epot + ekin:12.4f}  {volume:10.2f}  "
+            f"{pressure:12.6f}  {density:14.6f}")
 
 
 class MDLogger:
@@ -573,16 +607,13 @@ class MDLogger:
     Per-step MD logger that writes to both a file and stdout.
 
     Logs step number, time (ps), temperature (K), potential energy (eV),
-    kinetic energy (eV), total energy (eV), and volume (Å³).
+    kinetic energy (eV), total energy (eV), volume (Å³), pressure (GPa),
+    and density (g/cm³). Pressure includes the kinetic contribution.
     """
 
     def __init__(self, logfile: str, mode: str = "w", step_offset: int = 0):
         self.step_offset = int(step_offset)
-        self._fh = open(logfile, mode)
-        if mode != "a":     # resumed runs continue the existing table
-            self._fh.write(MD_LOG_HEADER + "\n")
-            self._fh.write("-" * len(MD_LOG_HEADER) + "\n")
-            self._fh.flush()
+        self._fh = open_md_log(logfile, mode)
 
     def log(self, dyn, atoms):
         step = dyn.nsteps + self.step_offset
@@ -591,7 +622,9 @@ class MDLogger:
         epot = atoms.get_potential_energy()
         ekin = atoms.get_kinetic_energy()
         vol = atoms.get_volume()
-        line = format_md_log_row(step, t_ps, T, epot, ekin, vol)
+        line = format_md_log_row(step, t_ps, T, epot, ekin, vol,
+                                 compute_pressure_GPa(atoms),
+                                 compute_density_gcm3(atoms))
         self._fh.write(line + "\n")
         self._fh.flush()
         print(line)

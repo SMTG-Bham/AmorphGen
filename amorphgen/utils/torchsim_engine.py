@@ -138,6 +138,7 @@ class _TorchSafetyBridge:
     """
 
     _ID = "amorphgen_safety_id"
+    _STRESS = "amorphgen_model_stress"
 
     def __init__(self, atoms_list, config=None, context="torch-sim"):
         from .safety import SafetyMonitor
@@ -213,8 +214,11 @@ class _TorchSafetyBridge:
     def check(self, state, results=None, geometry_only=False):
         if results is None and not geometry_only:
             results = {key: getattr(state, key) for key in ("energy", "forces")}
-            if getattr(state, "stress", None) is not None:
-                results["stress"] = state.stress
+            stress = getattr(state, "stress", None)
+            if stress is None:
+                stress = state.system_extras.get(self._STRESS)
+            if stress is not None:
+                results["stress"] = stress
         frames = self.atoms(state, results)
         for original, atoms in zip(self.ids(state), frames):
             monitor = self.monitors[original]
@@ -255,6 +259,13 @@ class _TorchSafetyBridge:
                 if base is not None:
                     checked["_amorphgen_base_results"] = base
                 bridge.check(state, checked)
+                # NVT MDState keeps energy and forces but drops the canonical
+                # model stress. Preserve it as a per-system extra so logging
+                # gets the current virial without another model evaluation.
+                if results.get("stress") is not None:
+                    state.system_extras[bridge._STRESS] = results["stress"].detach()
+                else:
+                    state.system_extras.pop(bridge._STRESS, None)
                 return results
 
         return GuardedModel()
