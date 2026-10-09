@@ -68,20 +68,40 @@ def _save_curve_uncertainty(base, x, summaries):
                                  for coordinate, value in zip(x, curve))
 
 
-def _apply_pub_style(ax, label_fs=11, tick_fs=10):
-    """Apply publication-style cosmetics: hide top/right spines, inward ticks,
-    minor ticks, consistent font sizing on tick labels."""
+def _style_axes(ax, fs_label=11, fs_tick=10):
+    """Shared axis cosmetics for analysis and ensemble comparison plots."""
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
-    for spine in ('left', 'bottom'):
-        ax.spines[spine].set_linewidth(1.0)
-    ax.tick_params(axis='both', which='major', labelsize=tick_fs,
+    ax.tick_params(axis='both', which='major', labelsize=fs_tick,
                    direction='in', length=4, width=0.9, top=False, right=False)
     ax.tick_params(axis='both', which='minor', direction='in', length=2.5,
                    width=0.7, top=False, right=False)
     ax.minorticks_on()
-    ax.xaxis.label.set_size(label_fs)
-    ax.yaxis.label.set_size(label_fs)
+    ax.xaxis.label.set_size(fs_label)
+    ax.yaxis.label.set_size(fs_label)
+
+
+def _apply_pub_style(ax, label_fs=11, tick_fs=10):
+    """Apply shared cosmetics and the analysis plots' fixed spine width."""
+    _style_axes(ax, label_fs, tick_fs)
+    for spine in ('left', 'bottom'):
+        ax.spines[spine].set_linewidth(1.0)
+
+
+def _draw_density_samples(ax, values, position, color, rng):
+    """Draw one density violin, jittered structure observations and its mean."""
+    violin = ax.violinplot([values], positions=[position], widths=0.65,
+                          showmeans=False, showmedians=False, showextrema=False)
+    for body in violin["bodies"]:
+        body.set_facecolor(color)
+        body.set_alpha(0.32)
+        body.set_edgecolor("black")
+        body.set_linewidth(0.9)
+    jitter = position + 0.06 * rng.standard_normal(len(values))
+    ax.scatter(jitter, values, color=color, s=22, alpha=0.9,
+               edgecolor="black", lw=0.4, zorder=3)
+    ax.hlines(values.mean(), position - 0.22, position + 0.22,
+              color="black", lw=1.6, zorder=4)
 
 
 def _panel_letter(ax, letter):
@@ -494,23 +514,11 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
     if len(rho_values) >= 2:
         fig, ax = _figure(figsize=(5.0, 4.0))
         x_pos = 1
-        vp = ax.violinplot([rho_values], positions=[x_pos], widths=0.65,
-                           showmeans=False, showmedians=False,
-                           showextrema=False)
-        for body in vp["bodies"]:
-            body.set_facecolor(_PALETTE[0])
-            body.set_alpha(0.32)
-            body.set_edgecolor("black")
-            body.set_linewidth(0.9)
         rng = np.random.default_rng(0)
-        jx = x_pos + 0.06 * rng.standard_normal(len(rho_values))
-        ax.scatter(jx, rho_values, color=_PALETTE[0], s=22, alpha=0.9,
-                   edgecolor="black", lw=0.4, zorder=3)
+        _draw_density_samples(ax, rho_values, x_pos, _PALETTE[0], rng)
         m = rho_values.mean()
         u = density_dict["uncertainty"]
         s = u["ci_high"] - m
-        ax.hlines(m, x_pos - 0.22, x_pos + 0.22, color="black", lw=1.6,
-                  zorder=4)
         ax.errorbar(x_pos, m, yerr=s, color="black", lw=1.0, capsize=4,
                     fmt="none", zorder=4)
         ax.text(x_pos, rho_values.max()
@@ -679,17 +687,13 @@ def plot_tr(tr_result, output_dir=".", prefix="analysis", dpi=300,
     The CSV is what you overlay on a digitised figure from a diffraction paper.
     """
     import csv
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
     os.makedirs(output_dir, exist_ok=True)
     r = np.asarray(tr_result["r"], dtype=float)
     T = np.asarray(tr_result["T_r"], dtype=float)
     g = np.asarray(tr_result["g_r"], dtype=float)
     G = np.asarray(tr_result["G_r"], dtype=float)
 
-    fig, ax = plt.subplots(figsize=(5.4, 4.0))
+    fig, ax = _figure(figsize=(5.4, 4.0))
     ax.plot(r, T, lw=1.5, color=_PALETTE[0])
     if _draw_uncertainty(ax, r, tr_result.get("uncertainty"), _PALETTE[0]):
         ax.legend(frameon=False, fontsize=8)
@@ -703,7 +707,6 @@ def plot_tr(tr_result, output_dir=".", prefix="analysis", dpi=300,
     fig.tight_layout()
     base = os.path.join(output_dir, f"{prefix}_tr")
     _save_fig(fig, base, dpi, save_pdf)
-    plt.close(fig)
 
     with open(f"{base}.csv", "w", newline="") as fh:
         w = csv.writer(fh)

@@ -55,21 +55,16 @@ import numpy as np
 # not pull matplotlib — keeps doc builds and lightweight scripts fast.
 
 from .analyser import StructureAnalyser
-from .plotting import _figure, _draw_uncertainty, _save_curve_uncertainty
+from .plotting import (_figure, _draw_uncertainty, _save_curve_uncertainty,
+                       _style_axes as _style, _draw_density_samples,
+                       _PALETTE, _EXP_COLOR)
 from .uncertainty import summarize_structures
 
 
 # ─── Okabe-Ito colour-blind-safe palette ──────────────────────────────────
-DEFAULT_COLORS = [
-    "#0072B2",   # blue        (reference / DFT)
-    "#D55E00",   # orange      (random / first AmorphGen ensemble)
-    "#009E73",   # green       (hybrid)
-    "#CC79A7",   # pink        (full MQ)
-    "#F0E442",   # yellow      (spare)
-    "#56B4E9",   # light blue  (spare)
-]
+DEFAULT_COLORS = _PALETTE[:6]
 
-EXP_COLOR = "#222222"
+EXP_COLOR = _EXP_COLOR
 
 
 # ─── Specs ────────────────────────────────────────────────────────────────
@@ -138,19 +133,6 @@ class EnsembleSpec:
 
 
 # ─── Shared style ─────────────────────────────────────────────────────────
-def _style(ax, fs_label=11, fs_tick=10):
-    """Apply the AmorphGen publication style to one axes."""
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    ax.tick_params(direction="in", length=4, width=0.9,
-                   labelsize=fs_tick, top=False, right=False)
-    ax.tick_params(which="minor", direction="in", length=2.5, width=0.7,
-                   top=False, right=False)
-    ax.minorticks_on()
-    ax.xaxis.label.set_size(fs_label)
-    ax.yaxis.label.set_size(fs_label)
-
-
 def _assign_colours(ensembles: list[EnsembleSpec]) -> None:
     """In-place: fill missing colours from DEFAULT_COLORS."""
     palette_iter = iter(DEFAULT_COLORS)
@@ -435,23 +417,12 @@ def plot_density(ensembles: list[EnsembleSpec],
     start = (x_exp + 1) if has_exp else 1
     positions = list(range(start, start + len(ensembles)))
 
-    vp = ax.violinplot(rho_data, positions=positions, widths=0.65,
-                       showmeans=False, showmedians=False, showextrema=False)
-    for body, ens in zip(vp["bodies"], ensembles):
-        body.set_facecolor(ens.color)
-        body.set_alpha(0.32)
-        body.set_edgecolor("black")
-        body.set_linewidth(0.9)
-
     rng = np.random.default_rng(0)
     for x0, vals, ens in zip(positions, rho_data, ensembles):
-        jx = x0 + 0.06 * rng.standard_normal(len(vals))
-        ax.scatter(jx, vals, color=ens.color, s=22, alpha=0.9,
-                   edgecolor="black", lw=0.4, zorder=3)
+        _draw_density_samples(ax, vals, x0, ens.color, rng)
         m = vals.mean()
         summary = summaries[ens.label]
         lo, hi = summary["ci_low"][0], summary["ci_high"][0]
-        ax.hlines(m, x0 - 0.22, x0 + 0.22, color="black", lw=1.6, zorder=4)
         if lo is not None and hi is not None:
             ax.errorbar(x0, m, yerr=[[m - lo], [hi - m]], color="black",
                         lw=1.0, capsize=4, fmt="none", zorder=4)

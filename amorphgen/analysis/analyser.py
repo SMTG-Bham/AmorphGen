@@ -25,7 +25,7 @@ from .rdf import (compute_rdf, compute_structure_factor,
                   compute_averaged_rdf, DEFAULT_SMEARING, DEFAULT_SQ_SMOOTH)
 from .rings import compute_ring_statistics
 from .voronoi import compute_voronoi
-from .energy import compute_energy_ranking
+from .energy import compute_energy_ranking, stored_info_energy
 from .plotting import plot_analysis
 from .uncertainty import summarize_structures, summarize_site_groups
 
@@ -1107,12 +1107,11 @@ class StructureAnalyser:
             # Energy (per atom, using THIS structure's atom count)
             n_at = len(atoms)
             e_str = ""
-            for key in ['energy', 'Energy', 'potential_energy']:
-                if key in atoms.info:
-                    e = atoms.info[key] / n_at
-                    all_energies.append(e)
-                    e_str = f"{e:.4f}"
-                    break
+            key, stored = stored_info_energy(atoms)
+            if key is not None:
+                e = stored / n_at
+                all_energies.append(e)
+                e_str = f"{e:.4f}"
             if not e_str:
                 try:
                     e = atoms.get_potential_energy() / n_at

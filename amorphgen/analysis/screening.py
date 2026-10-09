@@ -20,6 +20,7 @@ from ase.neighborlist import neighbor_list
 
 from .bond_order import _resolve_cutoff, _validate_geometry, compute_bond_order
 from .cutoff import parse_cutoff_spec
+from .energy import stored_info_energy
 from .structure import is_bonding_pair
 from ..utils.common import compute_density_gcm3
 from ..utils.radii import auto_target_cn, default_minsep
@@ -226,9 +227,9 @@ def _close_contacts(atoms, opts):
 
 def _stored_energy(atoms):
     """Read existing energy only; screening must not run a calculator."""
-    for key in ("energy", "Energy", "potential_energy"):
-        if key in atoms.info:
-            return _number(atoms.info[key], f"stored {key}") / len(atoms)
+    key, value = stored_info_energy(atoms)
+    if key is not None:
+        return _number(value, f"stored {key}") / len(atoms)
     results = getattr(atoms.calc, "results", {})
     if "energy" in results:
         if atoms.calc.check_state(atoms):
