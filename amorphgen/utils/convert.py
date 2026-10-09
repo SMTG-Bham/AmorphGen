@@ -19,22 +19,14 @@ import os
 
 from ase.io import read, write
 
-
-# Format key → (ASE format string, file extension).  Mirrors the
-# random_gen module's table; kept locally to avoid a circular import.
-_FORMAT_MAP: dict[str, tuple[str, str]] = {
-    "xyz":    ("extxyz", ".xyz"),
-    "extxyz": ("extxyz", ".xyz"),
-    "vasp":   ("vasp",   ".vasp"),
-    "cif":    ("cif",    ".cif"),
-}
+from .structure_io import STRUCTURE_FORMATS as _FORMAT_MAP, STRUCTURE_PATTERNS
 
 
 def _gather_inputs(input_path: str) -> list[str]:
     """Return a sorted list of structure files implied by ``input_path``."""
     if os.path.isdir(input_path):
         files: list[str] = []
-        for pattern in ("*.xyz", "*.extxyz", "*.vasp", "*.cif", "POSCAR*"):
+        for pattern in STRUCTURE_PATTERNS:
             files += _glob.glob(os.path.join(input_path, pattern))
         return sorted(set(files))
     if os.path.isfile(input_path):

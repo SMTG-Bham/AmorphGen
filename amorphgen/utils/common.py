@@ -863,14 +863,10 @@ def stage_file(name: str, work_dir=None) -> str:
 # Snapshot extraction
 # ═════════════════════════════════════════════════════════════════════════════
 
-# Map output_format -> (file extension, ASE write format).
-_SNAPSHOT_FORMAT_MAP = {
-    "extxyz": (".xyz", "extxyz"),
-    "xyz":    (".xyz", "extxyz"),
-    "vasp":   (".vasp", "vasp"),
-    "cif":    (".cif", "cif"),
-    "traj":   (".traj", "traj"),
-}
+from .structure_io import SNAPSHOT_FORMATS
+
+# Retain the private compatibility mapping's original (extension, format) order.
+_SNAPSHOT_FORMAT_MAP = {key: (ext, fmt) for key, (fmt, ext) in SNAPSHOT_FORMATS.items()}
 
 
 def extract_snapshots(traj_file: str, n_snapshots: int = 20,

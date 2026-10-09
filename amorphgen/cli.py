@@ -34,6 +34,9 @@ import argparse
 import sys
 import os
 
+from .utils.calculators import calculator_kwargs
+from .utils.structure_io import first_structure_files
+
 
 # Concise, task-oriented usage shown at the bottom of ``-h`` and by
 # ``--examples``. Kept short on purpose; the full flag list is the rest of -h.
@@ -886,6 +889,13 @@ def _parse_composition(spec: str) -> dict[str, int]:
     return comp
 
 
+def _cli_calculator_kwargs(args, override):
+    return calculator_kwargs(override, defaults={
+        key: getattr(args, key)
+        for key in ("model", "device", "model_path", "default_dtype")
+    })
+
+
 def _potential_kwargs(override: dict) -> dict:
     """Extract the potential parameter blocks (classical_params,
     lammps_params, ace_params) from the config override if present."""
@@ -1324,13 +1334,7 @@ def _run_mq_ensemble(args, override: dict, analysis_config=None) -> None:
 
     # ── Phase 3: stages 5-6-7 per snapshot (with resume) ─────────────────────
     print(f"\n[Phase 3/3] Stages 5-6-7 (per snapshot) -> {quench_dir}/")
-    calc = get_calculator(
-        **_potential_kwargs(override),
-        model=override.get("model", args.model),
-        device=override.get("device", args.device),
-        model_path=override.get("model_path", args.model_path),
-        default_dtype=override.get("default_dtype", args.default_dtype),
-    )
+    calc = get_calculator(**_cli_calculator_kwargs(args, override))
     batch_quench.run(
         snapshot_files=snap_files,
         n_runs=len(snap_files),
@@ -1356,7 +1360,6 @@ def _run_hybrid_ensemble(args, override: dict) -> None:
         quench_runs/ per-input stages 4-7 outputs (run_0000, run_0001, ...)
         final/       collected final amorphous structures (hybrid_NNNN.<fmt>)
     """
-    import glob as _glob
     from .pipeline import batch_quench
     from .utils import get_calculator
     from .pipeline.random_gen import _FORMAT_MAP, random_gen_dir_hint
@@ -1367,11 +1370,7 @@ def _run_hybrid_ensemble(args, override: dict) -> None:
     os.makedirs(work_dir, exist_ok=True)
 
     # Find input structures (any ASE-readable format)
-    snap_files = []
-    for pattern in ("*.xyz", "*.extxyz", "*.vasp", "*.cif", "POSCAR*"):
-        snap_files = sorted(_glob.glob(os.path.join(args.input_dir, pattern)))
-        if snap_files:
-            break
+    snap_files = first_structure_files(args.input_dir)
     if not snap_files:
         print(f"Error: no structure files in {args.input_dir}/ "
               f"(looked for *.xyz, *.extxyz, *.vasp, *.cif, POSCAR*)")
@@ -1420,13 +1419,7 @@ def _run_hybrid_ensemble(args, override: dict) -> None:
         return
 
 
-    calc = get_calculator(
-        **_potential_kwargs(override),
-        model=override.get("model", args.model),
-        device=override.get("device", args.device),
-        model_path=override.get("model_path", args.model_path),
-        default_dtype=override.get("default_dtype", args.default_dtype),
-    )
+    calc = get_calculator(**_cli_calculator_kwargs(args, override))
     batch_quench.run(
         snapshot_files=snap_files,
         n_runs=len(snap_files),
@@ -2447,13 +2440,7 @@ def _main():
         with run_lock(args.work_dir):
             calc = None
             if do_relax and not use_torchsim:
-                calc = get_calculator(
-                    **_potential_kwargs(override),
-                    model=override.get("model", args.model),
-                    device=override.get("device", args.device),
-                    model_path=override.get("model_path", args.model_path),
-                    default_dtype=override.get("default_dtype", args.default_dtype),
-                )
+                calc = get_calculator(**_cli_calculator_kwargs(args, override))
 
             files = _batch_random_unlocked(
                 composition=composition,
@@ -2516,14 +2503,7 @@ def _main():
                 sys.exit(1)
             return
 
-        calc = get_calculator(
-            **_potential_kwargs(override),
-            model=override.get("model", args.model),
-            device=override.get("device", args.device),
-            model_path=override.get("model_path", args.model_path),
-            default_dtype=override.get("default_dtype", args.default_dtype),
-
-        )
+        calc = get_calculator(**_cli_calculator_kwargs(args, override))
 
         paths = batch_optimize(
             input_dir=args.input_dir,
@@ -2541,7 +2521,6 @@ def _main():
     if args.batch_quench:
         from .pipeline import batch_quench
         from .utils import get_calculator
-        import glob
 
         snap_source = args.snapshot_dir
 
@@ -2573,11 +2552,7 @@ def _main():
         # let users feed in pre-relaxed structures from --random-gen or DFT.
         snap_files: list = extracted_files or []
         if extracted_files is None:
-            for pattern in ("*.xyz", "*.extxyz", "*.vasp", "*.cif", "POSCAR*"):
-                snap_files = sorted(glob.glob(
-                    os.path.join(snap_source, pattern)))
-                if snap_files:
-                    break
+            snap_files = first_structure_files(snap_source)
         if not snap_files:
             from .pipeline.random_gen import random_gen_dir_hint
             print(f"Error: no snapshot files found in {snap_source}/ "
@@ -2587,14 +2562,7 @@ def _main():
                 print(hint)
             sys.exit(1)
 
-        calc = get_calculator(
-            **_potential_kwargs(override),
-            model=override.get("model", args.model),
-            device=override.get("device", args.device),
-            model_path=override.get("model_path", args.model_path),
-            default_dtype=override.get("default_dtype", args.default_dtype),
-
-        )
+        calc = get_calculator(**_cli_calculator_kwargs(args, override))
 
         batch_quench.run(
             snapshot_files=snap_files,
@@ -2627,13 +2595,7 @@ def _main():
 
         # Build the calculator before changing directory, so relative
         # potential paths resolve against where the command was run.
-        calc = get_calculator(
-            **_potential_kwargs(override),
-            model=override.get("model", args.model),
-            device=override.get("device", args.device),
-            model_path=override.get("model_path", args.model_path),
-            default_dtype=override.get("default_dtype", args.default_dtype),
-        )
+        calc = get_calculator(**_cli_calculator_kwargs(args, override))
         os.makedirs(args.work_dir, exist_ok=True)
         orig_dir = os.getcwd()
         os.chdir(args.work_dir)

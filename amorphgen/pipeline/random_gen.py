@@ -1120,13 +1120,7 @@ def generate_random(
 # Batch generation
 # ==============================================================================
 
-# Map output format names to ASE format strings and file extensions
-_FORMAT_MAP = {
-    "xyz":    ("extxyz", ".xyz"),     # default: extxyz format, .xyz extension
-    "extxyz": ("extxyz", ".xyz"),     # alias
-    "vasp":   ("vasp",   ".vasp"),
-    "cif":    ("cif",    ".cif"),
-}
+from ..utils.structure_io import STRUCTURE_FORMATS as _FORMAT_MAP
 
 # Capture the real signature once so instrumentation of generate_random does
 # not change a run's identity. Explicit defaults and omitted defaults match.

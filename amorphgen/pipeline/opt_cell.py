@@ -31,12 +31,10 @@ from ..utils.relaxation import (
 )
 from ..configs import DEFAULT_CONFIG
 
-# Map --format choices to ASE write format strings and file extensions
-FORMAT_MAP = {
-    "extxyz": ("extxyz", ".xyz"),
-    "vasp":   ("vasp",   ".vasp"),
-    "cif":    ("cif",    ".cif"),
-}
+from ..utils.structure_io import STRUCTURE_FORMATS
+
+# Optimisation retains its historical accepted keys; xyz is normalized upstream.
+FORMAT_MAP = {key: STRUCTURE_FORMATS[key] for key in ("extxyz", "vasp", "cif")}
 
 
 def _log(msg, lf=None):
@@ -381,8 +379,7 @@ def _batch_optimize_torchsim(files, output_dir, cfg, **kwargs):
     batch_size = kwargs.get("batch_size") or ocfg.get("batch_size") or "auto"
     resume = bool(kwargs.get("resume", False))
     out_fmt = ocfg.get("output_format", "xyz")
-    ext = {"xyz": ".xyz", "extxyz": ".xyz", "vasp": ".vasp", "cif": ".cif"}.get(out_fmt, ".xyz")
-    ase_fmt = {"xyz": "extxyz", "extxyz": "extxyz", "vasp": "vasp", "cif": "cif"}.get(out_fmt, "extxyz")
+    ase_fmt, ext = STRUCTURE_FORMATS.get(out_fmt, STRUCTURE_FORMATS["xyz"])
     dtype = full.get("default_dtype")
     dtype = "float64" if dtype in (None, "auto") else dtype
     print(f"\n{'=' * 65}\n  AmorphGen - Batch Optimisation (torch-sim engine)\n"
