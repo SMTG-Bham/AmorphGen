@@ -918,20 +918,17 @@ def _infer_potential_model(override: dict) -> str | None:
     return None
 
 
-def _parse_minsep(spec: str) -> dict[str, float]:
-    """Parse 'In-In=2.8,In-O=1.9,O-O=2.5' -> {'In-In': 2.8, ...}.
-
-    Raises ValueError on malformed input.
-    """
-    minsep = {}
+def _parse_pair_distances(spec: str, label: str, example: str) -> dict[str, float]:
+    """Parse the shared pair-distance syntax, preserving option-specific errors."""
+    distances = {}
     for part in spec.split(","):
         part = part.strip()
         if not part:
             continue
         if "=" not in part:
             raise ValueError(
-                f"Invalid minsep entry: '{part}'. "
-                f"Expected 'A-B=distance' (e.g. 'Si-O=1.6')."
+                f"Invalid {label} entry: '{part}'. "
+                f"Expected 'A-B=distance' (e.g. 'Si-O={example}')."
             )
         pair, val_str = part.split("=", 1)
         pair = pair.strip()
@@ -943,14 +940,19 @@ def _parse_minsep(spec: str) -> dict[str, float]:
             val = float(val_str.strip())
         except ValueError:
             raise ValueError(
-                f"Invalid minsep value for '{pair}': '{val_str.strip()}'."
+                f"Invalid {label} value for '{pair}': '{val_str.strip()}'."
             )
         if val <= 0:
             raise ValueError(
-                f"Minsep for '{pair}' must be positive, got {val}."
+                f"{label.capitalize()} for '{pair}' must be positive, got {val}."
             )
-        minsep[pair] = val
-    return minsep
+        distances[pair] = val
+    return distances
+
+
+def _parse_minsep(spec: str) -> dict[str, float]:
+    """Parse 'In-In=2.8,In-O=1.9,O-O=2.5' into minimum pair distances."""
+    return _parse_pair_distances(spec, "minsep", "1.6")
 
 
 def _parse_target_cn(spec: str) -> dict[str, int]:
@@ -985,38 +987,8 @@ def _parse_target_cn(spec: str) -> dict[str, int]:
 
 
 def _parse_dmax(spec: str) -> dict[str, float]:
-    """Parse 'Si-O=2.0,Si-Si=3.2' -> {'Si-O': 2.0, ...}.
-
-    Raises ValueError on malformed input.
-    """
-    dmax = {}
-    for part in spec.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        if "=" not in part:
-            raise ValueError(
-                f"Invalid dmax entry: '{part}'. "
-                f"Expected 'A-B=distance' (e.g. 'Si-O=2.0')."
-            )
-        pair, val_str = part.split("=", 1)
-        pair = pair.strip()
-        if "-" not in pair:
-            raise ValueError(
-                f"Invalid pair format: '{pair}'. Expected 'A-B' (e.g. 'Si-O')."
-            )
-        try:
-            val = float(val_str.strip())
-        except ValueError:
-            raise ValueError(
-                f"Invalid dmax value for '{pair}': '{val_str.strip()}'."
-            )
-        if val <= 0:
-            raise ValueError(
-                f"Dmax for '{pair}' must be positive, got {val}."
-            )
-        dmax[pair] = val
-    return dmax
+    """Parse 'Si-O=2.0,Si-Si=3.2' into maximum pair distances."""
+    return _parse_pair_distances(spec, "dmax", "2.0")
 
 
 def _build_override(args, parser, explicit_only: bool = False,
