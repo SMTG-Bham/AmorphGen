@@ -118,26 +118,20 @@ def run(snapshot_files: list[str],
         n_runs = len(snapshot_files)
 
     # Select subset
-    import numpy as np
+    from ..utils.common import select_frame_indices
     n_available = len(snapshot_files)
-    if select == "uniform":
-        indices = np.linspace(0, n_available - 1, min(n_runs, n_available), dtype=int)
-    else:
-        indices = list(range(max(0, n_available - n_runs), n_available))
+    # Retain the batch API's historical non-uniform -> trailing selection.
+    indices = select_frame_indices(n_available, n_runs,
+                                   "uniform" if select == "uniform" else "last")
     selected = [snapshot_files[i] for i in indices]
 
     # Build calculator once
     if calc is None:
         from ..utils.common import resolve_device
-        device = resolve_device(global_cfg.get("device", "cuda"))
-        from ..utils.calculators import potential_kwargs
-        calc = get_calculator(
-            model=global_cfg.get("model", "mace-mpa-0"),
-            device=device,
-            model_path=global_cfg.get("model_path"),
-            default_dtype=global_cfg.get("default_dtype", "auto"),
-            **potential_kwargs(global_cfg),
-        )
+        from ..utils.calculators import calculator_kwargs
+        arguments = calculator_kwargs(global_cfg)
+        arguments["device"] = resolve_device(arguments["device"])
+        calc = get_calculator(**arguments)
 
     bar = "=" * 65
     print(f"\n{bar}")
@@ -304,7 +298,7 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
 
     Returns the list of ``final_amorphous.xyz`` paths.
     """
-    from ..utils.common import resolve_ramp
+    from ..utils.common import resolve_ramp_schedule
     from ..utils.torchsim_engine import build_model, batch_relax
     from ..utils.torchsim_md import batch_nvt, _RunWriter
     from ..utils.common import TRAJ_LOG_INTERVAL
@@ -387,65 +381,52 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
         if len(runs) > batch_size:
             print(f"  [torch-sim] chunk {c0 // batch_size + 1}/{(len(runs) + batch_size - 1) // batch_size}")
 
-        if 4 in stages:
-            c = cfg["eq_high"]; n = int(c["steps"])
-            start, done, complete = _batched_stage_checkpoint(dirs, "stage4_eq.log", "stage4_eq_traj.xyz",
-                                                              "stage4_eq.xyz", n, TRAJ_LOG_INTERVAL, resume,
-                                                              validate=validate_checkpoint)
+        for stage, section, stem, endname in (
+            (4, "eq_high", "stage4_eq", "stage4_eq.xyz"),
+            (5, "quench", "stage5_quench", "stage5_quenched.xyz"),
+            (6, "eq_low", "stage6_eq", "stage6_eq.xyz"),
+        ):
+            if stage not in stages:
+                continue
+            c = cfg[section]
+            dt = float(c.get("timestep", 0.5))
+            if stage == 5:
+                temps, spt = resolve_ramp_schedule(
+                    c["T_start"], c["T_end"], float(c.get("T_step", -100)),
+                    timestep_fs=dt, rate=c.get("rate"),
+                    steps_per_T=int(c.get("steps_per_T", 1000)))
+                temperatures = np.repeat(temps, spt)
+                n = len(temperatures)
+            else:
+                temperatures = float(c["T"])
+                n = int(c["steps"])
+            start, done, complete = _batched_stage_checkpoint(
+                dirs, stem + ".log", stem + "_traj.xyz", endname,
+                n, TRAJ_LOG_INTERVAL, resume, validate=validate_checkpoint)
             if complete:
-                print("  [Stage 4] already complete for this chunk -- skipping"); atoms = start
-            else:
-                if start is not None:
-                    print(f"  [Stage 4] resuming from step {done}/{n}"); atoms = start
-                ws = [_RunWriter(d, "stage4_eq.log", "stage4_eq_traj.xyz", append=done > 0, step_offset=done) for d in dirs]
-                print(f"  [Stage 4] NVT {c['T']} K, {n - done} steps")
-                atoms = batch_nvt(atoms, model, float(c["T"]), n - done, timestep_fs=float(c.get("timestep", 0.5)),
-                                  friction=float(c.get("friction", 0.01)), seed=seed, stage=4, tag=ci * 1_000_000 + done, run_index=job_index, writers=ws,
-                                  safety=cfg.get("safety"), repulsive_core=cfg.get("repulsive_core"))
-                for d, a in zip(dirs, atoms):
-                    write(os.path.join(d, "stage4_eq.xyz"), a, format="extxyz")
-        if 5 in stages:
-            c = cfg["quench"]; dt = float(c.get("timestep", 0.5))
-            temps = resolve_ramp(c["T_start"], c["T_end"], c.get("T_step", -100))
-            rate = c.get("rate")
-            if rate is not None:
-                spt = max(1, int(round(abs(float(c.get("T_step", -100))) / (abs(float(rate)) * dt / 1000))))
-            else:
-                spt = int(c.get("steps_per_T", 1000))
-            sched = np.repeat(temps, spt)
-            start, done, complete = _batched_stage_checkpoint(dirs, "stage5_quench.log", "stage5_quench_traj.xyz",
-                                                              "stage5_quenched.xyz", len(sched), TRAJ_LOG_INTERVAL, resume,
-                                                              validate=validate_checkpoint)
-            if complete:
-                print("  [Stage 5] already complete for this chunk -- skipping"); atoms = start
-            else:
-                if start is not None:
-                    print(f"  [Stage 5] resuming from step {done}/{len(sched)}"); atoms = start
-                ws = [_RunWriter(d, "stage5_quench.log", "stage5_quench_traj.xyz", append=done > 0, step_offset=done) for d in dirs]
-                print(f"  [Stage 5] quench {c['T_start']} -> {c['T_end']} K, {len(temps)} segments x {spt} steps"
+                print(f"  [Stage {stage}] already complete for this chunk -- skipping")
+                atoms = start
+                continue
+            if start is not None:
+                print(f"  [Stage {stage}] resuming from step {done}/{n}")
+                atoms = start
+            ws = [_RunWriter(d, stem + ".log", stem + "_traj.xyz",
+                             append=done > 0, step_offset=done) for d in dirs]
+            if stage == 5:
+                print(f"  [Stage 5] quench {c['T_start']} -> {c['T_end']} K, "
+                      f"{len(temps)} segments x {spt} steps"
                       + (f" (from step {done})" if done else ""))
-                atoms = batch_nvt(atoms, model, sched[done:], len(sched) - done, timestep_fs=dt,
-                                  friction=float(c.get("friction", 0.01)), seed=seed, stage=5, tag=ci * 1_000_000 + done, run_index=job_index, writers=ws,
-                                  safety=cfg.get("safety"), repulsive_core=cfg.get("repulsive_core"))
-                for d, a in zip(dirs, atoms):
-                    write(os.path.join(d, "stage5_quenched.xyz"), a, format="extxyz")
-        if 6 in stages:
-            c = cfg["eq_low"]; n = int(c["steps"])
-            start, done, complete = _batched_stage_checkpoint(dirs, "stage6_eq.log", "stage6_eq_traj.xyz",
-                                                              "stage6_eq.xyz", n, TRAJ_LOG_INTERVAL, resume,
-                                                              validate=validate_checkpoint)
-            if complete:
-                print("  [Stage 6] already complete for this chunk -- skipping"); atoms = start
+                temperatures = temperatures[done:]
             else:
-                if start is not None:
-                    print(f"  [Stage 6] resuming from step {done}/{n}"); atoms = start
-                ws = [_RunWriter(d, "stage6_eq.log", "stage6_eq_traj.xyz", append=done > 0, step_offset=done) for d in dirs]
-                print(f"  [Stage 6] NVT {c['T']} K, {n - done} steps")
-                atoms = batch_nvt(atoms, model, float(c["T"]), n - done, timestep_fs=float(c.get("timestep", 0.5)),
-                                  friction=float(c.get("friction", 0.01)), seed=seed, stage=6, tag=ci * 1_000_000 + done, run_index=job_index, writers=ws,
-                                  safety=cfg.get("safety"), repulsive_core=cfg.get("repulsive_core"))
-                for d, a in zip(dirs, atoms):
-                    write(os.path.join(d, "stage6_eq.xyz"), a, format="extxyz")
+                print(f"  [Stage {stage}] NVT {c['T']} K, {n - done} steps")
+            atoms = batch_nvt(
+                atoms, model, temperatures, n - done, timestep_fs=dt,
+                friction=float(c.get("friction", 0.01)), seed=seed,
+                stage=stage, tag=ci * 1_000_000 + done, run_index=job_index,
+                writers=ws, safety=cfg.get("safety"),
+                repulsive_core=cfg.get("repulsive_core"))
+            for d, a in zip(dirs, atoms):
+                write(os.path.join(d, endname), a, format="extxyz")
         if 7 in stages:
             c = cfg.get("final_opt") or cfg["opt"]
             print(f"  [Stage 7] batched relaxation, fmax {c.get('fmax', 0.01)}, cell filter {c.get('cell_filter', 'cubic')}")

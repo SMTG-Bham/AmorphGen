@@ -8,6 +8,19 @@ from math import isfinite
 from .uncertainty import summarize_structures
 
 
+def stored_info_energy(atoms):
+    """Return the first stored energy key/value without coercion or evaluation.
+
+    The key is None when no supported field exists. Keeping presence distinct
+    from a stored None lets reports, ranking and screening retain their own
+    validation and calculator-fallback policies.
+    """
+    for key in ("energy", "Energy", "potential_energy"):
+        if key in atoms.info:
+            return key, atoms.info[key]
+    return None, None
+
+
 def compute_energy_ranking(atoms_list):
     """
     Rank structures by potential energy.
@@ -18,11 +31,7 @@ def compute_energy_ranking(atoms_list):
     atoms_list = list(atoms_list)
     energies = []
     for atoms in atoms_list:
-        e = None
-        for key in ['energy', 'Energy', 'potential_energy']:
-            if key in atoms.info:
-                e = atoms.info[key]
-                break
+        _, e = stored_info_energy(atoms)
         if e is None:
             try:
                 e = atoms.get_potential_energy()

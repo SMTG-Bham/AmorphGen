@@ -6,16 +6,14 @@ import numpy as np
 from collections import Counter, defaultdict
 from ase.neighborlist import neighbor_list
 
-from .uncertainty import summarize_site_groups, summarize_structures
+from .uncertainty import (summarize_observations, summarize_site_groups,
+                          summarize_structures)
+from ..utils.common import compute_density_gcm3
 
 
 def compute_density(atoms_list: list) -> dict:
     """Compute density for each structure."""
-    densities = []
-    for atoms in atoms_list:
-        mass_g = sum(atoms.get_masses()) / 6.022e23
-        vol_cm3 = atoms.get_volume() * 1e-24
-        densities.append(mass_g / vol_cm3)
+    densities = [compute_density_gcm3(atoms) for atoms in atoms_list]
     uncertainty = summarize_structures(densities)
     return {
         "values": densities,
@@ -169,17 +167,7 @@ def compute_bond_distances(atoms_list, max_cutoff, get_cutoff_fn,
     for key, groups in sorted(dist_data.items()):
         ds = np.array([d for group in groups for d in group])
         per_structure = [float(np.mean(group)) if group else None for group in groups]
-        result[key] = {
-            "mean": float(np.mean(ds)),
-            "std": float(np.std(ds)),
-            "pooled_mean": float(np.mean(ds)),
-            "pooled_std": float(np.std(ds)),
-            "per_structure": per_structure,
-            "uncertainty": summarize_structures(per_structure),
-            "min": float(np.min(ds)),
-            "max": float(np.max(ds)),
-            "count": len(ds),
-        }
+        result[key] = summarize_observations(ds, per_structure)
     return result
 
 
@@ -256,17 +244,7 @@ def compute_bond_angle_stats(angle_data: dict) -> dict:
         per_structure = ([float(np.mean(group[key])) if group.get(key) else None
                           for group in groups] if groups is not None
                          else [float(np.mean(angles))])
-        result[key] = {
-            "mean": float(np.mean(angles)),
-            "std": float(np.std(angles)),
-            "pooled_mean": float(np.mean(angles)),
-            "pooled_std": float(np.std(angles)),
-            "per_structure": per_structure,
-            "uncertainty": summarize_structures(per_structure),
-            "min": float(np.min(angles)),
-            "max": float(np.max(angles)),
-            "count": len(angles),
-        }
+        result[key] = summarize_observations(angles, per_structure)
     return result
 
 

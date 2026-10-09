@@ -247,6 +247,7 @@ notes/sq_xrd_credits
 
 contributing
 changelog
+notes/consolidation-68
 ```
 
 ## Indices and tables

@@ -28,6 +28,8 @@ from ase.calculators.calculator import Calculator, all_changes
 from ase.neighborlist import neighbor_list
 from ase.stress import full_3x3_to_voigt_6_stress
 
+from ..configs._defaults import DEFAULT_REPULSIVE_CORE_CONFIG
+
 
 def validate_repulsive_core_config(config=None):
     """Return validated defaults for the ``repulsive_core`` config block."""
@@ -35,10 +37,10 @@ def validate_repulsive_core_config(config=None):
         config = {}
     if not isinstance(config, Mapping):
         raise ValueError("repulsive_core must be a mapping")
-    unknown = set(config) - {"enabled", "cutoff", "strength"}
+    unknown = set(config) - set(DEFAULT_REPULSIVE_CORE_CONFIG)
     if unknown:
         raise ValueError(f"Unknown repulsive_core setting(s): {sorted(unknown)}")
-    result = {"enabled": False, "cutoff": 1.0, "strength": 1.0, **config}
+    result = {**DEFAULT_REPULSIVE_CORE_CONFIG, **config}
     if not isinstance(result["enabled"], bool):
         raise ValueError("repulsive_core.enabled must be true or false")
     for key in ("cutoff", "strength"):

@@ -140,6 +140,23 @@ def potential_kwargs(cfg) -> dict:
     return {key: cfg[key] for key in POTENTIAL_PARAM_KEYS if cfg and cfg.get(key)}
 
 
+def calculator_kwargs(cfg, *, defaults=None) -> dict:
+    """Translate resolved settings into calculator factory arguments.
+
+    A present value (including None) overrides a default. Backend loading,
+    device resolution, caching and repulsive-core wrapping remain with their
+    existing owners. CLI callers can supply argument-parser defaults.
+    """
+    fallback = {
+        "model": "mace-mpa-0", "device": "cuda",
+        "model_path": None, "default_dtype": "auto",
+    }
+    if defaults is not None:
+        fallback.update(defaults)
+    return {**{key: cfg.get(key, value) for key, value in fallback.items()},
+            **potential_kwargs(cfg)}
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Human-readable model descriptions (for --list-models)
 # ═════════════════════════════════════════════════════════════════════════════

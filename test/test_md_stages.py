@@ -209,7 +209,7 @@ class TestRateConfig:
                                        stage, rate, timestep, expected_steps):
         """The stage uses rate magnitude and timestep, overriding steps_per_T."""
         from unittest.mock import Mock, call
-        from amorphgen.pipeline import melt_cell, quench
+        from amorphgen.pipeline import melt_cell, quench, md_ramp
 
         module = melt_cell if stage == "melt" else quench
         temperatures = [300, 400, 500, 600]
@@ -222,8 +222,8 @@ class TestRateConfig:
             "steps_per_T": 99999,
         }})
         dyn = Mock(spec=["set_temperature", "run"])
-        monkeypatch.setattr(module, "build_md_dynamics", Mock(return_value=dyn))
-        monkeypatch.setattr(module, "attach_outputs",
+        monkeypatch.setattr(md_ramp, "build_md_dynamics", Mock(return_value=dyn))
+        monkeypatch.setattr(md_ramp, "attach_outputs",
                             Mock(return_value=(Mock(), Mock())))
 
         module.run(cu_supercell, cfg_override=cfg, calc=emt_calc)

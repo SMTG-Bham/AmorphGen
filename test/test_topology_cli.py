@@ -2,21 +2,16 @@
 
 import csv
 import json
-import sys
 
 import pytest
 import yaml
 from ase.build import bulk
 from ase.io import write
 
+from amorphgen_test_helpers import run_cli
+
 from amorphgen.analysis import StructureAnalyser
-from amorphgen.cli import main
 from amorphgen.configs.yaml_config import _validate_config
-
-
-def run_cli(monkeypatch, arguments):
-    monkeypatch.setattr(sys, "argv", ["amorphgen", *map(str, arguments)])
-    main()
 
 
 @pytest.mark.parametrize("use_cli", [False, True])

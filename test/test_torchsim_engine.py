@@ -2,6 +2,7 @@
 
 Skipped when torch-sim is not installed (pip install "amorphgen[torchsim]").
 """
+
 import os
 import sys
 
@@ -10,16 +11,12 @@ import pytest
 from ase.build import bulk
 from ase.io import write, read
 
+from amorphgen_test_helpers import rattled_cu as _rattled_cu
+
 ts = pytest.importorskip("torch_sim")
 
 from amorphgen.utils.torchsim_engine import build_model, batch_relax  # noqa: E402
 from amorphgen.pipeline.opt_cell import batch_optimize  # noqa: E402
-
-
-def _rattled_cu(k, scale=1.05):
-    a = bulk("Cu", "fcc", a=3.6, cubic=True).repeat((2, 2, 2))
-    a.rattle(0.15, seed=k); a.set_cell(a.cell * scale, scale_atoms=True)
-    return a
 
 
 LJ = {"params": {"Cu-Cu": {"sigma": 2.3, "epsilon": 0.1}}, "cutoff": 6.0}
@@ -42,7 +39,6 @@ class TestEngine:
         out = batch_relax(ats, model, fmax=0.05, max_steps=300, cell_filter="none", log=lambda *a: None)
         assert len(out) == len(ats)
         assert all(np.allclose(o.cell[:], a.cell[:]) for o, a in zip(out, ats))
-
 
 
 class TestBatchOptimizeEngine:
@@ -116,7 +112,6 @@ class TestChunkingAndResume:
         text = capsys.readouterr().out
         assert "[Resume] 4 already relaxed, 1 to do" in text
         assert len(out) == 5 and (tmp_path / "o" / "s3_opt.xyz").exists()
-
 
 
 # ─── phase 2: batched MD ───────────────────────────────────────────────────

@@ -10,6 +10,7 @@ import re
 
 import numpy as np
 
+from ._serialization import numpy_json_default as _json_default
 
 def _number(value):
     return "unavailable" if value is None else f"{value:.6g}"
@@ -72,14 +73,6 @@ def format_convergence_report(report):
     for assumption in report.get("assumptions", []):
         lines.append(f"Assumption: {assumption}")
     return "\n".join(lines) + "\n"
-
-
-def _json_default(value):
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, np.generic):
-        return value.item()
-    raise TypeError(f"Cannot serialize {type(value).__name__}")
 
 
 def _projection(report, row):

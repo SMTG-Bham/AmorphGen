@@ -2,6 +2,8 @@
 # only test/test*.py from the suite, which leaves out conftest.py (the fixtures
 # and the --run-mace gate), so the tests of an unpacked sdist would fail.
 recursive-include test *.py
+include Tutorials/analysis_helpers.py
+recursive-include Tutorials *.ipynb
 # Offline experimental benchmarks must also run from an unpacked sdist.
 recursive-include test/data *.xyz *.md
 # The Slurm regression tests exercise these workflow/script examples.

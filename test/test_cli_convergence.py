@@ -1,20 +1,16 @@
 """CLI declarations, YAML precedence, and convergence report exports."""
 
 import json
-import sys
 
 import pytest
 import yaml
 from ase import Atoms
 from ase.io import write
 
-from amorphgen.cli import _convergence_options, _get_parser, _requires_calculator, main
+from amorphgen_test_helpers import run_cli
+
+from amorphgen.cli import _convergence_options, _get_parser, _requires_calculator
 from amorphgen.configs import load_yaml_config
-
-
-def run_cli(monkeypatch, arguments):
-    monkeypatch.setattr(sys, "argv", ["amorphgen", *map(str, arguments)])
-    main()
 
 
 @pytest.fixture

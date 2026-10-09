@@ -297,13 +297,7 @@ def block_average_test(source, n_blocks: int = 4,
         Keys: block_means, overall_mean, overall_std, sem,
         max_deviation, threshold, is_equilibrated.
     """
-    if isinstance(source, str) and source.endswith('.log'):
-        log_data = parse_md_log(source)
-        if n_atoms is None:
-            raise ValueError("n_atoms required for .log file")
-        e_per_atom = log_data['Epot_eV'] / n_atoms
-    else:
-        _, e_per_atom = extract_energies(source, n_atoms)
+    _, e_per_atom = extract_energies(source, n_atoms)
 
     n_discard = int(len(e_per_atom) * discard_fraction)
     e_prod = e_per_atom[n_discard:]
@@ -943,25 +937,10 @@ def convergence_report(source, timestep_fs: float = DEFAULT_TIMESTEP_FS,
     _save_or_store(fig_b, "fig_blocks", "blocks")
 
     # --- Temperature ---
-    if is_log:
-        fig_t, ax_t = plt.subplots(figsize=(10, 3))
-        ax_t.plot(log_data['time_ps'], log_data['T_K'], alpha=0.6, lw=0.8,
-                  color="orangered")
-        window = max(1, int(0.5 * 1000 / (timestep_fs * frame_stride)))
-        t_avg = running_average(log_data['T_K'], window)
-        ax_t.plot(log_data['time_ps'], t_avg, color="darkred", lw=1.5,
-                  label="Running avg (0.5 ps)")
-        if T_target:
-            ax_t.axhline(T_target, ls="--", color="black", lw=1,
-                         label=f"Target: {T_target} K")
-        ax_t.set_xlabel("Time (ps)")
-        ax_t.set_ylabel("Temperature (K)")
-        ax_t.set_title("Temperature stability")
-        ax_t.legend(fontsize=9)
-        fig_t.tight_layout()
-    else:
-        fig_t = plot_temperature(frames, timestep_fs=timestep_fs,
-                                 T_target=T_target, frame_stride=frame_stride)
+    fig_t = plot_temperature(source if is_log else frames,
+                             timestep_fs=timestep_fs,
+                             T_target=(T_target or None) if is_log else T_target,
+                             frame_stride=frame_stride)
     _save_or_store(fig_t, "fig_temperature", "temperature")
 
     # --- MSD and RDF — only from trajectory, not log ---

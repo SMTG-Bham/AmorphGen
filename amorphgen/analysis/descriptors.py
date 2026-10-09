@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ._serialization import numpy_json_default
 
 def _format_descriptor(name, result):
     """Return a compact, unit-labelled report for a computed descriptor."""
@@ -141,11 +142,10 @@ def format_descriptor(name, result):
 
 
 def _json_default(value):
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, np.generic):
-        return value.item()
-    raise TypeError(f"Cannot encode {type(value).__name__}")
+    try:
+        return numpy_json_default(value)
+    except TypeError:
+        raise TypeError(f"Cannot encode {type(value).__name__}") from None
 
 
 def save_descriptor(name, result, output_dir, *, dpi=300, save_pdf=False,

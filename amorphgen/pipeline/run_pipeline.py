@@ -38,7 +38,6 @@ import os
 import time
 import platform
 import sys
-import hashlib
 from copy import deepcopy
 from datetime import datetime
 
@@ -46,10 +45,11 @@ from ase.io import read
 
 from . import opt_cell, melt_cell, equilibrate, quench, final_opt
 from ..utils import get_calculator, merge_config
-from ..utils.calculators import potential_kwargs
+from ..utils.calculators import calculator_kwargs, potential_kwargs
 from ..configs import DEFAULT_CONFIG
 from .manifest import RunManifest, _json_value
 from ..utils.run_lock import run_lock
+from ..utils.persistence import sha256_file
 
 
 def _calculator_parameters(calc, seen=None):
@@ -177,15 +177,9 @@ class MeltQuenchPipeline:
         calculator_config = self._calculator_config()
         if self._calc is None or not self.share_calc or self._calc_config != calculator_config:
             from ..utils.common import resolve_device
-            device = resolve_device(self.cfg.get("device", "cuda"))
-
-            self._calc = get_calculator(
-                model=self.cfg.get("model", "mace-mpa-0"),
-                device=device,
-                model_path=self.cfg.get("model_path"),
-                default_dtype=self.cfg.get("default_dtype", "auto"),
-                **potential_kwargs(self.cfg),
-            )
+            arguments = calculator_kwargs(self.cfg)
+            arguments["device"] = resolve_device(arguments["device"])
+            self._calc = get_calculator(**arguments)
             from ..utils.run_provenance import calculator_provenance
             # Keep the identity of the weights actually loaded, even if the
             # checkpoint file is replaced before this calculator is reused.
@@ -284,11 +278,7 @@ class MeltQuenchPipeline:
         input_path = os.path.abspath(input_file)
         digest = None
         if os.path.isfile(input_path):
-            hasher = hashlib.sha256()
-            with open(input_path, "rb") as stream:
-                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                    hasher.update(chunk)
-            digest = hasher.hexdigest()
+            digest = sha256_file(input_path)
         provenance = calculator_provenance(
             self.cfg, self._injected_calc, injected=self._injected_calc is not None,
         )

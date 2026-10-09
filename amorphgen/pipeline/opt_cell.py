@@ -14,12 +14,10 @@ Supported optimisers (set via cfg["opt"]["optimizer"]):
 
 from __future__ import annotations
 
-import importlib
 import os
 from copy import deepcopy
 
 from ase.io import read, write
-from ase.filters import UnitCellFilter
 from ase.geometry import cell_to_cellpar
 
 from ..utils import get_calculator, merge_config
@@ -29,32 +27,14 @@ from ..utils.repulsion import with_repulsive_core
 from ..utils.preemption import stop_if_requested
 from ..utils.relaxation import (
     clear_relaxation_metadata, record_relaxation_metadata, write_relaxation_metadata,
+    OPTIMIZERS, get_optimizer_class as _get_optimizer, build_cell_filter,
 )
 from ..configs import DEFAULT_CONFIG
 
-OPTIMIZERS = {
-    "LBFGS":          ("ase.optimize", "LBFGS"),
-    "FIRE":           ("ase.optimize", "FIRE"),
-    "BFGSLineSearch": ("ase.optimize", "BFGSLineSearch"),
-    "BFGS":           ("ase.optimize", "BFGS"),
-    "MDMin":          ("ase.optimize", "MDMin"),
-}
+from ..utils.structure_io import STRUCTURE_FORMATS, write_sorted_vasp
 
-# Map --format choices to ASE write format strings and file extensions
-FORMAT_MAP = {
-    "extxyz": ("extxyz", ".xyz"),
-    "vasp":   ("vasp",   ".vasp"),
-    "cif":    ("cif",    ".cif"),
-}
-
-
-def _get_optimizer(name: str):
-    """Import and return an ASE optimizer class by name."""
-    if name not in OPTIMIZERS:
-        raise ValueError(f"Unknown optimizer '{name}'. Choose from: {', '.join(OPTIMIZERS)}")
-    module_path, cls_name = OPTIMIZERS[name]
-    module = importlib.import_module(module_path)
-    return getattr(module, cls_name)
+# Optimisation retains its historical accepted keys; xyz is normalized upstream.
+FORMAT_MAP = {key: STRUCTURE_FORMATS[key] for key in ("extxyz", "vasp", "cif")}
 
 
 def _log(msg, lf=None):
@@ -102,15 +82,10 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt",
 
     if calc is None:
         from ..utils.common import resolve_device
-        device = resolve_device(global_cfg.get("device", "cuda"))
-        from ..utils.calculators import potential_kwargs
-        calc = get_calculator(
-            model=global_cfg.get("model", "mace-mpa-0"),
-            device=device,
-            model_path=global_cfg.get("model_path"),
-            default_dtype=global_cfg.get("default_dtype", "auto"),
-            **potential_kwargs(global_cfg),
-        )
+        from ..utils.calculators import calculator_kwargs
+        arguments = calculator_kwargs(global_cfg)
+        arguments["device"] = resolve_device(arguments["device"])
+        calc = get_calculator(**arguments)
     calc = with_repulsive_core(calc, global_cfg.get("repulsive_core"))
     atoms.calc = calc
     clear_relaxation_metadata(atoms)
@@ -162,26 +137,9 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt",
             from ..utils.common import require_stress
             require_stress(calc, f"Cell-filter optimisation (cell_filter={filter_name!r})")
 
-        if filter_name == "none" or filter_name is None:
-            # Positions only — cell stays fixed
-            target = atoms
-        elif filter_name == "cubic":
-            # Keep cubic shape (a=b=c, 90 deg) but allow volume to change
-            from ..utils.common import cubic_cell_filter
-            target = cubic_cell_filter(atoms)
+        target = build_cell_filter(atoms, filter_name)
+        if filter_name == "cubic":
             _log("  [cell] Cubic: isotropic volume only, shape fixed", lf)
-        elif filter_name == "ExpCellFilter":
-            from ase.filters import ExpCellFilter
-            target = ExpCellFilter(atoms)
-        elif filter_name == "StrainFilter":
-            from ase.filters import StrainFilter
-            target = StrainFilter(atoms)
-        elif filter_name == "UnitCellFilter":
-            target = UnitCellFilter(atoms)
-        else:
-            # Default: FrechetCellFilter (better convergence for non-cubic)
-            from ase.filters import FrechetCellFilter
-            target = FrechetCellFilter(atoms)
 
         with OptimizerClass(target, logfile=None, trajectory=trajfile) as optimizer:
 
@@ -265,8 +223,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt",
         # Don't overwrite if we already wrote this extension
         if out_fmt not in (out_cif, out_xyz):
             if fmt_str == "vasp":
-                sorted_atoms = atoms[atoms.numbers.argsort()]
-                write(out_fmt, sorted_atoms, format=fmt_str, sort=True)
+                write_sorted_vasp(out_fmt, atoms)
             else:
                 write(out_fmt, atoms, format=fmt_str)
             write_relaxation_metadata(out_fmt, atoms)
@@ -416,8 +373,7 @@ def _batch_optimize_torchsim(files, output_dir, cfg, **kwargs):
     batch_size = kwargs.get("batch_size") or ocfg.get("batch_size") or "auto"
     resume = bool(kwargs.get("resume", False))
     out_fmt = ocfg.get("output_format", "xyz")
-    ext = {"xyz": ".xyz", "extxyz": ".xyz", "vasp": ".vasp", "cif": ".cif"}.get(out_fmt, ".xyz")
-    ase_fmt = {"xyz": "extxyz", "extxyz": "extxyz", "vasp": "vasp", "cif": "cif"}.get(out_fmt, "extxyz")
+    ase_fmt, ext = STRUCTURE_FORMATS.get(out_fmt, STRUCTURE_FORMATS["xyz"])
     dtype = full.get("default_dtype")
     dtype = "float64" if dtype in (None, "auto") else dtype
     print(f"\n{'=' * 65}\n  AmorphGen - Batch Optimisation (torch-sim engine)\n"

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import warnings
 import numpy as np
-from ase.neighborlist import neighbor_list
+
+from ._rdf_kernel import raw_frame_rdfs
 
 
 def auto_cutoff_minsep(atoms_list: list) -> dict[str, float]:
@@ -112,6 +113,9 @@ def auto_cutoff_rdf(atoms_list: list, rmax: float = 6.0,
     unique = sorted(set(atoms_list[0].get_chemical_symbols()))
     dr = rmax / nbins
     r_centres = np.linspace(dr / 2, rmax - dr / 2, nbins)
+    # Retain the cutoff path's scalar shell-volume arithmetic: tiny changes
+    # to equal-height bins can affect first-minimum plateau detection.
+    shell_volumes = np.array([4 * np.pi * r**2 * dr for r in r_centres])
 
     pairs = []
     for i, s1 in enumerate(unique):
@@ -122,39 +126,12 @@ def auto_cutoff_rdf(atoms_list: list, rmax: float = 6.0,
     n_frames = len(atoms_list)
 
     for atoms in atoms_list:
-        idx_i, idx_j, dists = neighbor_list('ijd', atoms, cutoff=rmax)
-        syms = np.array(atoms.get_chemical_symbols())
-        vol = atoms.get_volume()
-
-        for pair_key in pairs:
-            p1, p2 = pair_key.split("-")
-            n_source = int(np.sum(syms == p1))
-            n_target = int(np.sum(syms == p2))
-            if n_source == 0 or n_target == 0:
-                continue
-
-            if p1 == p2:
-                rho_target = (n_target - 1) / vol
-            else:
-                rho_target = n_target / vol
-
-            mask = (syms[idx_i] == p1) & (syms[idx_j] == p2)
-            pair_dists = dists[mask]
-            if len(pair_dists) == 0:
-                continue
-
-            in_range = (pair_dists > 0) & (pair_dists < rmax)
-            if not np.any(in_range):
-                continue
-            hist, _ = np.histogram(pair_dists[in_range], bins=nbins,
-                                   range=(0, rmax))
-
-            for i_bin in range(nbins):
-                r = r_centres[i_bin]
-                shell_vol = 4 * np.pi * r**2 * dr
-                if shell_vol > 0 and rho_target > 0:
-                    g_r_accum[pair_key][i_bin] += (
-                        hist[i_bin] / (n_source * rho_target * shell_vol))
+        curves = raw_frame_rdfs(atoms, pairs, rmax, shell_volumes)
+        for pair_key, curve in curves.items():
+            # Historically cutoff fitting includes every frame in its
+            # denominator, even when a pair is absent or unnormalizable.
+            if curve is not None:
+                g_r_accum[pair_key] += curve
 
     for key in g_r_accum:
         g_r_accum[key] /= n_frames

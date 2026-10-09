@@ -17,15 +17,7 @@ from ase.geometry import minkowski_reduce
 from ase.neighborlist import neighbor_list
 
 from .common import DivergenceError
-
-DEFAULT_SAFETY_CONFIG = {
-    "min_distance": 0.5,
-    "max_energy_jump_per_atom": 10.0,
-    "max_temperature": 100000.0,
-    "min_volume_ratio": 0.2,
-    "max_volume_ratio": 5.0,
-    "reference": None,
-}
+from ..configs._defaults import DEFAULT_SAFETY_CONFIG
 
 _REFERENCE_DEFAULTS = {
     "interval": 100,
