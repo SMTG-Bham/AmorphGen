@@ -58,7 +58,7 @@ SHANNON_IONIC_RADII = {
     "Al": {3: {4: 0.39, 6: 0.535}},
     "Ga": {3: {4: 0.47, 6: 0.620}},
     "In": {3: {4: 0.62, 6: 0.800}},
-    "Tl": {3: {6: 0.885}},
+    "Tl": {1: {6: 1.500}, 3: {6: 0.885}},
     "Si": {4: {4: 0.26, 6: 0.400}},
     "Ge": {4: {4: 0.39, 6: 0.530}},
     "Sn": {2: {6: 0.930}, 4: {4: 0.55, 6: 0.690}},
@@ -287,7 +287,10 @@ def _solve_oxidation_states(comp_items: tuple) -> dict | None:
     def penalty(sol):
         viol = sum(1 for s, o in sol.items()
                    if s in _DOMINANT_OS and o != _DOMINANT_OS[s])
-        return (viol, sum(sol.values()))
+        # an oxoanion centre takes its top state where it can: Ag2SO4 is
+        # Ag+ and a sulfate, not Ag2+ and a sulfite
+        centre = sum(o for s, o in sol.items() if s in NONMETALS)
+        return (viol, -centre, sum(sol.values()))
 
     solutions.sort(key=penalty)
     if penalty(solutions[0]) == penalty(solutions[1]):
@@ -386,7 +389,15 @@ def cation_nonmetals(composition) -> frozenset:
                      if x not in anions and x != e)
         as_cation = supply + _max_positive_os(e) * counts[e] - demand
         as_anion = supply - demand + charge * counts[e]
-        if abs(as_cation) >= abs(as_anion):
+        charges = {a: ANION_CHARGES[a] for a in anions}
+        cation_balances = _balances(counts, charges)
+        anion_balances = _balances(counts, {**charges, e: charge})
+        if cation_balances != anion_balances:
+            # only one role balances exactly: the P of Ag3PO4 and Tl3PO4,
+            # which the highest states (Ag+3, Tl+3) leave an anion
+            if anion_balances:
+                cations.discard(e)
+        elif abs(as_cation) >= abs(as_anion):
             cations.discard(e)
     return frozenset(cations)
 
@@ -834,6 +845,47 @@ def _cation_contact_factor(anion_cn: float) -> float:
     return 1.0
 
 
+# Anions that bond to themselves when the cations cannot reduce them all to
+# their nominal charge (Zintl-Klemm): the anion excess, 1 - supply / demand,
+# above which the floor becomes the X-X bond. O needs more: a table cation
+# below its real state (Ni2+ for the Ni3+ of LiNiO2, 0.25) must not read as
+# a peroxide (Li2O2, 0.5).
+_HOMOPOLAR_EXCESS = {"S": 0.10, "Se": 0.10, "P": 0.10, "C": 0.10, "N": 0.10,
+                     "I": 0.10, "O": 0.40}
+# ... and the scale on twice the Cordero radius: single bonds (S-S, Se-Se,
+# P-P, I-I) at 0.80, the multiple bonds of C2 2-, N3 - and O2 - at 0.70.
+_HOMOPOLAR_SCALE = {"C": 0.70, "N": 0.70, "O": 0.70}
+_ANION_VALENCE = {**ANION_CHARGES, "C": -4, "P": -3}
+# lone-pair cations of the chalcogenide glasses supply 3, not their top 5
+_LONE_PAIR_VALENCE = {"As": 3, "Sb": 3, "Bi": 3}
+# H-H in a metal hydride stays above ~2.1 A (Switendick), the geminal H of
+# BH4 - or ReH9 2- above 1.9 A: 0.8 of the first
+_HYDRIDE_HH_MINSEP = 0.8 * 2.1
+
+
+def _homopolar_anion(counts: dict, anion_syms) -> str | None:
+    """The anion that must bond to itself in this compound, or None.
+
+    The cations, at their top states (3 for As, Sb, Bi), cannot reduce every
+    anion to its nominal charge, so the least electronegative anion forms
+    X-X bonds: S2 2- in FeS2, Se chains in Ge20Se80 and S-rich As-S, C2 2- in
+    CaC2 and YCI, N3 - in NaN3, O2 2- in Li2O2, I3 - in CsI3. Where other
+    anions are present only S, Se, P or C qualify; an O-rich doped cell is
+    not a peroxide.
+    """
+    if not anion_syms or set(counts) <= set(anion_syms):
+        return None                     # a pure element, not a compound
+    supply = sum(_LONE_PAIR_VALENCE.get(e, _max_positive_os(e)) * n
+                 for e, n in counts.items() if e not in anion_syms)
+    demand = sum(-_ANION_VALENCE.get(a, -2) * counts[a] for a in anion_syms)
+    x = min(anion_syms, key=lambda a: PAULING_EN.get(a, 4.0))
+    if x not in _HOMOPOLAR_EXCESS or demand <= 0:
+        return None
+    if len(anion_syms) > 1 and x not in ("S", "Se", "P", "C"):
+        return None
+    return x if 1 - supply / demand > _HOMOPOLAR_EXCESS[x] else None
+
+
 # ==============================================================================
 # Bonding classification
 # ==============================================================================
@@ -1017,6 +1069,13 @@ def default_minsep(symbols: list[str], scale: float = 0.85,
     Li-Li 1.74 A in Li3N, against 2.11 A in the crystal. Beyond 12 (Fe3C,
     Ni80P20) the metals touch, at their metallic contact.
 
+    Same-element anions are kept at packing distance unless the cations
+    cannot reduce them all to their nominal charge; then the least
+    electronegative one gets its X-X bond (S-S in FeS2, Se-Se in Ge20Se80,
+    C-C in CaC2: :func:`_homopolar_anion`). Two H+ may share an O (water),
+    hydride H- stays 1.68 A from H-, a covalent metal-P bond takes covalent
+    radii, and the O of a nitrate or carbonate keep their triangle edge.
+
     A hydrogenated network (a-Si:H, a-C:H) has no anions: see
     :func:`_hydrogenated_network_minsep`.
 
@@ -1058,6 +1117,7 @@ def default_minsep(symbols: list[str], scale: float = 0.85,
         anion_cn = (sum(gate_cn.get(s, 6) * n for s, n in counts.items()
                         if s not in anion_syms)
                     / sum(counts[s] for s in anion_syms))
+    homopolar = _homopolar_anion(counts, anion_syms)
 
     def _cn_radius(sym):
         if sym in centres:
@@ -1077,6 +1137,17 @@ def default_minsep(symbols: list[str], scale: float = 0.85,
             bond_type = classify_bond(s1, s2, counts)
             sf = SCALE_FACTORS.get(bond_type, scale)
 
+            if s1 == s2 and s1 == homopolar:
+                # the X-X bond of the excess anions, not anion packing
+                r = covalent_radii[atomic_numbers[s1]]
+                sf_x = _HOMOPOLAR_SCALE.get(s1, SCALE_FACTORS["covalent"])
+                minsep[key] = float(2 * r * sf_x)
+                logger.info(
+                    "  minsep %s = %.2f A  (anion-excess X-X bond: Cordero "
+                    "%.3f, scale=%.2f)", key, minsep[key], r, sf_x
+                )
+                continue
+
             if bond_type == "cation-cation":
                 # A nonmetal cation meets the other cations only across an
                 # anion. With another cation it can share a polyhedron edge
@@ -1087,7 +1158,13 @@ def default_minsep(symbols: list[str], scale: float = 0.85,
                 # placement cannot make one and compute_dimers still flags it.
                 sf = SCALE_FACTORS["metallic"]
                 r_anion = max((_cn_radius(a) or 0.0) for a in anion_syms)
-                if s1 == s2:
+                if s1 == s2 == "H":
+                    # except two H, which share the O of a water molecule
+                    # at 104.5 degrees (H-H 1.52 A): the right-angle contact
+                    # across the smallest anion, 1.23 A
+                    r_small = min((_cn_radius(a) or 9.0) for a in anion_syms)
+                    d_cc = 2**0.5 * (_cn_radius(s1) + r_small) * sf
+                elif s1 == s2:
                     d_cc = 2 * (_cn_radius(s1) + r_anion) * sf
                 else:
                     d_geom = [2**0.5 * (r + r_anion) * sf
@@ -1252,6 +1329,22 @@ def default_minsep(symbols: list[str], scale: float = 0.85,
                     )
                     continue
 
+                if "P" in (s1, s2) and "P" in anion_syms and (
+                        s1 not in NONMETALS or s2 not in NONMETALS):
+                    # A metal-P bond of small dchi (Ni2P, CoP, Ni80P20) is
+                    # covalent: the 2.12 A P3- radius put Ni-P at 2.25 A
+                    # against 2.2-2.3 A. Metallic + Cordero radii, as for a
+                    # metalloid (Ni-P 1.85 A).
+                    m = s2 if s1 == "P" else s1
+                    r_m = get_metallic_radius(m) or covalent_radii[atomic_numbers[m]]
+                    r_p = covalent_radii[atomic_numbers["P"]]
+                    minsep[key] = float((r_m + r_p) * sf)
+                    logger.info(
+                        "  minsep %s = %.2f A  (covalent M-P: %.3f + Cordero "
+                        "%.3f, scale=%.2f)", key, minsep[key], r_m, r_p, sf
+                    )
+                    continue
+
                 r1 = _cn_radius(s1)
                 r2 = _cn_radius(s2)
                 if r1 is not None and r2 is not None:
@@ -1263,6 +1356,21 @@ def default_minsep(symbols: list[str], scale: float = 0.85,
                         sf_anion = SCALE_FACTORS.get("anion_packing", 0.80)
                         label = "small anion"
                     minsep[key] = min((r1 + r2) * sf_anion, _MAX_ANION_MINSEP)
+                    if s1 == s2:
+                        # Two O of one nitrate or carbonate sit an edge of
+                        # its triangle apart, sqrt(3) x the bond: 2.17 and
+                        # 2.22 A, just under the packing floor. Keep them at
+                        # 0.85 of that edge where packing would exclude it.
+                        for c in centres:
+                            if _nonmetal_cation_cn(c, counts) != 3:
+                                continue
+                            edge = 3**0.5 * (_cn_radius(c) + r1)
+                            if 0.95 * edge < minsep[key]:
+                                minsep[key] = 0.85 * edge
+                                label = f"{c}{s1}3 triangle-edge"
+                    if s1 == s2 == "H" and "H" in anion_syms:
+                        minsep[key] = min(minsep[key], _HYDRIDE_HH_MINSEP)
+                        label = "Switendick hydride"
                     logger.info(
                         "  minsep %s = %.2f A  (%s packing: Shannon "
                         "%.3f + %.3f, scale=%.2f)",
@@ -1740,6 +1848,26 @@ def _max_positive_os(sym: str) -> int:
     return max(states) if states else 4
 
 
+def _balances(counts: dict, charges: dict) -> bool:
+    """Whether the elements of ``counts`` outside ``charges`` (anion: charge)
+    can supply exactly the anions' charge, each element in one of its
+    tabulated positive states. One state per element, as in
+    :func:`_solve_oxidation_states`: with mixed valence, 16 Cr at +4 and +6
+    would balance CrOOH as a hydride."""
+    demand = sum(-q * counts[a] for a, q in charges.items())
+    reachable = {0}
+    for e, n in counts.items():
+        if e in charges:
+            continue
+        states = ({k for k in SHANNON_IONIC_RADII.get(e, {}) if k > 0}
+                  or {_max_positive_os(e)})
+        reachable = {r + n * k for r in reachable for k in states
+                     if r + n * k <= demand}
+        if not reachable:
+            return False
+    return demand in reachable
+
+
 def anion_elements(composition) -> set:
     """Which elements act as ANIONS in this compound, decided by charge balance.
 
@@ -1786,12 +1914,21 @@ def anion_elements(composition) -> set:
     # The most electronegative element is always an anion, so it is never a
     # candidate: an off-stoichiometry cell (a random Ga16Zn16O48 composition, a
     # defective model) must not end up with no anion at all.
+    def balances(anion_set):
+        return _balances(counts, {a: ANION_CHARGES[a] for a in anion_set})
+
     for candidate in sorted(anions, key=lambda e: PAULING_EN.get(e, 2.0))[:-1]:
         before = imbalance(anions)
-        if before >= 0:
+        if before >= 0 and balances(anions):
             break                       # the cations already cover the anions
         trial = anions - {candidate}
-        if abs(imbalance(trial)) < abs(before):
+        if before < 0 and abs(imbalance(trial)) < abs(before):
+            anions = trial
+        elif not balances(anions) and balances(trial):
+            # The highest states overstate what Ag, Tl, Pb, Mn or Cr supply:
+            # Ag2SO4 counts Ag+3 and ties (-4 against +4), CrOOH covers O and
+            # H with Cr+6. Only the sulfate (2 Ag+ + S6+) and the hydroxide
+            # (Cr3+ + H+) balance, so S and H are the cations.
             anions = trial
     return anions
 

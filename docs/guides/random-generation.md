@@ -22,6 +22,11 @@ For each element pair, the bond type is classified and the appropriate radii are
 | Large anion (Cl-Cl) | Shannon ionic | 0.70 | Cl-Cl: (1.81+1.81)*0.70 = 2.53 |
 | Nonmetal cation to anion (P-O, S-O, C-O) | Shannon cation radius (top state, lowest CN) | 0.80 | P-O: (0.17+1.40)*0.80 = 1.26 |
 | Nonmetal cation to cation | sqrt(2)*d(X-O), or 2*d(X-O) for the same element | 0.85, cap 2.80 | P-P: 2*(0.17+1.40)*0.85 = 2.67 |
+| Two H+ (water, hydroxides, acids) | sqrt(2)*d(H-O) | 0.85 | H-H: 1.414*(-0.38+1.40)*0.85 = 1.23 |
+| Same-element anions that must bond (anion excess) | Cordero covalent | 0.80 (0.70 for C, N, O) | Se-Se in Ge20Se80: 2*1.20*0.80 = 1.92 |
+| H-H of a hydride | 0.8 of the 2.1 Å Switendick limit | | H-H in TiH2: 1.68 |
+| Metal-P bond with Δχ < 1 (Ni2P, CoP, Ni80P20) | Metallic + Cordero covalent | 0.80 | Ni-P: (1.24+1.07)*0.80 = 1.85 |
+| O-O of a nitrate or carbonate | sqrt(3)*d(X-O), the triangle edge | 0.85 | O-O in NaNO3: 1.732*1.296*0.85 = 1.91 |
 
 When `--target-cn` is provided, CN-specific Shannon radii are used (e.g. Si CN=4: 0.26 A vs CN=6: 0.40 A), giving tighter minsep values.
 
@@ -31,27 +36,34 @@ When `--target-cn` is provided, CN-specific Shannon radii are used (e.g. Si CN=4
 - **M-M at 0.85.** Two metals are kept a little stiffer than a bond, so placement does not build metal clusters.
 - **Cations across an anion.** In a compound two cations meet across the anion they share. Where each anion has at most 6 cations (MO, M2O3, MO2), the closest approach is the shared edge of two octahedra: a 90° M-X-M angle, √2 × d(M-X). Where the anions average more cations (antifluorite Li2O and Li2S, anti-perovskite Li3OCl, Li3N, Cu2S), the cation polyhedra share edges of a cube (70.5°, 1.155 × d) or faces (60°, 1.0 × d). The metallic radius drops out there: it belongs to the neutral atom, and Li+ sits 2.11 Å from Li+ in Li3N against 3.04 Å in Li metal. The mean anion coordination is the cations' target CNs (the automatic ones when none are given) weighted by count, per anion. Beyond 12 no anion holds them all (Fe3C, Ni80P20): the metals touch, at their metallic contact.
 - **Anions at packing distance.** Same-element anions are kept at 0.80 of twice their Shannon radius (0.70 for Cl, Br, I, S, Se, Te, which are larger and softer), so they never bond. That is right for oxides, where an O-O bond is a peroxide defect.
+- **Unless they must bond.** When the cations, at their top oxidation states (3 for the lone-pair As, Sb and Bi), cannot reduce every anion to its nominal charge, the excess anions bond to each other (the Zintl-Klemm count): S2 2- in FeS2 and polysulfides, Se chains in Ge20Se80 and S-rich As-S glasses, C2 2- in CaC2, N3 - in NaN3, O2 2- and O2 - in Li2O2 and KO2, I3 - in CsI3. Their floor is then the X-X bond at 0.8 of twice the Cordero radius (0.7 for the multiple bonds of C, N and O). The least electronegative anion takes the bonds. With other anions present only S, Se, P or C qualify, and O needs an excess of 40 % rather than 10 %, so a doped oxide or a cation above the radii table (the Ni3+ of LiNiO2) does not read as a peroxide. Stoichiometric GeSe2 and As2S3 have no excess and stay chemically ordered.
+- **Hydrogen.** Two H+ can share one O, as in a water molecule (H-H 1.52 Å), so they get the right-angle contact across the O rather than two bonds end to end. H- in a metal hydride stays above about 2.1 Å from H- (Switendick), and the geminal H of BH4- or ReH9 2- above 1.9 Å, so the hydride floor is 0.8 of 2.1 Å.
+- **Covalent phosphides.** A metal-P bond with Δχ < 1 (Ni, Co, Fe, Mo, W phosphides) is covalent, and the 2.12 Å P3- radius put Ni-P at 2.25 Å against the real 2.2-2.3 Å. It takes metallic and Cordero radii instead, like a metalloid. Ionic phosphides (Li3P, Na3P) keep P3-.
+- **Oxoanion roles.** Which nonmetals are cations comes from charge balance at the top oxidation states. Where that leaves a tie or a mismatch, a nonmetal becomes the cation if only that role balances exactly with the tabulated states: Ag2SO4 is Ag+ with a sulfate, Tl3PO4 a phosphate, CrOOH and MnOOH hydroxides.
 - **The caps.** Random sequential placement jams once hard spheres fill about 38 % of the volume. Treating the floors as hard spheres, the oxides fill 26-36 % at their measured densities (O in SiO2 0.26, O in Al2O3 0.33, In in In2O3 0.36). The 2.80 Å and 3.00 Å caps keep large ions inside that limit.
 
-#### Known limits outside oxides
+#### Checked against real crystals
 
-The same-element anion rule assumes anions never bond, and it is applied unchanged outside oxides. Three families need bonds or contacts it forbids:
+A floor must not exclude the contacts of the material it is meant to build. Against the shortest contacts of 30,616 experimentally observed Materials Project structures (ICSD-matched, within 25 meV/atom of the convex hull, up to 80 sites), 0.4 % of the cation-anion bond floors sit above the bond, with a median of 0.82 of it. Counting every pair, 5.7 % of the inorganic structures still have one floor above one of their own contacts (11.9 % before the anion-excess, hydrogen, phosphide, triangle-edge, cation-rich and role rules above). Those left need bonds the composition alone does not reveal:
 
-| Family | Floor vs the real distance | Effect |
+| Family | Examples | Floor vs the real distance |
 |---|---|---|
-| Anion-excess compounds: Se-rich Ge-Se, S-rich As-S, FeS2, polysulfides, CaC2, NaN3 | Se-Se 2.77 Å vs 2.34; S-S 2.58 vs 2.05-2.16; C-C 2.24 vs 1.19; N-N 2.34 vs 1.17 | The X-X bonds these need cannot be placed. Ge20Se80 places with no Se-Se bond; FeS2 does not place at its density. `--check-dimers` flags every real S-S or Se-Se bond. |
-| Metal-rich glasses with a nonmetal (Ni80P20) | Ni-P 2.25 Å vs 2.28 | P is sized as P3-, so Ni-P bonds sit at the floor and the glass does not place at its density. |
-| Hydrides | H-H 2.24 Å vs 2.23 in TiH2 and 1.98 in BH4- | TiH2 does not place at its density; BH4- tetrahedra cannot form. |
+| Bonds between cations | Hg2 2+ (Hg2Cl2), Ga-Ga (GaSe), In-In (InSe), P-P (P4S3, the P2S6 4- of Li2S-P2S5 glasses), Ge-Ge and As-As in chalcogen-poor glasses, Mo, Re, W and Nb clusters | Hg-Hg 2.80 Å vs 2.53; P-P 2.80 vs 2.2; Ge-Ge 2.68 vs 2.45 |
+| MnP-type phosphides | CoP, FeP, CrP, WP | P-P 2.97 Å vs 2.6-2.8; Co-Co 2.80 vs 2.6-2.7 |
+| Anion excess hidden by the cation's top state | MoS3 (Mo4+ with S2 2-), CuS, CuSe, CeS2, PdSe2 | S-S 2.58 Å vs 2.04-2.1 |
+| Close Cu+ and Li+ contacts | CuI, Cu2Se, LiOH, LiBO2 | 2.60-2.80 Å vs 2.4-2.7 |
+| Uranyl and other actinide or Tc oxo-ions | UO2 2+ salts, NpO2 +, TcO4 - | U-O about 1.8 Å vs 1.75-1.8 (states missing from the radii table) |
+| Molecular and organic solids (C-H, N-H) | 16 % of them blocked | outside AmorphGen's scope |
 
 Stoichiometric chalcogenide glasses (GeSe2, GeS2, As2S3) also exclude their few homopolar bonds (Se-Se, Ge-Ge, As-As). That keeps the network chemically ordered on purpose; melt-quench creates those bonds.
 
-For these systems, pass a full table with the offending pair lowered to about 0.8 of its real distance. `--minsep` replaces the whole automatic table: a pair it leaves out falls back to 1.5 Å and gets no coordination-aware bonds. So copy every pair from the `[auto-derive]` line of `random_gen.log` and change only the one you need:
+For these systems, pass a full table with the offending pairs lowered to about 0.8 of their real distance. `--minsep` replaces the whole automatic table: a pair it leaves out falls back to 1.5 Å and gets no coordination-aware bonds. So copy every pair from the `[auto-derive]` line of `random_gen.log` and change only the ones you need:
 
 ```bash
-amorphgen --random-gen --composition Ni=80,P=20 --minsep Ni-Ni=2.11,Ni-P=1.85,P-P=2.97
-amorphgen --random-gen --composition Ge=20,Se=80 --minsep Ge-Ge=2.68,Ge-Se=2.06,Se-Se=1.90
-amorphgen --random-gen --composition Fe=32,S=64 --minsep Fe-Fe=2.80,Fe-S=1.99,S-S=1.70
-amorphgen --random-gen --composition Ti=32,H=64 --minsep H-H=1.90,H-Ti=1.60,Ti-Ti=2.50
+amorphgen --random-gen --composition Ge=40,Se=60 --minsep Ge-Ge=1.95,Ge-Se=2.06,Se-Se=2.77
+amorphgen --random-gen --composition Li=24,P=12,S=36 --minsep Li-Li=2.80,Li-P=2.77,Li-S=2.08,P-P=1.75,P-S=1.61,S-S=2.58
+amorphgen --random-gen --composition Mo=16,S=48 --minsep Mo-Mo=2.20,Mo-S=1.94,S-S=1.65
+amorphgen --random-gen --composition Co=48,P=48 --minsep Co-Co=2.20,Co-P=1.86,P-P=2.10
 ```
 
 #### Bond-type classifier

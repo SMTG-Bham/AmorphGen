@@ -645,10 +645,51 @@
   Li3OCl. Ni-Ni is 2.11 Å and Fe-Fe 2.14 Å. Li3N, Li2S, Na2S and Cu2S now place at their
   crystal density without the soft-pack fallback, and Li2O does with it. None of the
   100 class-benchmark systems changes, and neither do hydroxides, phosphates, LiPON,
-  Li4SiO4 or Mg3N2. The random-generation guide now explains the separations. It also
-  lists the non-oxide cases they still exclude (anion-excess compounds such as
-  Se-rich Ge-Se and FeS2, the Ni-P bond of Ni80P20, H-H in hydrides) and the `--minsep`
-  tables that place them.
+  Li4SiO4 or Mg3N2. The random-generation guide now explains the separations.
+- **Minimum separations excluded the contacts of 1 in 8 real inorganic crystals.**
+  Measured against the shortest contacts of 30,616 experimentally observed Materials
+  Project structures (ICSD-matched, within 25 meV/atom of the hull), 11.9 % of the
+  inorganic ones had a floor above one of their own contacts; 5.7 % still do. Bond floors
+  were rarely the cause (0.4 % of cation-anion floors sit above the bond). The rules
+  written for oxides were.
+  - *Anions that must bond.* Same-element anions were always kept at packing distance,
+    so the S2 2- of FeS2, the Se chains of Ge20Se80, the C2 2- of CaC2, the N3 - of NaN3,
+    the O2 2- of Li2O2 and the I3 - of CsI3 could not be placed (Se-Se 2.77 Å against
+    2.34, S-S 2.58 against 2.05-2.16, C-C 2.24 against 1.19). Where the cations, at their
+    top states (3 for As, Sb, Bi), cannot reduce every anion to its nominal charge, the
+    least electronegative anion now gets its X-X bond at 0.8 of twice the Cordero
+    radius (0.7 for C, N, O). Stoichiometric GeSe2, As2S3 and ZnS, doped oxides and
+    LiNiO2 are unchanged.
+  - *Hydrogen.* Two H+ were kept two O-H bonds apart (1.73 Å), more than the 1.52 Å of a
+    water molecule; they now get the right-angle contact across their O (1.23 Å). The H-
+    of a hydride was packed as an anion at 2.24 Å, more than TiH2's 2.23 Å and BH4-'s
+    1.98 Å; it now stays 1.68 Å from H- (0.8 of the 2.1 Å Switendick limit).
+  - *Covalent phosphides.* A metal-P bond with Δχ < 1 used the 2.12 Å P3- radius, which
+    put Ni-P at 2.25 Å against 2.2-2.3 Å in Ni2P and Ni80P20. It now takes metallic and
+    Cordero radii (Ni-P 1.85, Ga-P 1.94 Å). Ionic phosphides keep P3-.
+  - *Nitrate and carbonate.* Their O-O edge (2.17, 2.22 Å) sat under the 2.24 Å O-O
+    floor; two O of a trigonal oxoanion are now kept at 0.85 of the edge (1.91, 1.94 Å).
+  - *Oxoanion roles.* At the top states Ag+3, Tl+3, Mn+4 and Cr+6, charge balance tied
+    or overshot, so Ag2SO4 was an Ag+5 high-valent oxide with its S an anion (S-O 2.27
+    Å), and Ag3PO4, Tl3PO4, AgIO3, MnOOH and CrOOH lost their P, I or H cations. A
+    nonmetal now becomes the cation when only that role balances exactly with the
+    tabulated states. Ag2SO4 is Ag+ and a sulfate (S-O 1.22 Å, estimate 4.58 against
+    4.11 g/cm³, crystal 5.45), Ag3PO4 5.53 against 3.44 (crystal 6.37). Tl+ is now in
+    the radii table. Where several assignments balance, an oxoanion centre takes its top
+    state.
+  - `--check-dimers` read the bare element set, so a Li2O cell looked like LiO; it now
+    uses the cells' atom counts.
+
+  At 0.85 of the crystal density, strict placement now succeeds for FeS2 and NaN3 (0 of
+  3 seeds before), and Ge20Se80 places Se-Se bonds. A MACE-MPA-0 relaxation ends at the
+  same energy either way (Ge20Se80; FeS2 with S-S floors of 1.68 to 2.58 Å agree within
+  the 0.01-0.03 eV/atom scatter between seeds): the relaxation built the bonds before,
+  and the placement now starts with them. In the class benchmark only the
+  hydrides (H-H 2.24 → 1.68 Å) and GaP move. The random-generation guide lists what is
+  left: bonds between cations (Hg2 2+, Ga-Ga, P-P in P4S3 and P2S6 4-, Ge-Ge in Ge-rich
+  glasses, metal clusters), MnP-type phosphides, anion excess hidden by the cation's top
+  state (MoS3, CuS), close Cu+ and Li+ contacts, uranyl, and molecular solids, with the
+  `--minsep` tables that place them.
 
 ## v1.0.0rc3 (2026-09-22)
 

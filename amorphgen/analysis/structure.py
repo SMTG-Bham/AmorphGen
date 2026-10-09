@@ -307,10 +307,13 @@ def compute_dimers(atoms_list, threshold_frac: float = 0.85) -> dict:
     """
     from ..utils.radii import default_minsep, NONMETALS, METALLOIDS
 
-    symbols = sorted({s for atoms in atoms_list
-                      for s in atoms.get_chemical_symbols()})
-    minsep = default_minsep(symbols)
-    has_anions = any(s in NONMETALS for s in symbols)
+    # The counts, not the bare element set: which nonmetals are cations (the
+    # P of a phosphate) and which anions bond to themselves (S2 2- in FeS2)
+    # follow the stoichiometry, and one of each reads Li2O as a peroxide.
+    counts = Counter(s for atoms in atoms_list
+                     for s in atoms.get_chemical_symbols())
+    minsep = default_minsep(dict(counts))
+    has_anions = any(s in NONMETALS for s in counts)
 
     # Homonuclear pairs only (see docstring). Same-element metal pairs are
     # skipped when anions are present (metallic threshold is the wrong
