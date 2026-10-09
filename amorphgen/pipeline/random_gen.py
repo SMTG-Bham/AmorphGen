@@ -19,9 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-import importlib
 import inspect
-import tempfile
 import time
 from functools import wraps
 from collections import Counter
@@ -29,6 +27,12 @@ import numpy as np
 from ase import Atoms
 from ase.io import write
 from ase.data import atomic_masses, atomic_numbers
+
+from ..utils.persistence import atomic_write_text, changed_settings
+from ..utils.relaxation import (
+    get_optimizer_class as _get_optimizer_class,
+    build_cell_filter as _build_cell_filter,
+)
 
 from ..utils.radii import (
     # Data tables (re-exported for backward compatibility)
@@ -154,48 +158,6 @@ def _get_minsep(s1: str, s2: str, minsep: dict) -> float:
     key1 = f"{s1}-{s2}"
     key2 = f"{s2}-{s1}"
     return minsep.get(key1, minsep.get(key2, 1.5))
-
-
-# ==============================================================================
-# Optimizer and cell filter helpers
-# ==============================================================================
-
-def _get_optimizer_class(name: str):
-    """Import and return an ASE optimizer class by name."""
-    optimizers = {
-        "LBFGS":          ("ase.optimize", "LBFGS"),
-        "FIRE":           ("ase.optimize", "FIRE"),
-        "BFGSLineSearch": ("ase.optimize", "BFGSLineSearch"),
-        "BFGS":           ("ase.optimize", "BFGS"),
-        "MDMin":          ("ase.optimize", "MDMin"),
-    }
-    if name not in optimizers:
-        raise ValueError(f"Unknown optimizer '{name}'. Choose from: {', '.join(optimizers)}")
-    module_path, cls_name = optimizers[name]
-    module = importlib.import_module(module_path)
-    return getattr(module, cls_name)
-
-
-def _build_cell_filter(atoms, cell_filter: str):
-    """Wrap atoms in the requested cell filter for optimisation."""
-    if cell_filter == "none" or cell_filter is None:
-        return atoms
-    elif cell_filter == "cubic":
-        from ..utils.common import cubic_cell_filter
-        return cubic_cell_filter(atoms)
-    elif cell_filter == "ExpCellFilter":
-        from ase.filters import ExpCellFilter
-        return ExpCellFilter(atoms)
-    elif cell_filter == "StrainFilter":
-        from ase.filters import StrainFilter
-        return StrainFilter(atoms)
-    elif cell_filter == "UnitCellFilter":
-        from ase.filters import UnitCellFilter
-        return UnitCellFilter(atoms)
-    else:
-        # Default: FrechetCellFilter (better convergence for non-cubic)
-        from ase.filters import FrechetCellFilter
-        return FrechetCellFilter(atoms)
 
 
 # ==============================================================================
@@ -1229,16 +1191,8 @@ def _random_calculator_settings(calc, config):
 
 def _changed_setting(previous, current, prefix=""):
     """Return the first changed setting, including missing nested fields."""
-    if isinstance(previous, dict) and isinstance(current, dict):
-        for key in sorted(previous.keys() | current.keys()):
-            path = f"{prefix}.{key}" if prefix else key
-            if key not in previous or key not in current:
-                return path
-            difference = _changed_setting(previous[key], current[key], path)
-            if difference:
-                return difference
-        return None
-    return prefix if previous != current else None
+    changes = changed_settings(previous, current, prefix)
+    return changes[0] if changes else None
 
 
 def _validate_random_metadata(meta_path, current_meta, output_dir):
@@ -1290,21 +1244,9 @@ def _validate_random_metadata(meta_path, current_meta, output_dir):
 
 def _write_random_metadata(path, metadata):
     """Publish metadata atomically so interruptions cannot truncate it."""
-    name = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=os.path.dirname(path),
-            prefix=".random-metadata-", suffix=".tmp", delete=False,
-        ) as handle:
-            name = handle.name
-            json.dump(metadata, handle, indent=2, sort_keys=True, allow_nan=False)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(name, path)
-    finally:
-        if name is not None and os.path.exists(name):
-            os.unlink(name)
+    atomic_write_text(path,
+                      json.dumps(metadata, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                      prefix=".random-metadata-")
 
 
 def _derive_structure_seed(base_seed: int, index: int, attempt: int) -> int:

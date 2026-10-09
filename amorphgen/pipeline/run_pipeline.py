@@ -38,7 +38,6 @@ import os
 import time
 import platform
 import sys
-import hashlib
 from copy import deepcopy
 from datetime import datetime
 
@@ -50,6 +49,7 @@ from ..utils.calculators import potential_kwargs
 from ..configs import DEFAULT_CONFIG
 from .manifest import RunManifest, _json_value
 from ..utils.run_lock import run_lock
+from ..utils.persistence import sha256_file
 
 
 def _calculator_parameters(calc, seen=None):
@@ -284,11 +284,7 @@ class MeltQuenchPipeline:
         input_path = os.path.abspath(input_file)
         digest = None
         if os.path.isfile(input_path):
-            hasher = hashlib.sha256()
-            with open(input_path, "rb") as stream:
-                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                    hasher.update(chunk)
-            digest = hasher.hexdigest()
+            digest = sha256_file(input_path)
         provenance = calculator_provenance(
             self.cfg, self._injected_calc, injected=self._injected_calc is not None,
         )

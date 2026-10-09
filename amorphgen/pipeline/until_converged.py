@@ -24,6 +24,7 @@ from ..analysis import StructureAnalyser
 from ..analysis.sequential import sequential_convergence_report
 from ..configs.default_config import DEFAULT_CONFIG
 from ..utils.common import merge_config
+from ..utils.persistence import sha256_file as _hash_file
 from ..utils.repulsion import validate_repulsive_core_config
 from ..utils.run_lock import run_lock
 from ..utils.run_provenance import calculator_provenance
@@ -37,14 +38,6 @@ from .random_gen import (
 
 CHECKPOINT = "adaptive_convergence.json"
 _SCHEMA = "amorphgen.adaptive_random.v1"
-
-
-def _hash_file(path):
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _digest(value):

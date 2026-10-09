@@ -14,12 +14,10 @@ Supported optimisers (set via cfg["opt"]["optimizer"]):
 
 from __future__ import annotations
 
-import importlib
 import os
 from copy import deepcopy
 
 from ase.io import read, write
-from ase.filters import UnitCellFilter
 from ase.geometry import cell_to_cellpar
 
 from ..utils import get_calculator, merge_config
@@ -29,16 +27,9 @@ from ..utils.repulsion import with_repulsive_core
 from ..utils.preemption import stop_if_requested
 from ..utils.relaxation import (
     clear_relaxation_metadata, record_relaxation_metadata, write_relaxation_metadata,
+    OPTIMIZERS, get_optimizer_class as _get_optimizer, build_cell_filter,
 )
 from ..configs import DEFAULT_CONFIG
-
-OPTIMIZERS = {
-    "LBFGS":          ("ase.optimize", "LBFGS"),
-    "FIRE":           ("ase.optimize", "FIRE"),
-    "BFGSLineSearch": ("ase.optimize", "BFGSLineSearch"),
-    "BFGS":           ("ase.optimize", "BFGS"),
-    "MDMin":          ("ase.optimize", "MDMin"),
-}
 
 # Map --format choices to ASE write format strings and file extensions
 FORMAT_MAP = {
@@ -46,15 +37,6 @@ FORMAT_MAP = {
     "vasp":   ("vasp",   ".vasp"),
     "cif":    ("cif",    ".cif"),
 }
-
-
-def _get_optimizer(name: str):
-    """Import and return an ASE optimizer class by name."""
-    if name not in OPTIMIZERS:
-        raise ValueError(f"Unknown optimizer '{name}'. Choose from: {', '.join(OPTIMIZERS)}")
-    module_path, cls_name = OPTIMIZERS[name]
-    module = importlib.import_module(module_path)
-    return getattr(module, cls_name)
 
 
 def _log(msg, lf=None):
@@ -162,26 +144,9 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt",
             from ..utils.common import require_stress
             require_stress(calc, f"Cell-filter optimisation (cell_filter={filter_name!r})")
 
-        if filter_name == "none" or filter_name is None:
-            # Positions only — cell stays fixed
-            target = atoms
-        elif filter_name == "cubic":
-            # Keep cubic shape (a=b=c, 90 deg) but allow volume to change
-            from ..utils.common import cubic_cell_filter
-            target = cubic_cell_filter(atoms)
+        target = build_cell_filter(atoms, filter_name)
+        if filter_name == "cubic":
             _log("  [cell] Cubic: isotropic volume only, shape fixed", lf)
-        elif filter_name == "ExpCellFilter":
-            from ase.filters import ExpCellFilter
-            target = ExpCellFilter(atoms)
-        elif filter_name == "StrainFilter":
-            from ase.filters import StrainFilter
-            target = StrainFilter(atoms)
-        elif filter_name == "UnitCellFilter":
-            target = UnitCellFilter(atoms)
-        else:
-            # Default: FrechetCellFilter (better convergence for non-cubic)
-            from ase.filters import FrechetCellFilter
-            target = FrechetCellFilter(atoms)
 
         with OptimizerClass(target, logfile=None, trajectory=trajfile) as optimizer:
 

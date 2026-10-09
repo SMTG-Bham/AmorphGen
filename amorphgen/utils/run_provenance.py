@@ -8,6 +8,8 @@ import json
 import os
 import sys
 
+from .persistence import sha256_file as _file_sha256
+
 
 def _attribute(obj, name, default=None):
     try:
@@ -110,14 +112,6 @@ def _state_hash(models):
             count += 1
     if not count:
         raise ValueError("Calculator does not expose loaded model weights")
-    return digest.hexdigest()
-
-
-def _file_sha256(path):
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
     return digest.hexdigest()
 
 
