@@ -19,7 +19,8 @@ import os
 
 from ase.io import read, write
 
-from .structure_io import STRUCTURE_FORMATS as _FORMAT_MAP, STRUCTURE_PATTERNS
+from .structure_io import (STRUCTURE_FORMATS as _FORMAT_MAP, STRUCTURE_PATTERNS,
+                           write_sorted_vasp)
 
 
 def _gather_inputs(input_path: str) -> list[str]:
@@ -150,8 +151,7 @@ def convert(input_path: str,
     for f, dest in zip(files, destinations):
         atoms = read(f)
         if ase_format == "vasp" and sort:
-            atoms = atoms[atoms.numbers.argsort()]
-            write(dest, atoms, format=ase_format, sort=True)
+            write_sorted_vasp(dest, atoms)
         else:
             write(dest, atoms, format=ase_format)
         written.append(dest)

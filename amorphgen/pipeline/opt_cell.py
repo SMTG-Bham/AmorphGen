@@ -31,7 +31,7 @@ from ..utils.relaxation import (
 )
 from ..configs import DEFAULT_CONFIG
 
-from ..utils.structure_io import STRUCTURE_FORMATS
+from ..utils.structure_io import STRUCTURE_FORMATS, write_sorted_vasp
 
 # Optimisation retains its historical accepted keys; xyz is normalized upstream.
 FORMAT_MAP = {key: STRUCTURE_FORMATS[key] for key in ("extxyz", "vasp", "cif")}
@@ -223,8 +223,7 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage_key="opt",
         # Don't overwrite if we already wrote this extension
         if out_fmt not in (out_cif, out_xyz):
             if fmt_str == "vasp":
-                sorted_atoms = atoms[atoms.numbers.argsort()]
-                write(out_fmt, sorted_atoms, format=fmt_str, sort=True)
+                write_sorted_vasp(out_fmt, atoms)
             else:
                 write(out_fmt, atoms, format=fmt_str)
             write_relaxation_metadata(out_fmt, atoms)

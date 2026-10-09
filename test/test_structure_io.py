@@ -26,3 +26,27 @@ def test_calculator_arguments_preserve_explicit_none_and_backend_parameters():
         "default_dtype": "float64", "classical_params": params,
     }
     assert cfg["device"] is None
+
+
+def test_sorted_vasp_keeps_historical_order_constraints_and_input(tmp_path):
+    import numpy as np
+    from ase import Atoms
+    from ase.constraints import FixAtoms
+    from ase.io import read, write
+    from amorphgen.utils.structure_io import write_sorted_vasp
+
+    atoms = Atoms("SiOClOSi", positions=np.arange(15).reshape(5, 3) / 3,
+                  cell=[10, 11, 12], pbc=True)
+    atoms.set_constraint(FixAtoms(indices=[1, 4]))
+    atoms.info["relaxation_steps"] = 4
+    before = atoms.copy()
+    expected, actual = tmp_path / "old.vasp", tmp_path / "new.vasp"
+    write(expected, atoms[atoms.numbers.argsort()], format="vasp", sort=True)
+    write_sorted_vasp(actual, atoms)
+    assert actual.read_bytes() == expected.read_bytes()
+    assert "Cartesian" in actual.read_text()
+    assert read(actual).get_chemical_symbols() == ["Cl", "O", "O", "Si", "Si"]
+    np.testing.assert_array_equal(atoms.positions, before.positions)
+    np.testing.assert_array_equal(atoms.numbers, before.numbers)
+    np.testing.assert_array_equal(atoms.constraints[0].get_indices(), [1, 4])
+    assert atoms.info == before.info

@@ -15,6 +15,19 @@ SNAPSHOT_FORMATS = {**STRUCTURE_FORMATS, "traj": ("traj", ".traj")}
 STRUCTURE_PATTERNS = ("*.xyz", "*.extxyz", "*.vasp", "*.cif", "POSCAR*")
 
 
+def write_sorted_vasp(path, atoms):
+    """Write the shared Cartesian POSCAR convention without changing atoms.
+
+    Retain the historical atomic-number presort followed by ASE's symbol
+    sorting, including its within-species ordering and constraint permutation.
+    Torch-sim's direct-coordinate writer has a different convention.
+    """
+    from ase.io import write
+
+    ordered = atoms[atoms.numbers.argsort()]
+    write(path, ordered, format="vasp", sort=True)
+
+
 def first_structure_files(directory):
     """Return the sorted first nonempty format group used by ensemble modes.
 

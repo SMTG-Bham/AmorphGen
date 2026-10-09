@@ -35,7 +35,7 @@ import sys
 import os
 
 from .utils.calculators import calculator_kwargs
-from .utils.structure_io import first_structure_files
+from .utils.structure_io import first_structure_files, write_sorted_vasp
 
 
 # Concise, task-oriented usage shown at the bottom of ``-h`` and by
@@ -1491,8 +1491,7 @@ def _collect_ensemble_final(quench_dir: str, final_dir: str, output_format: str,
         atoms = read(src)
         read_relaxation_metadata(src, atoms)
         if ase_format == "vasp":
-            atoms = atoms[atoms.numbers.argsort()]
-            write(dest, atoms, format=ase_format, sort=True)
+            write_sorted_vasp(dest, atoms)
         else:
             write(dest, atoms, format=ase_format)
         write_relaxation_metadata(dest, atoms)

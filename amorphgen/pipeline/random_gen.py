@@ -1120,7 +1120,7 @@ def generate_random(
 # Batch generation
 # ==============================================================================
 
-from ..utils.structure_io import STRUCTURE_FORMATS as _FORMAT_MAP
+from ..utils.structure_io import STRUCTURE_FORMATS as _FORMAT_MAP, write_sorted_vasp
 
 # Capture the real signature once so instrumentation of generate_random does
 # not change a run's identity. Explicit defaults and omitted defaults match.
@@ -1679,8 +1679,7 @@ def _batch_random_unlocked(
             fname = os.path.join(initial_dir,
                                  f"random_{generated:04d}{ext}")
             if ase_format == "vasp":
-                sorted_atoms_ur = atoms[atoms.numbers.argsort()]
-                write(fname, sorted_atoms_ur, format=ase_format, sort=True)
+                write_sorted_vasp(fname, atoms)
             else:
                 write(fname, atoms, format=ase_format)
 
@@ -1784,9 +1783,7 @@ def _batch_random_unlocked(
                 fname_opt = os.path.join(
                     opt_dir, f"random_{generated:04d}_opt{ext}")
                 if ase_format == "vasp":
-                    sorted_atoms_r = atoms[atoms.numbers.argsort()]
-                    write(fname_opt, sorted_atoms_r, format=ase_format,
-                          sort=True)
+                    write_sorted_vasp(fname_opt, atoms)
                 else:
                     write(fname_opt, atoms, format=ase_format)
                 write_relaxation_metadata(fname_opt, atoms)
