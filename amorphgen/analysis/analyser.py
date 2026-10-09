@@ -941,23 +941,10 @@ class StructureAnalyser:
                 else:
                     nonbonded_cn[pair] = data
 
-            def _fmt(pair, data):
-                l1 = (f"  {pair}: mean={data['mean']:.1f} (pooled); site SD="
-                      f"{data['std']:.1f} [{data['min']},{data['max']}]")
-                parts = [f"CN={cn}: {pct:.1f}%"
-                         for cn, pct in sorted(data["distribution"].items())
-                         if pct >= 0.5]
-                l2 = "    Fraction of sites: " + ", ".join(parts)
-                prevalence = ", ".join(
-                    f"CN={cn}: {100 * fraction:.1f}%"
-                    for cn, fraction in data["fraction_of_structures"].items())
-                return [l1, l2, "    Fraction of structures (any such site): " + prevalence,
-                        "    " + _format_uncertainty(data["uncertainty"])]
-
             if bonding_cn:
                 lines.append(f"\n  Bonding coordination numbers:")
                 for pair, data in bonding_cn.items():
-                    lines.extend(_fmt(pair, data))
+                    lines.extend(_format_cn_entry(pair, data))
                 # elements bonded to more than one partner type (O in IGZO:
                 # O-Ga + O-In + O-Zn) also get their total first-shell CN
                 partners = {}
@@ -970,7 +957,7 @@ class StructureAnalyser:
                     lines.append(f"\n  Total coordination (all bonded partners):")
                     for s, ps in multi.items():
                         if s in tot:
-                            lines.extend(_fmt(f"{s}-({'+'.join(ps)})", tot[s]))
+                            lines.extend(_format_cn_entry(f"{s}-({'+'.join(ps)})", tot[s]))
 
             if nonbonded_cn:
                 nb = {k: v for k, v in nonbonded_cn.items()
@@ -978,7 +965,7 @@ class StructureAnalyser:
                 if nb:
                     lines.append(f"\n  Non-bonded contacts:")
                     for pair, data in nb.items():
-                        lines.extend(_fmt(pair, data))
+                        lines.extend(_format_cn_entry(pair, data))
 
         if show_angles:
             ba = self.bond_angles()
@@ -1241,16 +1228,24 @@ def format_total_cn(sa, specs):
             continue
         d = tot[centre]
         label = f"{centre}-({'+'.join(partners)})" if partners else f"{centre}-(all bonded)"
-        lines.append(f"  {label}: mean={d['mean']:.1f} (pooled); site SD={d['std']:.1f} "
-                     f"[{d['min']},{d['max']}]")
-        parts = [f"CN={cn}: {pct:.1f}%" for cn, pct in sorted(d["distribution"].items())
-                 if pct >= 0.5]
-        lines.append("    Fraction of sites: " + ", ".join(parts))
-        lines.append("    Fraction of structures (any such site): " + ", ".join(
-            f"CN={cn}: {100 * fraction:.1f}%"
-            for cn, fraction in d["fraction_of_structures"].items()))
-        lines.append("    " + _format_uncertainty(d["uncertainty"]))
+        lines.extend(_format_cn_entry(label, d))
     return "\n".join(lines)
+
+
+def _format_cn_entry(label, data):
+    """Format pooled coordination and structure uncertainty consistently."""
+    parts = [f"CN={cn}: {pct:.1f}%"
+             for cn, pct in sorted(data["distribution"].items()) if pct >= 0.5]
+    prevalence = ", ".join(
+        f"CN={cn}: {100 * fraction:.1f}%"
+        for cn, fraction in data["fraction_of_structures"].items())
+    return [
+        f"  {label}: mean={data['mean']:.1f} (pooled); site SD={data['std']:.1f} "
+        f"[{data['min']},{data['max']}]",
+        "    Fraction of sites: " + ", ".join(parts),
+        "    Fraction of structures (any such site): " + prevalence,
+        "    " + _format_uncertainty(data["uncertainty"]),
+    ]
 
 
 def _format_uncertainty(uncertainty):

@@ -49,8 +49,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-from ase.io import read
-from ase.units import _Nav
 
 # matplotlib imports happen lazily inside the plot functions (mirrors the
 # existing plotting.py pattern) so that simply importing this module does
@@ -172,16 +170,6 @@ def _save(fig, output_dir: str, prefix: str, name: str,
     fig.savefig(base + ".png", dpi=dpi, bbox_inches="tight")
     if save_pdf:
         fig.savefig(base + ".pdf", bbox_inches="tight")
-
-
-def _per_structure_density(files: list[str]) -> np.ndarray:
-    """Density in g/cm^3 for each structure file."""
-    rho = []
-    for f in files:
-        atoms = read(f)
-        rho.append((atoms.get_masses().sum() / _Nav)
-                   / (atoms.get_volume() * 1e-24))
-    return np.array(rho)
 
 
 # ─── Panel (a): partial RDFs ──────────────────────────────────────────────

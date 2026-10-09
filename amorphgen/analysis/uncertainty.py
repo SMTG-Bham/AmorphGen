@@ -11,14 +11,7 @@ from __future__ import annotations
 import numpy as np
 from scipy.stats import t
 
-
-def _native(values):
-    """Return JSON-native numbers, replacing undefined values with null."""
-    values = np.asarray(values)
-    if values.ndim == 0:
-        value = float(values)
-        return value if np.isfinite(value) else None
-    return [_native(value) for value in values]
+from ._serialization import finite_native as _native
 
 
 def summarize_structures(values, confidence=0.95, n_bootstrap=1000,
@@ -115,6 +108,26 @@ def summarize_structures(values, confidence=0.95, n_bootstrap=1000,
         "interval_method": "Student t", "bootstrap_method": "percentile",
         "band_type": "pointwise", "n_bootstrap": int(n_bootstrap),
         "seed": int(seed) if seed is not None else None,
+    }
+
+
+def summarize_observations(values, per_structure) -> dict:
+    """Describe pooled continuous observations and their structure means.
+
+    ``values`` contains the nonempty pooled bond lengths or angles;
+    ``per_structure`` contains one mean per structure, with absent observations
+    represented by None. Keep the pooled population spread distinct from the
+    uncertainty of the equal-weight structure mean.
+    """
+    values = np.asarray(values)
+    mean, std = float(np.mean(values)), float(np.std(values))
+    return {
+        "mean": mean, "std": std,
+        "pooled_mean": mean, "pooled_std": std,
+        "per_structure": per_structure,
+        "uncertainty": summarize_structures(per_structure),
+        "min": float(np.min(values)), "max": float(np.max(values)),
+        "count": len(values),
     }
 
 

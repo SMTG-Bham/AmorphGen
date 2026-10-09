@@ -13,16 +13,9 @@ from pathlib import Path
 
 import numpy as np
 
+from ._serialization import numpy_json_default as _json_default
 
 _SUMMARY_FIELDS = ("std", "sem", "ci_low", "ci_high", "bootstrap_low", "bootstrap_high")
-
-
-def _json_default(value):
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, np.generic):
-        return value.item()
-    raise TypeError(f"Cannot serialize {type(value).__name__}")
 
 
 def _number(value):
