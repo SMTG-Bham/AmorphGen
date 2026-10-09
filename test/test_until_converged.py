@@ -330,3 +330,17 @@ def test_output_directory_lock_prevents_concurrent_writers(driver, simulated, tm
         with pytest.raises(RuntimeError, match="Another run"):
             driver.run_until_converged(**config)
     assert not simulated.generated
+
+
+def test_source_identity_covers_extracted_scientific_helpers():
+    from amorphgen.pipeline.until_converged import _source_identity
+
+    identity = _source_identity()
+    for path in ("analysis/_rdf_kernel.py", "analysis/_serialization.py",
+                 "configs/_defaults.py", "configs/default_config.py",
+                 "configs/descriptor_names.py", "utils/common.py",
+                 "utils/calculators.py", "utils/relaxation.py",
+                 "utils/persistence.py", "utils/structure_io.py"):
+        digest = identity["sources"][path]
+        assert len(digest) == 64
+        assert int(digest, 16) >= 0

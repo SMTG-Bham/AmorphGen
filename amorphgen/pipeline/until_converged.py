@@ -75,7 +75,11 @@ def _source_identity():
              "utils/torchsim_engine.py", "utils/radii.py", "utils/safety.py",
              "utils/repulsion.py", "analysis/analyser.py", "analysis/structure.py",
              "analysis/energy.py", "analysis/cutoff.py", "analysis/uncertainty.py",
-             "analysis/sequential.py"]
+             "analysis/sequential.py", "analysis/_rdf_kernel.py",
+             "analysis/_serialization.py", "configs/_defaults.py",
+             "configs/default_config.py", "configs/descriptor_names.py",
+             "utils/common.py", "utils/calculators.py", "utils/relaxation.py",
+             "utils/persistence.py", "utils/structure_io.py"]
     versions = {}
     for package in ("numpy", "scipy", "ase", "torch", "torch-sim-atomistic",
                     "mace-torch", "sevenn"):
