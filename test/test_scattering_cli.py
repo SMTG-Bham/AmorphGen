@@ -1,7 +1,6 @@
 """Public scattering APIs and complete calculator-free CLI workflows."""
 
 import json
-import sys
 
 import numpy as np
 import pytest
@@ -9,8 +8,10 @@ import yaml
 from ase import Atoms
 from ase.io import write
 
+from amorphgen_test_helpers import run_cli as _run
+
 from amorphgen.analysis import StructureAnalyser
-from amorphgen.cli import _get_parser, _requires_calculator, main
+from amorphgen.cli import _get_parser, _requires_calculator
 
 
 @pytest.fixture
@@ -24,11 +25,6 @@ def ensemble(tmp_path):
     for index, atoms in enumerate((first, second)):
         write(directory / f"structure_{index}.xyz", atoms)
     return directory, StructureAnalyser(str(directory), cutoff=2.5)
-
-
-def _run(monkeypatch, arguments):
-    monkeypatch.setattr(sys, "argv", ["amorphgen", *map(str, arguments)])
-    main()
 
 
 def test_public_comparison_wrapper_and_defaults(ensemble, tmp_path):

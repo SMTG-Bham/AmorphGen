@@ -2,15 +2,15 @@
 
 import csv
 import json
-import sys
 
 import pytest
 import yaml
 from ase import Atoms
 from ase.io import write
 
+from amorphgen_test_helpers import run_cli
+
 from amorphgen.analysis import StructureAnalyser
-from amorphgen.cli import main
 from amorphgen.configs import load_yaml_config
 
 
@@ -24,11 +24,6 @@ def candidates(tmp_path):
         atoms.info["potential_energy"] = energy
         write(directory / f"candidate_{index}.xyz", atoms)
     return directory
-
-
-def run(monkeypatch, *args):
-    monkeypatch.setattr(sys, "argv", ["amorphgen", *map(str, args)])
-    main()
 
 
 @pytest.mark.parametrize("exclude,analysed", [(False, 2), (True, 1)])
@@ -48,8 +43,10 @@ def test_labels_and_exclusions_reach_analysis_and_tables(
         return original(self, **kwargs)
 
     monkeypatch.setattr(StructureAnalyser, "summary", summary)
-    run(monkeypatch, "--analyse", "--input-dir", candidates, "--config", config,
-        "--cutoff", "1.8", "--screening-output", prefix, "--save-report", report_path)
+    run_cli(monkeypatch, [
+        "--analyse", "--input-dir", candidates, "--config", config, "--cutoff", "1.8",
+        "--screening-output", prefix, "--save-report", report_path,
+    ])
     audit = json.loads(prefix.with_suffix(".json").read_text())
     assert audit["summary"]["generated"] == 2
     assert audit["summary"]["passed"] == 1
@@ -80,8 +77,10 @@ def test_all_excluded_writes_audit_without_attempting_empty_analysis(
         raise AssertionError("Empty ensemble must not be analysed")
 
     monkeypatch.setattr(StructureAnalyser, "summary", forbidden)
-    run(monkeypatch, "--analyse", "--input-dir", candidates, "--config", config,
-        "--cutoff", "1.8", "--work-dir", tmp_path / "out")
+    run_cli(monkeypatch, [
+        "--analyse", "--input-dir", candidates, "--config", config, "--cutoff", "1.8",
+        "--work-dir", tmp_path / "out",
+    ])
     audit = json.loads((tmp_path / "out" / "screening.json").read_text())
     assert audit["summary"]["generated"] == audit["summary"]["labelled"] == 2
     assert audit["summary"]["analysed"] == audit["summary"]["passed"] == 0
@@ -100,8 +99,10 @@ def test_failed_analysis_does_not_claim_candidates_were_analysed(
 
     monkeypatch.setattr(StructureAnalyser, "summary", failure)
     with pytest.raises(RuntimeError, match="analysis failed"):
-        run(monkeypatch, "--analyse", "--input-dir", candidates, "--config", config,
-            "--cutoff", "1.8", "--work-dir", tmp_path / "out")
+        run_cli(monkeypatch, [
+            "--analyse", "--input-dir", candidates, "--config", config, "--cutoff", "1.8",
+            "--work-dir", tmp_path / "out",
+        ])
     audit = json.loads((tmp_path / "out" / "screening.json").read_text())
     assert audit["retained_indices"] == [0, 1]
     assert audit["analysed_indices"] == []
@@ -141,8 +142,10 @@ def test_screen_defaults_and_output_override(tmp_path, candidates, monkeypatch):
     config.write_text(yaml.safe_dump({"analysis": {
         "screening_output": str(tmp_path / "unused"),
     }}))
-    run(monkeypatch, "--analyse", "--input-dir", candidates, "--config", config,
-        "--cutoff", "1.8", "--screen", "--screening-output", tmp_path / "audit")
+    run_cli(monkeypatch, [
+        "--analyse", "--input-dir", candidates, "--config", config, "--cutoff", "1.8", "--screen",
+        "--screening-output", tmp_path / "audit",
+    ])
     report = json.loads((tmp_path / "audit.json").read_text())
     assert set(report["per_structure"][0]["screens"]) == {
         "coordination", "crystal_like", "close_contacts", "unconverged"}
@@ -170,5 +173,5 @@ def test_invalid_yaml_screening_rejected(tmp_path, settings):
 ])
 def test_screening_mode_errors_precede_expensive_work(monkeypatch, arguments):
     with pytest.raises(SystemExit) as error:
-        run(monkeypatch, *arguments)
+        run_cli(monkeypatch, [*arguments])
     assert error.value.code == 1

@@ -14,44 +14,26 @@ the packing floor, and the centre of an oxoanion left an anion when its metal
 import numpy as np
 import pytest
 from ase.build import bulk
-from ase.neighborlist import neighbor_list
 from ase.spacegroup import crystal
+
+from amorphgen_test_helpers import (
+    minsep_floors as _floors,
+    shortest_pair_distances as _shortest,
+)
 
 from amorphgen.analysis.structure import compute_dimers
 from amorphgen.pipeline.random_gen import generate_random
 from amorphgen.utils.radii import (
     _homopolar_anion,
-    auto_target_cn,
     cation_nonmetals,
-    default_minsep,
     infer_oxidation_state,
 )
-
-
-def _symbols(composition):
-    return [s for s, n in composition.items() for _ in range(n)]
-
-
-def _floors(composition):
-    """The minsep table generate_random builds for this composition."""
-    target_cn, _ = auto_target_cn(composition)
-    return default_minsep(_symbols(composition), target_cn=target_cn)
 
 
 def _anions(composition):
     from amorphgen.utils.radii import NONMETALS
     centres = cation_nonmetals(composition)
     return [s for s in composition if s in NONMETALS and s not in centres]
-
-
-def _shortest(atoms, cutoff=4.5):
-    symbols = np.array(atoms.get_chemical_symbols())
-    i, j, d = neighbor_list("ijd", atoms, cutoff)
-    out = {}
-    for a, b, dist in zip(symbols[i], symbols[j], d):
-        key = "-".join(sorted((a, b)))
-        out[key] = min(out.get(key, np.inf), dist)
-    return out
 
 
 # ── Oxoanion centres beside a metal below its top state ──────────
@@ -170,7 +152,7 @@ CRYSTALS = {
 @pytest.mark.parametrize("name", sorted(CRYSTALS))
 def test_no_floor_excludes_the_crystal(name):
     atoms, composition = CRYSTALS[name]
-    floors, shortest = _floors(composition), _shortest(atoms)
+    floors, shortest = _floors(composition), _shortest(atoms, cutoff=4.5)
     for key, floor in floors.items():
         if key in shortest:
             assert floor < 0.95 * shortest[key], (key, floor, shortest[key])

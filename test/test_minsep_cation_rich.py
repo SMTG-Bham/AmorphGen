@@ -12,39 +12,21 @@ the crystals' own Li-Li distances (Li3N 2.58 against 2.11 A, Li2O 2.60 against
 
 import logging
 
-import numpy as np
 import pytest
 from ase.build import bulk
-from ase.neighborlist import neighbor_list
 from ase.spacegroup import crystal
+
+from amorphgen_test_helpers import (
+    composition_symbols as _symbols,
+    minsep_floors as _floors,
+    shortest_pair_distances as _shortest,
+)
 
 from amorphgen.pipeline.random_gen import generate_random
 from amorphgen.utils.radii import (
     _cation_contact_factor,
-    auto_target_cn,
     default_minsep,
 )
-
-
-def _symbols(composition):
-    return [s for s, n in composition.items() for _ in range(n)]
-
-
-def _floors(composition):
-    """The minsep table generate_random builds for this composition."""
-    target_cn, _ = auto_target_cn(composition)
-    return default_minsep(_symbols(composition), target_cn=target_cn)
-
-
-def _shortest(atoms, cutoff=6.0):
-    """Shortest distance of each element pair in a crystal."""
-    symbols = np.array(atoms.get_chemical_symbols())
-    i, j, d = neighbor_list("ijd", atoms, cutoff)
-    out = {}
-    for a, b, dist in zip(symbols[i], symbols[j], d):
-        key = "-".join(sorted((a, b)))
-        out[key] = min(out.get(key, np.inf), dist)
-    return out
 
 
 def _density(atoms):
@@ -75,7 +57,7 @@ def test_contact_factor_follows_the_narrowest_angle():
 @pytest.mark.parametrize("name", sorted(CRYSTALS))
 def test_cation_floor_below_the_crystal(name):
     atoms, composition, pair = CRYSTALS[name]
-    floors, shortest = _floors(composition), _shortest(atoms)
+    floors, shortest = _floors(composition), _shortest(atoms, cutoff=6.0)
     # the cation pair at 0.7-0.92 of the crystal's, as a bond floor is at 0.8
     assert 0.70 * shortest[pair] <= floors[pair] <= 0.92 * shortest[pair]
     # and no floor of the compound excludes the crystal's own contacts

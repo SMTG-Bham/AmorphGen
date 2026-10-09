@@ -7,13 +7,15 @@ or, in an interactive GPU session:
 The MACE tests require --run-mace and `pip install "amorphgen[mace]"`
 (mace-torch); the first opt-in run may download model weights.
 """
+
 import sys
 
 import numpy as np
 import pytest
 from ase import units
-from ase.build import bulk
 from ase.io import write, read
+
+from amorphgen_test_helpers import rattled_cu as _cu
 
 ts = pytest.importorskip("torch_sim")
 torch = pytest.importorskip("torch")
@@ -23,12 +25,6 @@ from amorphgen.utils.torchsim_engine import build_model, batch_relax  # noqa: E4
 from amorphgen.utils.torchsim_md import batch_nvt  # noqa: E402
 
 LJ = {"params": {"Cu-Cu": {"sigma": 2.3, "epsilon": 0.1}}, "cutoff": 6.0}
-
-
-def _cu(k, scale=1.05):
-    a = bulk("Cu", "fcc", a=3.6, cubic=True).repeat((2, 2, 2))
-    a.rattle(0.15, seed=k); a.set_cell(a.cell * scale, scale_atoms=True)
-    return a
 
 
 def _sio2(seed):

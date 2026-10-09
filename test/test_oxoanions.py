@@ -11,25 +11,19 @@ fault of treating a cation-cation pair (Na-B, K-Si) as an ionic bond.
 import numpy as np
 import pytest
 from ase import Atoms
-from ase.data import atomic_masses, atomic_numbers
 from ase.neighborlist import neighbor_list
+
+from amorphgen_test_helpers import (
+    composition_symbols as _symbols,
+    estimated_density as _density,
+)
 
 from amorphgen.utils.radii import (
     _classify_compound, auto_target_cn, cation_nonmetals, classify_bond,
-    default_minsep, estimate_cell_length, format_auto_derive_summary,
+    default_minsep, format_auto_derive_summary,
     infer_oxidation_state,
 )
 from amorphgen.pipeline.random_gen import _auto_dmax, generate_random
-
-
-def _symbols(composition):
-    return [s for s, n in composition.items() for _ in range(n)]
-
-
-def _density(composition):
-    L = estimate_cell_length(composition)
-    m = sum(atomic_masses[atomic_numbers[e]] * n for e, n in composition.items())
-    return m * 1.66054 / L ** 3
 
 
 # ── Which nonmetals are cations ──────────────────────────────────
