@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 import numpy as np
 
-from .rdf import DEFAULT_SMEARING
+from .rdf import DEFAULT_SMEARING, _shared_rmax
 
 # Okabe-Ito colour-blind-safe palette (RGB hex)
 _PALETTE = ["#0072B2", "#D55E00", "#009E73", "#CC79A7",
@@ -238,9 +238,7 @@ def plot_analysis(analyser, output_dir=".", prefix="analysis",
 
     # Auto rmax
     if rmax is None:
-        half_cells = [min(atoms.cell.lengths()) / 2
-                      for atoms in analyser.atoms_list]
-        rmax = float(np.floor(min(half_cells) * 10) / 10)
+        rmax = _shared_rmax(analyser.atoms_list, None)
         print(f"  Auto rmax = {rmax:.1f} A (half cell)")
 
     # ── 1. RDF plot ──────────────────────────────────────────────────
