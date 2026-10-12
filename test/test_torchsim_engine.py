@@ -381,10 +381,8 @@ class TestSeedReachesTheBatchedEngine:
 def test_batch_nvt_langevin_friction_matches_torchsim_enum_integrator():
     """batch_nvt wraps torch-sim's nvt_langevin in a checked (init, step) pair; ts.integrate
     converts unit-carrying kwargs (gamma, 1/ps) only for its Integrator enum, so the wrapped
-    path must apply the same factor itself. With the same seed both paths must give the same
-    trajectory; without the factor the friction is ~100x too strong and the atoms barely move
-    (seen as a vanishing anneal effect on BlueBEAR, October 2026)."""
-    import torch
+    path must apply the same factor itself. Without it the friction is ~100x too strong and
+    the atoms barely move while the thermostat still reports the target temperature."""
     import torch_sim as ts
     from amorphgen.utils.torchsim_md import batch_nvt, _derive_seed
     atoms = _rattled_cu(0)
