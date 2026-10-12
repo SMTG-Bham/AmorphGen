@@ -172,6 +172,26 @@ See the bundled
 [`example_classical.yaml`](https://github.com/SMTG-Bham/AmorphGen/blob/main/amorphgen/configs/example_classical.yaml)
 for a complete example.
 
+#### Buckingham on the batched engine
+
+The same `classical_params` run on the torch-sim engine (`--engine torchsim`,
+`pip install "amorphgen[torchsim]"`), batched over structures and on the GPU
+when one is present: random + relax, `--batch-opt` and the hybrid-ensemble MD
+stages. The model is assembled from torch-sim's pair-potential and
+electrostatics models; `coulomb_method: ewald` uses its Ewald sum (agrees
+with the NumPy calculator to ~2e-4 eV/atom), `wolf` maps to its
+damped-shifted-force kernel with the same `alpha` (forces within a few per
+cent of the NumPy Wolf sum; the energies carry a different self-term, so
+compare energies between engines only with `ewald`). Stress is available, so
+`--cell-filter cubic` works. On one CPU core the batched model is ~5x faster
+than the NumPy calculator for a 648-atom SiO2 cell; on a GPU the whole
+ensemble runs in one batch.
+
+```bash
+amorphgen --random-gen --composition "SiO2*216" -n 20 --target-density 2.20 \
+    --relax --config bks_sio2.yaml --engine torchsim --batch-size auto -C none -o sio2_bks
+```
+
 ## Listing available models
 
 ```python

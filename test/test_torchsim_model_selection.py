@@ -53,9 +53,16 @@ def test_named_foundation_model_still_resolves_without_model_path(name, mace_stu
     assert result is wrapper.return_value
 
 
-@pytest.mark.parametrize("name", ["chgnet", "buckingham", "buck"])
-def test_unsupported_models_raise_clearly(name, mace_stubs):
+def test_unsupported_models_raise_clearly(mace_stubs):
     with pytest.raises(ValueError, match="no torch-sim implementation"):
+        engine.build_model("chgnet", device="cpu")
+
+
+@pytest.mark.parametrize("name", ["buckingham", "buck"])
+def test_buckingham_needs_its_parameters(name, mace_stubs):
+    # Buckingham is supported (test_torchsim_classical.py); without parameters
+    # it must say what is missing rather than fall through to the MACE branch.
+    with pytest.raises(ValueError, match="classical_params"):
         engine.build_model(name, device="cpu")
 
 
