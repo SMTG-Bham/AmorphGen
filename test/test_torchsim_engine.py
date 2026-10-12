@@ -384,7 +384,6 @@ def test_batch_nvt_langevin_friction_matches_torchsim_enum_integrator():
     path must apply the same factor itself. With the same seed both paths must give the same
     trajectory; without the factor the friction is ~100x too strong and the atoms barely move
     (seen as a vanishing anneal effect on BlueBEAR, October 2026)."""
-    import torch
     import torch_sim as ts
     from amorphgen.utils.torchsim_md import batch_nvt, _derive_seed
     atoms = _rattled_cu(0)
