@@ -122,6 +122,35 @@ class TestGenerateRandom:
         a2 = generate_random({"O": 8}, cell_length_ang=6.0, seed=123)
         assert np.allclose(a1.positions, a2.positions)
 
+    def test_seed_reproducible_across_unstable_sort_tie_orders(self, monkeypatch):
+        """Equal CN deficits must give the same seeded structure on every CPU."""
+        settings = dict(
+            composition={"Si": 12}, cell_length_ang=12.0, seed=7,
+            max_attempts_per_atom=1000, repair_floor=False, retry_mode="none",
+        )
+        expected = generate_random(**settings)
+        original_argsort = np.argsort
+        tied_sorts = 0
+
+        def alternate_argsort(values, axis=-1, kind=None, order=None, **kwargs):
+            nonlocal tied_sorts
+            indices = original_argsort(
+                values, axis=axis, kind=kind, order=order, **kwargs,
+            )
+            if len(np.unique(values)) < len(values):
+                tied_sorts += 1
+            # Another legal result for an unstable sort: reverse the input
+            # order within ties, as CPU/NumPy implementations are free to do.
+            if kind not in ("stable", "mergesort") and not kwargs.get("stable"):
+                return np.lexsort((-np.arange(len(values)), values))
+            return indices
+
+        monkeypatch.setattr(np, "argsort", alternate_argsort)
+        actual = generate_random(**settings)
+
+        assert tied_sorts > 0
+        np.testing.assert_array_equal(actual.positions, expected.positions)
+
     def test_different_seeds_differ(self):
         a1 = generate_random({"O": 8}, cell_length_ang=6.0, seed=1)
         a2 = generate_random({"O": 8}, cell_length_ang=6.0, seed=2)

@@ -825,9 +825,12 @@ def generate_random(
             bondable_idx = np.where(bondable_mask)[0]
 
             if len(bondable_idx) > 0:
-                # Sort by deficit (most under-coordinated first)
+                # Sort by deficit (most under-coordinated first), preserving
+                # placement order for ties. Unstable sorts can visit tied
+                # seeds in a different order across NumPy versions/CPUs and
+                # change the whole seeded placement trajectory.
                 deficits = tgt_placed[bondable_idx] - cn_placed[bondable_idx]
-                order = np.argsort(-deficits)
+                order = np.argsort(-deficits, kind="stable")
                 bondable_idx = bondable_idx[order]
 
                 attempts_per_seed = max(
