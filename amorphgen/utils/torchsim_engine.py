@@ -7,9 +7,12 @@ all structures are relaxed together instead of one after another through ASE.
 
 Install with ``pip install "amorphgen[torchsim]"`` (needs Python >= 3.12 and a
 CUDA GPU or CPU; Apple MPS is not supported by torch-sim). Supported models:
-MACE foundation models and files, SevenNet checkpoints, Lennard-Jones
-(single sigma/epsilon, used for tests). CHGNet and the Buckingham potential have
-no torch-sim implementation; use the default ASE engine for those.
+MACE foundation models and files, SevenNet checkpoints, and the classical pair
+potentials: Lennard-Jones (single sigma/epsilon, used for tests) and
+Buckingham + Coulomb (per-pair parameters from ``classical_params``, Ewald or
+damped-shifted-force electrostatics; built from torch-sim's pair-potential and
+electrostatics models, see :func:`build_classical_model`). CHGNet has no
+torch-sim implementation; use the default ASE engine for it.
 
 Inputs and outputs are plain ASE ``Atoms`` so every AmorphGen writer, log and
 analysis path is unchanged.
@@ -72,7 +75,10 @@ def build_model(model: str, device: str = "auto", model_path: str | None = None,
                                  cutoff=float(cp.get("cutoff", 10.0)), device=dev,
                                  dtype=tdtype, compute_stress=True)
 
-    if name in ("buckingham", "buck", "chgnet"):
+    if name in ("buckingham", "buck"):
+        return build_classical_model(classical_params, device=dev, dtype=tdtype)
+
+    if name == "chgnet":
         raise ValueError(f"'{model}' has no torch-sim implementation; use the ASE "
                          f"engine (drop --engine torchsim) for this model.")
 
@@ -100,6 +106,99 @@ def build_model(model: str, device: str = "auto", model_path: str | None = None,
         return SevenNetModel(ckpt, device=dev, dtype=torch.float32, **kw)
 
     raise ValueError(f"Unknown model '{model}' for the torch-sim engine.")
+
+
+def build_classical_model(classical_params: dict | None, device, dtype):
+    """Buckingham + Coulomb as a batched torch-sim model.
+
+    The same ``classical_params`` mapping as the ASE calculator
+    (:class:`amorphgen.utils.classical.BuckinghamCalculator`): ``params``
+    keyed ``"A-B"`` with ``A``, ``rho`` and ``C``, ``charges`` per element,
+    ``cutoff``, ``coulomb`` and ``coulomb_method``. The short-range term is a
+    ``PairPotentialModel`` whose pair function looks the parameters up by the
+    two atomic numbers (unlisted pairs contribute nothing, as in BKS, which
+    has no Si-Si term); the electrostatics are torch-sim's ``EwaldModel`` or,
+    for ``coulomb_method: wolf``, its damped-shifted-force ``DSFCoulombModel``
+    with the same ``alpha`` (the DSF kernel is the force-shifted relative of
+    the Wolf sum, not identical to the NumPy implementation). Both are summed
+    and wrapped so that the per-atom charges the electrostatics need are set
+    on every state from its atomic numbers, which keeps them correct when
+    torch-sim re-slices a batch as structures converge.
+    """
+    # Validate before importing torch-sim, so a bad configuration fails fast
+    # and nothing is imported on behalf of a request that cannot run.
+    cp = classical_params or {}
+    params = cp.get("params") or {}
+    if not params:
+        raise ValueError("Buckingham needs classical_params with at least one "
+                         "'A-B' pair (A, rho, C); see amorphgen.utils.classical.")
+    coulomb = bool(cp.get("coulomb", True))
+    charges = cp.get("charges") or {}
+    if coulomb and not charges:
+        raise ValueError("Buckingham with coulomb: true needs classical_params.charges")
+    method = str(cp.get("coulomb_method", "ewald")).lower()
+    if coulomb and method not in ("ewald", "wolf"):
+        raise ValueError(f"coulomb_method must be 'ewald' or 'wolf', got {method!r}")
+    cutoff = float(cp.get("cutoff", 10.0))
+
+    import torch
+    from torch_sim.models.interface import ModelInterface, SumModel
+    from torch_sim.models.pair_potential import PairPotentialModel
+    from ase.data import atomic_numbers
+
+    zmax = max(atomic_numbers[e] for pair in params for e in pair.split("-")) + 1
+    A = torch.zeros((zmax, zmax), dtype=dtype, device=device)
+    RHO = torch.ones((zmax, zmax), dtype=dtype, device=device)
+    C = torch.zeros((zmax, zmax), dtype=dtype, device=device)
+    for pair, p in params.items():
+        e1, e2 = pair.split("-")
+        z1, z2 = atomic_numbers[e1], atomic_numbers[e2]
+        for i, j in ((z1, z2), (z2, z1)):
+            A[i, j], RHO[i, j], C[i, j] = float(p["A"]), float(p["rho"]), float(p.get("C", 0.0))
+
+    def buckingham_pair(dr, zi, zj):
+        zi, zj = zi.long(), zj.long()
+        return A[zi, zj] * torch.exp(-dr / RHO[zi, zj]) - C[zi, zj] / dr ** 6
+
+    short = PairPotentialModel(pair_fn=buckingham_pair, cutoff=cutoff, device=device,
+                               dtype=dtype, compute_stress=True)
+    if not coulomb:
+        print(f"  [torch-sim] Buckingham, {len(params)} pair(s), cutoff {cutoff} A, no Coulomb")
+        return short
+
+    if method == "wolf":
+        from torch_sim.models.electrostatics import DSFCoulombModel
+        alpha = float(cp.get("alpha", 0.2))
+        elec = DSFCoulombModel(cutoff=cutoff, alpha=alpha, device=device, dtype=dtype)
+        label = f"damped-shifted-force Coulomb (alpha {alpha}/A, the torch-sim form of the Wolf sum)"
+    else:
+        from torch_sim.models.electrostatics import EwaldModel
+        elec = EwaldModel(cutoff=cutoff, device=device, dtype=dtype)
+        label = "Ewald"
+    print(f"  [torch-sim] Buckingham + {label}, {len(params)} pair(s), cutoff {cutoff} A")
+
+    q_by_z = torch.zeros(max(zmax, max(atomic_numbers[e] for e in charges) + 1),
+                         dtype=dtype, device=device)
+    for e, q in charges.items():
+        q_by_z[atomic_numbers[e]] = float(q)
+    inner = SumModel(short, elec)
+
+    class ChargedModel(ModelInterface):
+        """Set ``partial_charges`` on the state from its atomic numbers, then evaluate."""
+
+        def __init__(self):
+            super().__init__()
+            self.inner = inner
+            self._device, self._dtype = inner.device, inner.dtype
+            self._compute_forces = inner.compute_forces
+            self._compute_stress = inner.compute_stress
+            self._memory_scales_with = inner.memory_scales_with
+
+        def forward(self, state, **kwargs):
+            state._atom_extras["partial_charges"] = q_by_z[state.atomic_numbers.long()]
+            return self.inner(state, **kwargs)
+
+    return ChargedModel()
 
 
 _CELL_FILTERS = {
