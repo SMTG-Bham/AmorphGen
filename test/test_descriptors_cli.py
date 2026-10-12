@@ -1,7 +1,6 @@
 """Optional descriptor dispatch, calculator gating and exported artifacts."""
 
 import json
-import sys
 
 import numpy as np
 import pytest
@@ -11,12 +10,9 @@ from ase.build import bulk
 from ase.io import write
 from scipy.integrate import trapezoid
 
-from amorphgen.cli import _get_parser, _requires_calculator, main
+from amorphgen_test_helpers import run_cli
 
-
-def run_cli(monkeypatch, arguments):
-    monkeypatch.setattr(sys, "argv", ["amorphgen", *map(str, arguments)])
-    main()
+from amorphgen.cli import _get_parser, _requires_calculator
 
 
 def test_structural_descriptors_need_no_calculator_and_cli_overrides_yaml(tmp_path, monkeypatch):

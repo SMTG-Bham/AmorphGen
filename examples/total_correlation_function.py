@@ -33,7 +33,15 @@ _trapz = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
 
 def structure_factor_and_Tr(atoms_list, qmin=0.3, qmax=20.0, nq=400,
                             rmax=10.0, nr=600, sigma_q=0.05, lorch=True):
-    """Return (Q, S_Q, r, g_r, T_r, rho) in the diffraction convention."""
+    """Return the historical example's (Q, S_Q, r, g_r, T_r, rho).
+
+    This transforms the ensemble-mean S(Q) at the mean number density, on
+    an r grid starting at 0.5 Å, with a Lorch cutoff at the last observed Q.
+    ``amorphgen.analysis.compute_total_correlation`` instead transforms each
+    structure before averaging and uses the requested qmax for its window.
+    They are distinct estimators when reciprocal-shell support or density
+    varies; replacing this example with that API would change its results.
+    """
     from amorphgen.analysis import StructureAnalyser
 
     sa = StructureAnalyser(list(atoms_list))

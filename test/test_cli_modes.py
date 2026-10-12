@@ -5,9 +5,10 @@ top-level mode flag, verifying that the mode runs to completion and
 produces the expected output artefacts.  EMT-only (no MLIP), so these
 run on Tier 2 hardware (no GPU).
 """
+
 from __future__ import annotations
 
-import sys
+
 import numpy as np
 from pathlib import Path
 
@@ -15,16 +16,10 @@ import pytest
 from ase import Atoms
 from ase.io import read, write
 
-from amorphgen.cli import main
+from amorphgen_test_helpers import run_cli
 
 
 # ─── helpers ───────────────────────────────────────────────────────────────
-
-def _run_cli(args_list, monkeypatch):
-    """Invoke amorphgen.cli.main() with sys.argv set to args_list."""
-    monkeypatch.setattr(sys, "argv", ["amorphgen"] + args_list)
-    main()
-
 
 def _make_si_traj(path: Path, n_frames: int = 5):
     """Create a minimal extxyz trajectory of n_frames Si4 frames."""
@@ -54,7 +49,7 @@ def _make_si_xyz(path: Path):
 class TestListModels:
     def test_runs_and_exits_zero(self, monkeypatch, capsys):
         with pytest.raises(SystemExit) as exc:
-            _run_cli(["--list-models"], monkeypatch)
+            run_cli(monkeypatch, ["--list-models"])
         assert exc.value.code == 0
         out = capsys.readouterr().out
         assert "MACE" in out or "model" in out.lower()
@@ -65,14 +60,14 @@ class TestListModels:
 class TestRandomGenMode:
     def test_minimal_run_produces_files(self, tmp_path, monkeypatch):
         out_dir = tmp_path / "rand"
-        _run_cli([
+        run_cli(monkeypatch, [
             "--random-gen",
             "--composition", "Si=8",
             "--seed", "0",
             "-n", "2",
             "-o", str(out_dir),
             "--format", "vasp",
-        ], monkeypatch)
+        ])
         # v1.0.0rc2: initial structures land in random_initial/ subdir
         initial_dir = out_dir / "random_initial"
         assert initial_dir.is_dir()
@@ -118,11 +113,11 @@ class TestRandomGenMode:
             config_path.write_text(opt_yaml)
             config_args = ["--config", str(config_path)]
 
-        _run_cli([
+        run_cli(monkeypatch, [
             "--random-gen", "--relax", "--composition", "Cu=4",
             "--model", "lj", "--engine", engine, "-o", str(tmp_path / "run"),
             *config_args, *cli_args,
-        ], monkeypatch)
+        ])
 
         generate.assert_called_once()
         generation = generate.call_args.kwargs
@@ -151,11 +146,11 @@ class TestRandomGenMode:
         )
         monkeypatch.setattr("amorphgen.utils.get_calculator", lambda **kw: EMT())
         out_dir = tmp_path / "run"
-        _run_cli([
+        run_cli(monkeypatch, [
             "--random-gen", "--relax", "--composition", "Cu=4", "--no-sc",
             "--seed", "0", "-n", "1", "--config", str(config_path),
             "-o", str(out_dir),
-        ], monkeypatch)
+        ])
 
         log = (out_dir / "random_gen.log").read_text()
         assert "Optimizer: FIRE  fmax=1e-12  max_steps=2" in log
@@ -170,12 +165,12 @@ class TestExtractSnapshotsMode:
         traj = tmp_path / "traj.xyz"
         _make_si_traj(traj, n_frames=10)
         out_dir = tmp_path / "snaps"
-        _run_cli([
+        run_cli(monkeypatch, [
             "--extract-snapshots", str(traj),
             "-n", "3",                       # unified count flag
             "--burn-in-frames", "0",
             "-o", str(out_dir),
-        ], monkeypatch)
+        ])
         files = sorted(out_dir.glob("snapshot_*.xyz"))
         assert len(files) == 3
 
@@ -185,13 +180,13 @@ class TestExtractSnapshotsMode:
         traj = tmp_path / "traj.xyz"
         _make_si_traj(traj, n_frames=8)
         out_dir = tmp_path / "snaps_vasp"
-        _run_cli([
+        run_cli(monkeypatch, [
             "--extract-snapshots", str(traj),
             "-n", "3",
             "--burn-in-frames", "0",
             "-o", str(out_dir),
             "--format", "vasp",
-        ], monkeypatch)
+        ])
         files = sorted(out_dir.glob("snapshot_*.vasp"))
         assert len(files) == 3
         # Confirm it's actually a POSCAR (ASE-readable) and not just a renamed extxyz.
@@ -203,12 +198,12 @@ class TestExtractSnapshotsMode:
         traj = tmp_path / "traj.xyz"
         _make_si_traj(traj, n_frames=8)
         out_dir = tmp_path / "snaps_back"
-        _run_cli([
+        run_cli(monkeypatch, [
             "--extract-snapshots", str(traj),
             "--n-runs", "2",
             "--burn-in-frames", "0",
             "-o", str(out_dir),
-        ], monkeypatch)
+        ])
         files = sorted(out_dir.glob("snapshot_*.xyz"))
         assert len(files) == 2
 
@@ -220,11 +215,11 @@ class TestConvertMode:
         src = tmp_path / "in.xyz"
         _make_si_xyz(src)
         out_dir = tmp_path / "converted"
-        _run_cli([
+        run_cli(monkeypatch, [
             "--convert", str(src),
             "--format", "vasp",
             "-o", str(out_dir),
-        ], monkeypatch)
+        ])
         files = list(out_dir.glob("*.vasp"))
         assert len(files) == 1
         atoms = read(files[0])
@@ -241,7 +236,7 @@ class TestAnalyseMode:
                               (i // 16) * 1.4 % 11) for i in range(64)],
                   cell=[11, 11, 11], pbc=True)
         write(str(src), a, format="extxyz")
-        _run_cli(["--analyse", str(src)], monkeypatch)
+        run_cli(monkeypatch, ["--analyse", str(src)])
         out = capsys.readouterr().out
         # Output should mention pair distances or coordination.
         assert any(tok in out
@@ -260,8 +255,8 @@ class TestAnalyseMode:
                   cell=[11, 11, 11], pbc=True)
         write(str(src), a, format="extxyz")
         plots = tmp_path / "plots"
-        _run_cli(["--analyse", str(src), "--sq", "--sq-method", method,
-                  "--save-plot", str(plots)], monkeypatch)
+        run_cli(monkeypatch, ["--analyse", str(src), "--sq", "--sq-method", method,
+                  "--save-plot", str(plots)])
         out = capsys.readouterr().out
         assert f"S(q): {method} method" in out
         header = (plots / "analysis_sq.csv").read_text().splitlines()[0]
@@ -280,19 +275,19 @@ class TestAnalyseMode:
                   cell=[12, 12, 12], pbc=True)
         src = tmp_path / "sio.xyz"; write(str(src), a, format="extxyz")
         plots = tmp_path / "plots"
-        _run_cli(["--analyse", str(src), "--sq", "--sq-partials",
-                  "--save-plot", str(plots)], monkeypatch)
+        run_cli(monkeypatch, ["--analyse", str(src), "--sq", "--sq-partials",
+                  "--save-plot", str(plots)])
         out = capsys.readouterr().out
         assert "Faber-Ziman partials S_ab(q)" in out and "O-Si" in out
         header = (plots / "analysis_sq.csv").read_text().splitlines()[0].split(",")
         assert {"s_Si-Si", "s_O-Si", "s_O-O"} <= set(header)
         assert (plots / "analysis_sq_partials.png").exists()
-        _run_cli(["--analyse", str(src), "--sq", "--sq-partials", "--pair-panels",
-                  "--save-plot", str(tmp_path / "p3")], monkeypatch)
+        run_cli(monkeypatch, ["--analyse", str(src), "--sq", "--sq-partials", "--pair-panels",
+                  "--save-plot", str(tmp_path / "p3")])
         assert (tmp_path / "p3" / "analysis_rdf_panels.png").exists()
         assert (tmp_path / "p3" / "analysis_sq_partials_panels.png").exists()
-        _run_cli(["--analyse", str(src), "--sq", "--sq-partials", "--sq-method", "ft",
-                  "--save-plot", str(tmp_path / "p2")], monkeypatch)
+        run_cli(monkeypatch, ["--analyse", str(src), "--sq", "--sq-partials", "--sq-method", "ft",
+                  "--save-plot", str(tmp_path / "p2")])
         assert "partials skipped" in capsys.readouterr().out
 
     def test_cutoff_overrides(self, tmp_path, monkeypatch, capsys):
@@ -310,18 +305,18 @@ class TestAnalyseMode:
         a = Atoms("Ga16Zn16O48", positions=rng.uniform(0, 11, (80, 3)),
                   cell=[11, 11, 11], pbc=True)
         src = tmp_path / "gzo.xyz"; write(str(src), a, format="extxyz")
-        _run_cli(["--analyse", str(src), "--cutoff", "2.2,Ga-O=1.9"], monkeypatch)
+        run_cli(monkeypatch, ["--analyse", str(src), "--cutoff", "2.2,Ga-O=1.9"])
         out = capsys.readouterr().out
         assert "Cutoff mode: fixed 2.20 A + overrides Ga-O=1.90" in out
         assert "Ga-O: 1.90 A" in out and "O-Zn: 2.20 A" in out
         assert "Total coordination (all bonded partners):" in out
         assert "O-(Ga+Zn):" in out
         with pytest.raises(SystemExit):
-            _run_cli(["--analyse", str(src), "--cutoff", "Ga-O=abc"], monkeypatch)
+            run_cli(monkeypatch, ["--analyse", str(src), "--cutoff", "Ga-O=abc"])
         assert "Error: could not convert" in capsys.readouterr().out
         plots = tmp_path / "cnplots"
-        _run_cli(["--analyse", str(src), "--total-cn", "O", "--total-cn", "O:Ga",
-                  "--total-cn", "Xe", "--save-plot", str(plots)], monkeypatch)
+        run_cli(monkeypatch, ["--analyse", str(src), "--total-cn", "O", "--total-cn", "O:Ga",
+                  "--total-cn", "Xe", "--save-plot", str(plots)])
         out = capsys.readouterr().out
         assert "Total coordination (requested):" in out
         assert "O-(all bonded): mean=" in out and "O-(Ga): mean=" in out
@@ -354,7 +349,7 @@ class TestAnalyseWithReference:
             "    expected: [1.0, 2.0]\n"
             "    units: 'A'\n"
         )
-        _run_cli(["--analyse", str(src), "--reference", str(ref)], monkeypatch)
+        run_cli(monkeypatch, ["--analyse", str(src), "--reference", str(ref)])
         out = capsys.readouterr().out
         assert "Validation" in out or "match" in out or "Synthetic" in out
 
@@ -386,7 +381,7 @@ class TestRankFromLogMode:
             "  Converged after 4 steps!\n"
             "[3/3] Si16 -> /tmp/fake/random_0002_opt.vasp\n"
         )
-        _run_cli(["--rank-from-log", str(log)], monkeypatch)
+        run_cli(monkeypatch, ["--rank-from-log", str(log)])
         out = capsys.readouterr().out
         # Lowest-energy entry should be 0001 (-53.123).
         assert "Best : random_0001_opt" in out
@@ -411,8 +406,8 @@ class TestRingsAndVoronoiFlags:
 
     def test_rings_and_voronoi(self, tmp_path, monkeypatch, capsys):
         src = self._sio2(tmp_path); plots = tmp_path / "plots"; rep = tmp_path / "r" / "report.txt"
-        _run_cli(["--analyse", "--input-dir", str(src), "--rings", "--voronoi", "Si",
-                  "--save-plot", str(plots), "--save-report", str(rep)], monkeypatch)
+        run_cli(monkeypatch, ["--analyse", "--input-dir", str(src), "--rings", "--voronoi", "Si",
+                  "--save-plot", str(plots), "--save-report", str(rep)])
         out = capsys.readouterr().out
         assert "Ring statistics" in out and " 6-ring:" in out       # cristobalite: 6-rings, Si nodes
         assert "Voronoi indices" in out
@@ -424,7 +419,7 @@ class TestRingsAndVoronoiFlags:
 
     def test_rings_explicit_pair(self, tmp_path, monkeypatch, capsys):
         src = self._sio2(tmp_path)
-        _run_cli(["--analyse", "--input-dir", str(src), "--rings", "Si-O"], monkeypatch)
+        run_cli(monkeypatch, ["--analyse", "--input-dir", str(src), "--rings", "Si-O"])
         assert "nodes-bridge: Si-O" in capsys.readouterr().out
 
 
@@ -434,8 +429,8 @@ def test_connectivity_flag(tmp_path, monkeypatch, capsys):
                     cellpar=[7.16, 7.16, 7.16, 90, 90, 90]).repeat((2, 2, 2))
     src = tmp_path / "in"; src.mkdir(); write(str(src / "s.xyz"), crist, format="extxyz")
     plots = tmp_path / "plots"; rep = tmp_path / "report.txt"
-    _run_cli(["--analyse", "--input-dir", str(src), "--connectivity", "--cutoff", "auto",
-              "--save-plot", str(plots), "--save-report", str(rep)], monkeypatch)
+    run_cli(monkeypatch, ["--analyse", "--input-dir", str(src), "--connectivity", "--cutoff", "auto",
+              "--save-plot", str(plots), "--save-report", str(rep)])
     out = capsys.readouterr().out
     assert "Polyhedral connectivity" in out and "corner 100.0%" in out
     assert "Polyhedral connectivity" in rep.read_text()

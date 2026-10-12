@@ -1,5 +1,7 @@
 """Native sequential generation dispatch and predeclared CLI/YAML settings."""
+
 from __future__ import annotations
+
 
 import sys
 from types import ModuleType
@@ -8,7 +10,9 @@ from unittest.mock import Mock
 import pytest
 import yaml
 
-from amorphgen.cli import _get_parser, _until_convergence_options, main
+from amorphgen_test_helpers import run_cli as _run
+
+from amorphgen.cli import _get_parser, _until_convergence_options
 from amorphgen.configs import load_yaml_config
 
 
@@ -21,11 +25,6 @@ def _arguments():
 def _parse(monkeypatch, arguments):
     monkeypatch.setattr(sys, "argv", ["amorphgen", *map(str, arguments)])
     return _get_parser().parse_args()
-
-
-def _run(monkeypatch, arguments):
-    monkeypatch.setattr(sys, "argv", ["amorphgen", *map(str, arguments)])
-    return main()
 
 
 @pytest.fixture

@@ -360,3 +360,185 @@ class TestConvergenceReport:
             "convergence_temperature.png", "convergence_report.txt",
         }
         assert (out_dir / "convergence_report.txt").read_text() == report["summary_text"]
+
+
+@pytest.fixture
+def diagnostic_frames():
+    """Opposing equal-mass displacements with a known, linear total MSD."""
+    from ase import Atoms
+    from ase.calculators.singlepoint import SinglePointCalculator
+
+    def make(displacements, energies=None):
+        frames = []
+        if energies is None:
+            energies = np.full(len(displacements), -10.0)
+        for displacement, energy in zip(displacements, energies):
+            atoms = Atoms("Si2", positions=[[-2 - displacement, 0, 0],
+                                           [2 + displacement, 0, 0]],
+                          cell=[100, 100, 100], pbc=False)
+            atoms.calc = SinglePointCalculator(atoms, energy=energy)
+            frames.append(atoms)
+        return frames
+
+    return make
+
+
+class TestNumericalDiagnostics:
+    def test_nonuniform_times_and_diffusion_units(self, diagnostic_frames, capsys):
+        import json
+        from amorphgen.utils.equilibration import convergence_report
+
+        # 0.06 A^2/ps / 6 * 1e-4 = 1e-6 cm^2/s; exceed it tenfold.
+        times = np.r_[np.arange(23) * 0.1, 2.25]
+        frames = diagnostic_frames(np.sqrt(0.6 * times))
+        report = convergence_report(frames, time_ps=times, make_plots=False)
+        assert report["diffusion_coefficients_cm2_s"] == pytest.approx({"all": 1e-5, "Si": 1e-5})
+        assert report["msd_final_A2"]["all"] == pytest.approx(0.6 * 2.25)
+        assert report["total_time_ps"] == pytest.approx(2.25)
+        assert report["liquid_test"]["is_liquid"] is True
+        assert report["block_test_passed"] is True
+        assert report["stationarity"]["energy"]["passed"] is True
+        json.dumps(report, allow_nan=False)
+        assert capsys.readouterr().out == ""
+        assert not any(key.startswith("fig_") for key in report)
+
+    @pytest.mark.parametrize("n_frames", [0, 1, 2, 7])
+    def test_short_trajectories_are_inconclusive(self, diagnostic_frames, n_frames):
+        import json
+        from amorphgen.utils.equilibration import convergence_report
+
+        report = convergence_report(diagnostic_frames(np.zeros(n_frames)), make_plots=False)
+        assert report["status"] == "insufficient_data"
+        assert report["liquid_test"]["is_liquid"] is None
+        assert report["diffusion_coefficients_cm2_s"] == {}
+        assert report["freezing_temperature_K"] is None
+        assert report["stationarity"]["diffusion"]["passed"] is None
+        json.dumps(report, allow_nan=False)
+
+    def test_early_late_energy_and_diffusion_detect_drift(self, diagnostic_frames):
+        from amorphgen.utils.equilibration import convergence_report
+
+        times = np.arange(32) * 0.1
+        motion = np.r_[np.sqrt(6 * times[:16]), np.full(16, np.sqrt(6 * times[15]))]
+        energies = np.r_[np.full(16, -10.0), np.full(16, -5.0)]
+        report = convergence_report(diagnostic_frames(motion, energies), time_ps=times,
+                                    make_plots=False)
+        assert report["stationarity"]["energy"]["passed"] is False
+        diffusion = report["stationarity"]["diffusion"]
+        assert diffusion["passed"] is False
+        assert diffusion["early_cm2_s"]["all"] == pytest.approx(1e-4)
+        assert diffusion["late_cm2_s"]["all"] == pytest.approx(0)
+
+    def test_freezing_from_local_temperature_windows(self, diagnostic_frames):
+        from amorphgen.utils.equilibration import convergence_report
+
+        times = np.arange(48) * 0.1
+        motion = np.r_[np.sqrt(6 * times[:16]), np.full(32, np.sqrt(6 * times[15]))]
+        report = convergence_report(diagnostic_frames(motion), time_ps=times,
+                                    temperatures=np.repeat([1000, 600, 300], 16),
+                                    make_plots=False)
+        assert report["diffusion_coefficients_cm2_s"] == {}
+        assert report["liquid_test"]["is_liquid"] is None
+        assert report["freezing_temperature_K"] == 600
+        assert report["diffusion_freezing"]["bracket_K"] == [600, 1000]
+        assert report["diffusion_freezing"]["status"] == "observed"
+        windows = report["temperature_windows"]
+        assert [window["liquid_test"]["is_liquid"] for window in windows] == [True, False, False]
+        assert windows[0]["diffusion_coefficients_cm2_s"]["all"] == pytest.approx(1e-4)
+        assert report["stationarity"]["energy"]["passed"] is None
+
+    def test_short_holds_do_not_manufacture_freezing(self, diagnostic_frames):
+        from amorphgen.utils.equilibration import convergence_report
+
+        report = convergence_report(diagnostic_frames(np.zeros(21)),
+                                    temperatures=np.repeat([1000, 600, 300], 7),
+                                    make_plots=False)
+        assert report["freezing_temperature_K"] is None
+        assert report["diffusion_freezing"]["status"] == "insufficient_data"
+        assert all(window["liquid_test"]["is_liquid"] is None
+                   for window in report["temperature_windows"])
+
+    def test_frozen_entire_ramp_has_no_transition(self, diagnostic_frames):
+        from amorphgen.utils.equilibration import convergence_report
+
+        report = convergence_report(diagnostic_frames(np.zeros(32)),
+                                    temperatures=np.repeat([1000, 300], 16),
+                                    make_plots=False)
+        assert report["freezing_temperature_K"] is None
+        assert report["diffusion_freezing"]["status"] == "no_liquid_reference"
+
+    def test_distinct_undersampled_targets_are_never_combined(self, diagnostic_frames):
+        from amorphgen.utils.equilibration import convergence_report
+
+        report = convergence_report(diagnostic_frames(np.zeros(80)),
+                                    temperatures=np.linspace(2000, 300, 80),
+                                    make_plots=False)
+        assert report["status"] == "insufficient_data"
+        assert len(report["temperature_windows"]) == 80
+        assert all(window["liquid_test"]["is_liquid"] is None
+                   for window in report["temperature_windows"])
+        assert report["freezing_temperature_K"] is None
+
+    def test_missing_energies_still_reports_diffusion(self, diagnostic_frames):
+        from amorphgen.utils.equilibration import convergence_report
+
+        frames = diagnostic_frames(np.zeros(16))
+        for frame in frames:
+            frame.calc = None
+        report = convergence_report(frames, make_plots=False)
+        assert report["block_test_passed"] is None
+        assert report["stationarity"]["energy"]["status"] == "insufficient_data"
+        assert report["liquid_test"]["is_liquid"] is False
+
+    @pytest.mark.parametrize("times", [[0, 0], [0, np.nan], [0], [1, 0]])
+    def test_invalid_sample_times_rejected(self, diagnostic_frames, times):
+        from amorphgen.utils.equilibration import convergence_report
+
+        with pytest.raises(ValueError, match="time_ps"):
+            convergence_report(diagnostic_frames([0, 0]), time_ps=times, make_plots=False)
+
+
+class TestMSDBoundariesAndCell:
+    def test_nonperiodic_motion_is_not_wrapped(self):
+        from ase import Atoms
+        from amorphgen.utils.equilibration import compute_msd
+
+        frames = [Atoms("Si2", positions=[[0, 0, 7 * i], [1, 0, 0]],
+                        cell=[10, 10, 10], pbc=[True, False, False]) for i in range(4)]
+        _, msd = compute_msd(frames)
+        np.testing.assert_allclose(msd["all"], (np.arange(4) * 3.5) ** 2)
+
+    def test_periodic_crossing_is_unwrapped(self):
+        from ase import Atoms
+        from amorphgen.utils.equilibration import compute_msd
+
+        frames = [Atoms("Si2", positions=[[x, 0, 0], [5, 0, 0]],
+                        cell=[10, 10, 10], pbc=True) for x in [9.5, 0, 0.5]]
+        _, msd = compute_msd(frames)
+        np.testing.assert_allclose(msd["all"], [0, 0.0625, 0.25])
+
+    def test_affine_npt_expansion_is_not_diffusion(self):
+        from ase import Atoms
+        from amorphgen.utils.equilibration import compute_msd
+
+        cell = np.array([[10, 0, 0], [1, 9, 0], [2, 1, 10]], float)
+        frames = [Atoms("Si2", scaled_positions=[[0.1, 0.2, 0.3], [0.7, 0.8, 0.9]],
+                        cell=cell * scale, pbc=True) for scale in np.linspace(1, 2, 16)]
+        _, msd = compute_msd(frames)
+        np.testing.assert_allclose(msd["all"], 0, atol=1e-25)
+
+
+class TestExpandedLogParser:
+    def test_pressure_density_and_malformed_rows_are_aligned(self, tmp_path):
+        from amorphgen.utils.equilibration import parse_md_log
+
+        path = tmp_path / "stage.log"
+        path.write_text("0 0 300 -10 1 -9 500 0.125 2.5\n"
+                        "100 0.1 300 -10 1 -9 broken 0.1 2.5\n"
+                        "200 0.2 300 -10 1 -9 500\n"
+                        "300 0.3 300 -10 1 -9 500 nan 2.5\n")
+        data = parse_md_log(path)
+        assert all(len(values) == 3 for values in data.values())
+        np.testing.assert_array_equal(data["step"], [0, 200, 300])
+        np.testing.assert_allclose(data["P_GPa"], [0.125, np.nan, np.nan], equal_nan=True)
+        np.testing.assert_allclose(data["density_g_cm3"], [2.5, np.nan, 2.5], equal_nan=True)

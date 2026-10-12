@@ -11,6 +11,8 @@ from .calculators import (
     MACE_FOUNDATION_MODELS,
     CHGNET_MODELS,
     SEVENNET_MODELS,
+    ACE_MODELS,
+    LAMMPS_MODELS,
     MODEL_DESCRIPTIONS,
 )
 
@@ -79,6 +81,8 @@ __all__ = [
     "MACE_FOUNDATION_MODELS",
     "CHGNET_MODELS",
     "SEVENNET_MODELS",
+    "ACE_MODELS",
+    "LAMMPS_MODELS",
     "MODEL_DESCRIPTIONS",
     "make_cubic",
     "build_md_dynamics",

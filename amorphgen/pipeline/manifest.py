@@ -6,12 +6,13 @@ import json
 import math
 import os
 import platform
-import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
+
+from ..utils.persistence import atomic_write_text, changed_settings as _changed_settings
 
 
 def _timestamp():
@@ -145,21 +146,9 @@ class RunManifest:
 
     def save(self):
         """Replace the manifest only after the complete new JSON is on disk."""
-        temporary = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                mode="w", encoding="utf-8", dir=self.path.parent,
-                prefix=".run_manifest.", suffix=".tmp", delete=False,
-            ) as stream:
-                temporary = stream.name
-                json.dump(_json_value(self.data), stream, indent=2, allow_nan=False)
-                stream.write("\n")
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, self.path)
-        finally:
-            if temporary is not None and os.path.exists(temporary):
-                os.unlink(temporary)
+        atomic_write_text(self.path,
+                          json.dumps(_json_value(self.data), indent=2, allow_nan=False) + "\n",
+                          prefix=".run_manifest.")
 
     def skip_stages(self, stages, checkpoints):
         for record in self.attempt["stages"]:
@@ -198,17 +187,3 @@ class RunManifest:
         self.attempt.update(status=status, finished_at=_timestamp(),
                             elapsed_seconds=time.perf_counter() - self._started)
         self.finish_stage(status, error)
-
-
-def _changed_settings(previous, current, prefix=""):
-    """Return the specific configuration paths that differ, without values."""
-    if isinstance(previous, dict) and isinstance(current, dict):
-        changes = []
-        for key in sorted(previous.keys() | current.keys()):
-            path = f"{prefix}.{key}" if prefix else key
-            if key not in previous or key not in current:
-                changes.append(path)
-            else:
-                changes.extend(_changed_settings(previous[key], current[key], path))
-        return changes
-    return [] if previous == current else [prefix]

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ._serialization import numpy_json_default
 
 def _format_descriptor(name, result):
     """Return a compact, unit-labelled report for a computed descriptor."""
@@ -141,11 +142,10 @@ def format_descriptor(name, result):
 
 
 def _json_default(value):
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, np.generic):
-        return value.item()
-    raise TypeError(f"Cannot encode {type(value).__name__}")
+    try:
+        return numpy_json_default(value)
+    except TypeError:
+        raise TypeError(f"Cannot encode {type(value).__name__}") from None
 
 
 def save_descriptor(name, result, output_dir, *, dpi=300, save_pdf=False,
@@ -343,13 +343,13 @@ def run_descriptor_analysis(sa, args, config, override, *, plot_dir=None,
     calculator = None
     if "elastic" in selected or "vdos" in selected:
         from ..utils import get_calculator
+        from ..utils.calculators import potential_kwargs
         calculator = get_calculator(
             model=override.get("model", args.model),
             model_path=override.get("model_path", args.model_path),
             device=override.get("device", args.device),
             default_dtype=override.get("default_dtype", args.default_dtype),
-            **({"classical_params": override["classical_params"]}
-               if "classical_params" in override else {}))
+            **potential_kwargs(override))
     for name in selected:
         print(f"\n  Computing {name.replace('_', ' ')}...")
         if name == "bond_order":

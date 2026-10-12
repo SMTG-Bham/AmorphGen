@@ -34,6 +34,9 @@ import argparse
 import sys
 import os
 
+from .utils.calculators import calculator_kwargs
+from .utils.structure_io import first_structure_files, write_sorted_vasp
+
 
 # Concise, task-oriented usage shown at the bottom of ``-h`` and by
 # ``--examples``. Kept short on purpose; the full flag list is the rest of -h.
@@ -190,17 +193,12 @@ def _until_convergence_options(args, config):
     if set(bounds) != set(tolerances):
         raise ValueError("every convergence tolerance requires matching descriptor bounds, with no extra bounds")
     from ase.data import atomic_numbers
+    from .configs.descriptor_names import supports_sequential_descriptor
     for name, tolerance in tolerances.items():
         if not isinstance(name, str):
             raise ValueError("convergence descriptor names must be strings")
-        if name not in {"density", "energy.total", "energy.per_atom"}:
-            kind, separator, label = name.partition(".")
-            count = {"coordination": 2, "total_coordination": 1,
-                     "bond_distance": 2, "bond_angle": 3}.get(kind)
-            elements = label.split("-")
-            if (not separator or count is None or len(elements) != count
-                    or any(element not in atomic_numbers for element in elements)):
-                raise ValueError(f"Unsupported sequential descriptor {name!r}")
+        if not supports_sequential_descriptor(name, atomic_numbers):
+            raise ValueError(f"Unsupported sequential descriptor {name!r}")
         if (isinstance(tolerance, bool) or not isinstance(tolerance, (int, float))
                 or not math.isfinite(tolerance) or tolerance <= 0):
             raise ValueError(f"Tolerance for {name!r} must be finite and positive")
@@ -341,11 +339,21 @@ def _add_arguments(p):
 
     # ── Calculator ────────────────────────────────────────────────────────────
     g_calc = p.add_argument_group("calculator")
-    model_group = g_calc.add_mutually_exclusive_group()
-    model_group.add_argument("-m", "--model", default="mace-mpa-0", metavar="NAME",
-                             help="Foundation model (mace-mpa-0, chgnet, sevennet, ...).")
-    model_group.add_argument("--model-path", default=None, metavar="PATH",
-                             help="Path to a local .model file.")
+    g_calc.add_argument("-m", "--model", default="mace-mpa-0", metavar="NAME",
+                        help="Foundation model (mace-mpa-0, chgnet, sevennet, ...), "
+                             "or 'ace' / 'lammps' for a potential file.")
+    g_calc.add_argument("--model-path", default=None, metavar="PATH",
+                        help="Potential file: a MACE .model, or an ACE .yaml/.yace/"
+                             ".ace (implies --model ace).")
+    g_calc.add_argument("--pair-style", default=None, metavar="STYLE",
+                        help="LAMMPS pair style, e.g. 'sw' or 'lj/cut 6.0' "
+                             "(implies --model lammps).")
+    g_calc.add_argument("--pair-coeff", action="append", default=None, metavar="ARGS",
+                        help="LAMMPS pair_coeff arguments, e.g. '* * Si.sw Si'; "
+                             "repeat for several lines.")
+    g_calc.add_argument("--lammps-elements", default=None, metavar="EL,EL",
+                        help="Element of each LAMMPS type in order, e.g. 'Si,O'. "
+                             "Needed when no '* * file El ...' pair_coeff line names them.")
     g_calc.add_argument("-d", "--device", default="auto",
                         choices=["auto", "cuda", "cpu", "mps"],
                         help="Device.")
@@ -876,28 +884,56 @@ def _parse_composition(spec: str) -> dict[str, int]:
     return comp
 
 
-def _classical_kwargs(override: dict) -> dict:
-    """Extract classical_params from config override if present."""
-    kw = {}
-    if override.get("classical_params"):
-        kw["classical_params"] = override["classical_params"]
-    return kw
+def _cli_calculator_kwargs(args, override):
+    return calculator_kwargs(override, defaults={
+        key: getattr(args, key)
+        for key in ("model", "device", "model_path", "default_dtype")
+    })
 
 
-def _parse_minsep(spec: str) -> dict[str, float]:
-    """Parse 'In-In=2.8,In-O=1.9,O-O=2.5' -> {'In-In': 2.8, ...}.
+def _potential_kwargs(override: dict) -> dict:
+    """Extract the potential parameter blocks (classical_params,
+    lammps_params, ace_params) from the config override if present."""
+    from .utils.calculators import potential_kwargs
+    return potential_kwargs(override)
 
-    Raises ValueError on malformed input.
+
+def _infer_potential_model(override: dict) -> str | None:
+    """Set ``model`` to ace / lammps when only their settings were given.
+
+    A ``.yaml`` / ``.yace`` / ``.ace`` model_path implies ACE, and a
+    lammps_params block (or --pair-style) implies LAMMPS. Returns an error
+    message when the model was set to something that would ignore them.
     """
-    minsep = {}
+    from .utils.calculators import is_ace_file
+    model = override.get("model")
+    path = override.get("model_path")
+    if path is not None and is_ace_file(path):
+        if model is None:
+            override["model"] = model = "ace"
+        elif model.lower() != "ace":
+            return (f"{path} is an ACE potential, but the model is '{model}'; "
+                    f"use --model ace (or drop the model setting).")
+    if override.get("lammps_params"):
+        if model is None:
+            override["model"] = model = "lammps"
+        elif model.lower() != "lammps":
+            return (f"LAMMPS settings (--pair-style / --pair-coeff / lammps_params) "
+                    f"were given, but the model is '{model}'; use --model lammps.")
+    return None
+
+
+def _parse_pair_distances(spec: str, label: str, example: str) -> dict[str, float]:
+    """Parse the shared pair-distance syntax, preserving option-specific errors."""
+    distances = {}
     for part in spec.split(","):
         part = part.strip()
         if not part:
             continue
         if "=" not in part:
             raise ValueError(
-                f"Invalid minsep entry: '{part}'. "
-                f"Expected 'A-B=distance' (e.g. 'Si-O=1.6')."
+                f"Invalid {label} entry: '{part}'. "
+                f"Expected 'A-B=distance' (e.g. 'Si-O={example}')."
             )
         pair, val_str = part.split("=", 1)
         pair = pair.strip()
@@ -909,14 +945,19 @@ def _parse_minsep(spec: str) -> dict[str, float]:
             val = float(val_str.strip())
         except ValueError:
             raise ValueError(
-                f"Invalid minsep value for '{pair}': '{val_str.strip()}'."
+                f"Invalid {label} value for '{pair}': '{val_str.strip()}'."
             )
         if val <= 0:
             raise ValueError(
-                f"Minsep for '{pair}' must be positive, got {val}."
+                f"{label.capitalize()} for '{pair}' must be positive, got {val}."
             )
-        minsep[pair] = val
-    return minsep
+        distances[pair] = val
+    return distances
+
+
+def _parse_minsep(spec: str) -> dict[str, float]:
+    """Parse 'In-In=2.8,In-O=1.9,O-O=2.5' into minimum pair distances."""
+    return _parse_pair_distances(spec, "minsep", "1.6")
 
 
 def _parse_target_cn(spec: str) -> dict[str, int]:
@@ -951,38 +992,8 @@ def _parse_target_cn(spec: str) -> dict[str, int]:
 
 
 def _parse_dmax(spec: str) -> dict[str, float]:
-    """Parse 'Si-O=2.0,Si-Si=3.2' -> {'Si-O': 2.0, ...}.
-
-    Raises ValueError on malformed input.
-    """
-    dmax = {}
-    for part in spec.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        if "=" not in part:
-            raise ValueError(
-                f"Invalid dmax entry: '{part}'. "
-                f"Expected 'A-B=distance' (e.g. 'Si-O=2.0')."
-            )
-        pair, val_str = part.split("=", 1)
-        pair = pair.strip()
-        if "-" not in pair:
-            raise ValueError(
-                f"Invalid pair format: '{pair}'. Expected 'A-B' (e.g. 'Si-O')."
-            )
-        try:
-            val = float(val_str.strip())
-        except ValueError:
-            raise ValueError(
-                f"Invalid dmax value for '{pair}': '{val_str.strip()}'."
-            )
-        if val <= 0:
-            raise ValueError(
-                f"Dmax for '{pair}' must be positive, got {val}."
-            )
-        dmax[pair] = val
-    return dmax
+    """Parse 'Si-O=2.0,Si-Si=3.2' into maximum pair distances."""
+    return _parse_pair_distances(spec, "dmax", "2.0")
 
 
 def _build_override(args, parser, explicit_only: bool = False,
@@ -1025,8 +1036,14 @@ def _build_override(args, parser, explicit_only: bool = False,
         def get(key):
             return getattr(args, key)
 
+    lammps = {
+        "pair_style": get("pair_style"),
+        "pair_coeff": get("pair_coeff"),
+        "elements": get("lammps_elements"),
+    }
     mapping = {
         "model": get("model"),
+        "lammps_params": {k: v for k, v in lammps.items() if v is not None} or None,
         "seed": get("seed"),
         "run_index": get("run_index"),
         "engine": get("engine"),
@@ -1312,13 +1329,7 @@ def _run_mq_ensemble(args, override: dict, analysis_config=None) -> None:
 
     # ── Phase 3: stages 5-6-7 per snapshot (with resume) ─────────────────────
     print(f"\n[Phase 3/3] Stages 5-6-7 (per snapshot) -> {quench_dir}/")
-    calc = get_calculator(
-        **_classical_kwargs(override),
-        model=override.get("model", args.model),
-        device=override.get("device", args.device),
-        model_path=override.get("model_path", args.model_path),
-        default_dtype=override.get("default_dtype", args.default_dtype),
-    )
+    calc = get_calculator(**_cli_calculator_kwargs(args, override))
     batch_quench.run(
         snapshot_files=snap_files,
         n_runs=len(snap_files),
@@ -1344,7 +1355,6 @@ def _run_hybrid_ensemble(args, override: dict) -> None:
         quench_runs/ per-input stages 4-7 outputs (run_0000, run_0001, ...)
         final/       collected final amorphous structures (hybrid_NNNN.<fmt>)
     """
-    import glob as _glob
     from .pipeline import batch_quench
     from .utils import get_calculator
     from .pipeline.random_gen import _FORMAT_MAP, random_gen_dir_hint
@@ -1355,11 +1365,7 @@ def _run_hybrid_ensemble(args, override: dict) -> None:
     os.makedirs(work_dir, exist_ok=True)
 
     # Find input structures (any ASE-readable format)
-    snap_files = []
-    for pattern in ("*.xyz", "*.extxyz", "*.vasp", "*.cif", "POSCAR*"):
-        snap_files = sorted(_glob.glob(os.path.join(args.input_dir, pattern)))
-        if snap_files:
-            break
+    snap_files = first_structure_files(args.input_dir)
     if not snap_files:
         print(f"Error: no structure files in {args.input_dir}/ "
               f"(looked for *.xyz, *.extxyz, *.vasp, *.cif, POSCAR*)")
@@ -1408,13 +1414,7 @@ def _run_hybrid_ensemble(args, override: dict) -> None:
         return
 
 
-    calc = get_calculator(
-        **_classical_kwargs(override),
-        model=override.get("model", args.model),
-        device=override.get("device", args.device),
-        model_path=override.get("model_path", args.model_path),
-        default_dtype=override.get("default_dtype", args.default_dtype),
-    )
+    calc = get_calculator(**_cli_calculator_kwargs(args, override))
     batch_quench.run(
         snapshot_files=snap_files,
         n_runs=len(snap_files),
@@ -1491,8 +1491,7 @@ def _collect_ensemble_final(quench_dir: str, final_dir: str, output_format: str,
         atoms = read(src)
         read_relaxation_metadata(src, atoms)
         if ase_format == "vasp":
-            atoms = atoms[atoms.numbers.argsort()]
-            write(dest, atoms, format=ase_format, sort=True)
+            write_sorted_vasp(dest, atoms)
         else:
             write(dest, atoms, format=ase_format)
         write_relaxation_metadata(dest, atoms)
@@ -1610,6 +1609,11 @@ def _main():
         # documented defaults) fills the rest exactly as in YAML mode.
         override = _build_override(args, _get_parser(), explicit_only=True)
 
+    potential_error = _infer_potential_model(override)
+    if potential_error:
+        print(f"Error: {potential_error}")
+        sys.exit(1)
+
     # --hybrid-ensemble / --batch-opt relax with the stage-7 ("final_opt")
     # settings; let a YAML that only has an `opt:` block drive that relax
     # instead of silently falling back to the defaults.
@@ -1640,14 +1644,18 @@ def _main():
     # 1-4 of MD.
     if until_options is not None or _requires_calculator(args, override.get("analysis", {})):
         from .utils.calculators import (require_backend, require_dtype,
-                                        BackendNotInstalledError)
+                                        require_potential, BackendNotInstalledError)
         model = override.get("model", args.model) or "mace-mpa-0"
         model_path = override.get("model_path", getattr(args, "model_path", None))
+        engine = "torchsim" if until_options is not None else override.get("engine")
         try:
             require_backend(model, model_path=model_path)
             require_dtype(model, override.get("default_dtype", args.default_dtype),
                           model_path=model_path)
-        except (BackendNotInstalledError, ValueError, NotImplementedError) as exc:
+            require_potential(model, model_path, engine=engine,
+                              **_potential_kwargs(override))
+        except (BackendNotInstalledError, ValueError, NotImplementedError,
+                FileNotFoundError) as exc:
             print(f"Error: {exc}")
             sys.exit(1)
 
@@ -2375,6 +2383,10 @@ def _main():
                 "classical_params": override.get("classical_params"),
                 "engine": "torchsim" if use_torchsim else "ase",
             }
+            # Only when set, so runs started before these backends resume.
+            for key in ("lammps_params", "ace_params"):
+                if override.get(key):
+                    relax_settings[key] = override[key]
             if use_torchsim:
                 relax_settings["torchsim"] = {
                     "pressure_tol_gpa": opt_cfg.get("pressure_tol_gpa", 0.02),
@@ -2422,13 +2434,7 @@ def _main():
         with run_lock(args.work_dir):
             calc = None
             if do_relax and not use_torchsim:
-                calc = get_calculator(
-                    **_classical_kwargs(override),
-                    model=override.get("model", args.model),
-                    device=override.get("device", args.device),
-                    model_path=override.get("model_path", args.model_path),
-                    default_dtype=override.get("default_dtype", args.default_dtype),
-                )
+                calc = get_calculator(**_cli_calculator_kwargs(args, override))
 
             files = _batch_random_unlocked(
                 composition=composition,
@@ -2491,14 +2497,7 @@ def _main():
                 sys.exit(1)
             return
 
-        calc = get_calculator(
-            **_classical_kwargs(override),
-            model=override.get("model", args.model),
-            device=override.get("device", args.device),
-            model_path=override.get("model_path", args.model_path),
-            default_dtype=override.get("default_dtype", args.default_dtype),
-
-        )
+        calc = get_calculator(**_cli_calculator_kwargs(args, override))
 
         paths = batch_optimize(
             input_dir=args.input_dir,
@@ -2516,7 +2515,6 @@ def _main():
     if args.batch_quench:
         from .pipeline import batch_quench
         from .utils import get_calculator
-        import glob
 
         snap_source = args.snapshot_dir
 
@@ -2548,11 +2546,7 @@ def _main():
         # let users feed in pre-relaxed structures from --random-gen or DFT.
         snap_files: list = extracted_files or []
         if extracted_files is None:
-            for pattern in ("*.xyz", "*.extxyz", "*.vasp", "*.cif", "POSCAR*"):
-                snap_files = sorted(glob.glob(
-                    os.path.join(snap_source, pattern)))
-                if snap_files:
-                    break
+            snap_files = first_structure_files(snap_source)
         if not snap_files:
             from .pipeline.random_gen import random_gen_dir_hint
             print(f"Error: no snapshot files found in {snap_source}/ "
@@ -2562,14 +2556,7 @@ def _main():
                 print(hint)
             sys.exit(1)
 
-        calc = get_calculator(
-            **_classical_kwargs(override),
-            model=override.get("model", args.model),
-            device=override.get("device", args.device),
-            model_path=override.get("model_path", args.model_path),
-            default_dtype=override.get("default_dtype", args.default_dtype),
-
-        )
+        calc = get_calculator(**_cli_calculator_kwargs(args, override))
 
         batch_quench.run(
             snapshot_files=snap_files,
@@ -2600,20 +2587,15 @@ def _main():
         from .pipeline.opt_cell import run as opt_run
         from .utils import get_calculator
 
+        # Build the calculator before changing directory, so relative
+        # potential paths resolve against where the command was run.
+        calc = get_calculator(**_cli_calculator_kwargs(args, override))
         os.makedirs(args.work_dir, exist_ok=True)
         orig_dir = os.getcwd()
         os.chdir(args.work_dir)
 
         try:
             input_path = os.path.join(orig_dir, args.input_file)
-            calc = get_calculator(
-                **_classical_kwargs(override),
-                model=override.get("model", args.model),
-                device=override.get("device", args.device),
-                model_path=override.get("model_path", args.model_path),
-                default_dtype=override.get("default_dtype", args.default_dtype),
-
-            )
             stage_key = "opt" if args.stages == [1] else "final_opt"
             opt_run(input_path, cfg_override=override, calc=calc,
                     stage_key=stage_key)

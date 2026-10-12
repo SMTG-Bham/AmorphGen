@@ -259,6 +259,20 @@ for follow-up DFT work.
 amorphgen --list-models
 ```
 
+### ACE and LAMMPS potentials
+
+```bash
+# ACE potential file; the suffix selects the ACE backend
+amorphgen POSCAR --model-path output_potential.yaml
+
+# Any LAMMPS pair style; --pair-style selects the LAMMPS backend
+amorphgen POSCAR --pair-style tersoff --pair-coeff "* * SiC.tersoff Si C"
+amorphgen POSCAR --pair-style "lj/cut 8.0" --pair-coeff "1 1 0.0104 3.40" \
+    --lammps-elements Ar
+```
+
+See {doc}`/guides/backends` for installation and the LAMMPS type order.
+
 ## Default output directories
 
 | Mode | Default `--work-dir` |

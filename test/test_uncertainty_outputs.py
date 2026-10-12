@@ -85,7 +85,15 @@ def test_curve_exports_include_uncertainty_and_structure_identity(tmp_path):
     assert scalar["bond_angles"]["Si-Si-Si"]["uncertainty"]["sem"] == pytest.approx(15)
 
 
-def test_sq_and_tr_exports_include_bands(tmp_path):
+def test_sq_and_tr_exports_include_bands(tmp_path, monkeypatch):
+    import matplotlib
+    import matplotlib.pyplot as plt
+
+    def no_backend_switch(*args, **kwargs):
+        pytest.fail("Saving analysis figures must not switch the caller's backend")
+
+    monkeypatch.setattr(matplotlib, "use", no_backend_switch)
+    existing_figures = plt.get_fignums()
     frames = [_angle(90), _angle(120)]
     for frame in frames:
         frame.pbc = True
@@ -94,6 +102,7 @@ def test_sq_and_tr_exports_include_bands(tmp_path):
     plot_sq(sq, output_dir=tmp_path, dpi=40)
     tr = sa.total_correlation(qmax=4, nq=20, rmax=3, nr=25, n_bootstrap=40)
     plot_tr(tr, output_dir=tmp_path, dpi=40)
+    assert plt.get_fignums() == existing_figures
     for key in ("sq", "tr"):
         with (tmp_path / f"analysis_{key}_uncertainty.csv").open() as handle:
             rows = list(csv.DictReader(handle))

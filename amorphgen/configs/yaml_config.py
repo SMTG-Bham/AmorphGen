@@ -52,12 +52,31 @@ _VALID_TOP_KEYS = {
     "random_gen": dict,
     "analysis": dict,
     "classical_params": dict,
+    "lammps_params": dict,
+    "ace_params": dict,
     "convert": dict,
     "safety": dict,
     "repulsive_core": dict,
 }
 
-# Stage sub-keys and expected types.
+# Common MD fields describe accepted keys, not physical stage defaults.
+_MD_SCHEMA = {
+    "ensemble": str, "npt_method": str,
+    "timestep": (int, float), "friction": (int, float),
+    "ttime": (int, float), "taup_factor": (int, float),
+    "compressibility_GPa": (int, float),
+    "log_file": str, "traj_file": str, "output_xyz": str,
+}
+_PLATEAU_SCHEMA = {
+    **_MD_SCHEMA, "T": (int, float), "steps": int, "make_cubic": bool,
+}
+_RAMP_SCHEMA = {
+    **_MD_SCHEMA,
+    "T_start": (int, float), "T_end": (int, float), "T_step": (int, float),
+    "steps_per_T": int, "rate": (int, float, type(None)),
+}
+
+# Give each stage its own dictionary so extensions cannot leak across stages.
 _STAGE_SCHEMA = {
     "opt": {
         "fmax": (int, float),
@@ -72,62 +91,20 @@ _STAGE_SCHEMA = {
         "pressure_tol_gpa": (int, float),
         "batch_size": (int, str, type(None)),
     },
-    "eq_premelt": {
-        "ensemble": str, "npt_method": str,
-        "T": (int, float), "steps": int,
-        "timestep": (int, float), "friction": (int, float),
-        "ttime": (int, float),
-        "taup_factor": (int, float),
-        "compressibility_GPa": (int, float),
-    },
-    "melt": {
-        "ensemble": str, "npt_method": str,
-        "T_start": (int, float), "T_end": (int, float),
-        "T_step": (int, float), "steps_per_T": int, "rate": (int, float, type(None)),
-        "timestep": (int, float), "friction": (int, float),
-        "ttime": (int, float), "make_cubic": bool,
-        "taup_factor": (int, float),
-        "compressibility_GPa": (int, float),
-    },
-    "eq_high": {
-        "ensemble": str, "npt_method": str,
-        "T": (int, float), "steps": int,
-        "timestep": (int, float), "friction": (int, float),
-        "ttime": (int, float),
-        "taup_factor": (int, float),
-        "compressibility_GPa": (int, float),
-    },
-    "quench": {
-        "ensemble": str, "npt_method": str,
-        "T_start": (int, float), "T_end": (int, float),
-        "T_step": (int, float), "steps_per_T": int, "rate": (int, float, type(None)),
-        "timestep": (int, float), "friction": (int, float),
-        "ttime": (int, float),
-        "taup_factor": (int, float),
-        "compressibility_GPa": (int, float),
-    },
-    "eq_low": {
-        "ensemble": str, "npt_method": str,
-        "T": (int, float), "steps": int,
-        "timestep": (int, float), "friction": (int, float),
-        "ttime": (int, float),
-        "taup_factor": (int, float),
-        "compressibility_GPa": (int, float),
-    },
+    "eq_premelt": dict(_PLATEAU_SCHEMA),
+    "melt": {**_RAMP_SCHEMA, "make_cubic": bool},
+    "eq_high": dict(_PLATEAU_SCHEMA),
+    "quench": dict(_RAMP_SCHEMA),
+    "eq_low": dict(_PLATEAU_SCHEMA),
 }
 
 _STAGE_SCHEMA["final_opt"] = _STAGE_SCHEMA["opt"]
-for _stage in ("eq_premelt", "melt", "eq_high", "quench", "eq_low"):
-    _STAGE_SCHEMA[_stage].update({
-        "log_file": str, "traj_file": str, "output_xyz": str,
-    })
-for _stage in ("eq_premelt", "eq_high", "eq_low"):
-    _STAGE_SCHEMA[_stage]["make_cubic"] = bool
 
 _NUMBER = (int, float)
 _OPTIONAL_NUMBER = (int, float, type(None))
 _OPTIONAL_DICT = (dict, type(None))
 _OPTIONAL_STRING = (str, type(None))
+_STRINGS = (str, list)
 _PAIR_PARAMS_SCHEMA = dict.fromkeys(("epsilon", "sigma", "A", "rho", "C"), _NUMBER)
 
 # Only settings actually read from YAML belong here; CLI/API-only arguments
@@ -236,6 +213,21 @@ _BLOCK_SCHEMA = {
         "coulomb": bool,
         "coulomb_method": _OPTIONAL_STRING,
     },
+    "lammps_params": {
+        "pair_style": str,
+        "pair_coeff": _STRINGS,
+        "elements": _STRINGS,
+        "commands": _STRINGS,
+        "masses": _OPTIONAL_DICT,
+        "lammps_header": _STRINGS,
+        "amendments": _STRINGS,
+        "log_file": _OPTIONAL_STRING,
+    },
+    "ace_params": {
+        "recursive_evaluator": bool,
+        "recursive": bool,
+        "fast_nl": bool,
+    },
     "convert": {
         "input": str,
         "format": str,
@@ -314,6 +306,9 @@ def _validate_nested_values(cfg: dict, errors: list[str], path: str) -> None:
         "classical_params": {
             "charges": ("element", _NUMBER),
             "params": ("pair", _PAIR_PARAMS_SCHEMA),
+        },
+        "lammps_params": {
+            "masses": ("element", _NUMBER),
         },
     }
     for block_name, fields in maps.items():

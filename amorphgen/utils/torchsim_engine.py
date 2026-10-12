@@ -11,8 +11,8 @@ MACE foundation models and files, SevenNet checkpoints, and the classical pair
 potentials: Lennard-Jones (single sigma/epsilon, used for tests) and
 Buckingham + Coulomb (per-pair parameters from ``classical_params``, Ewald or
 damped-shifted-force electrostatics; built from torch-sim's pair-potential and
-electrostatics models, see :func:`build_classical_model`). CHGNet has no
-torch-sim implementation; use the default ASE engine for it.
+electrostatics models, see :func:`build_classical_model`). CHGNet, ACE and
+LAMMPS have no torch-sim implementation; use the default ASE engine for those.
 
 Inputs and outputs are plain ASE ``Atoms`` so every AmorphGen writer, log and
 analysis path is unchanged.
@@ -49,9 +49,24 @@ def resolve_torch_device(device: str):
     return torch.device(dev)
 
 
+def check_model(model: str, model_path: str | None = None) -> None:
+    """Raise ValueError if *model* has no torch-sim implementation.
+
+    Needs neither torch nor torch-sim, so the CLI checks before any work.
+    """
+    from .calculators import is_ace_file
+    name = (model or "").lower()
+    if model_path is not None and is_ace_file(model_path):
+        name = "ace"
+    if name in ("chgnet", "ace", "lammps"):
+        raise ValueError(f"'{name}' has no torch-sim implementation; use the ASE "
+                         f"engine (drop --engine torchsim) for this model.")
+
+
 def build_model(model: str, device: str = "auto", model_path: str | None = None,
                 classical_params: dict | None = None, dtype: str = "float64"):
     """Build a torch-sim ModelInterface for an AmorphGen model name."""
+    check_model(model, model_path)
     if model_path is not None and not os.path.isfile(model_path):
         raise FileNotFoundError(
             f"Custom MACE model file not found: {model_path}\n"
@@ -77,10 +92,6 @@ def build_model(model: str, device: str = "auto", model_path: str | None = None,
 
     if name in ("buckingham", "buck"):
         return build_classical_model(classical_params, device=dev, dtype=tdtype)
-
-    if name == "chgnet":
-        raise ValueError(f"'{model}' has no torch-sim implementation; use the ASE "
-                         f"engine (drop --engine torchsim) for this model.")
 
     if model_path or name.startswith("mace") or _ci_get(MACE_FOUNDATION_MODELS, model) != model:
         from torch_sim.models.mace import MaceModel
@@ -225,6 +236,7 @@ class _TorchSafetyBridge:
     """
 
     _ID = "amorphgen_safety_id"
+    _STRESS = "amorphgen_model_stress"
 
     def __init__(self, atoms_list, config=None, context="torch-sim"):
         from .safety import SafetyMonitor
@@ -300,8 +312,11 @@ class _TorchSafetyBridge:
     def check(self, state, results=None, geometry_only=False):
         if results is None and not geometry_only:
             results = {key: getattr(state, key) for key in ("energy", "forces")}
-            if getattr(state, "stress", None) is not None:
-                results["stress"] = state.stress
+            stress = getattr(state, "stress", None)
+            if stress is None:
+                stress = state.system_extras.get(self._STRESS)
+            if stress is not None:
+                results["stress"] = stress
         frames = self.atoms(state, results)
         for original, atoms in zip(self.ids(state), frames):
             monitor = self.monitors[original]
@@ -342,6 +357,13 @@ class _TorchSafetyBridge:
                 if base is not None:
                     checked["_amorphgen_base_results"] = base
                 bridge.check(state, checked)
+                # NVT MDState keeps energy and forces but drops the canonical
+                # model stress. Preserve it as a per-system extra so logging
+                # gets the current virial without another model evaluation.
+                if results.get("stress") is not None:
+                    state.system_extras[bridge._STRESS] = results["stress"].detach()
+                else:
+                    state.system_extras.pop(bridge._STRESS, None)
                 return results
 
         return GuardedModel()

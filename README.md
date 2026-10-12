@@ -152,10 +152,12 @@ AmorphGen supports multiple calculator backends:
 | **CHGNet** | `pip install "amorphgen[chgnet]"` | `chgnet` |
 | **SevenNet** | `pip install "amorphgen[sevennet]"` | `sevennet`, `7net-mf-ompa`, `7net-l3i5`, `7net-omat`, `7net-0`, ... |
 | **Classical** | built-in (no extra install) | `lennard-jones`, `buckingham` |
+| **ACE** | `pip install "amorphgen[ace]"` | `ace`, with a pacemaker `.yaml` / `.yace` / `.ace` file via `--model-path` |
+| **LAMMPS** | `pip install "amorphgen[lammps]"` | `lammps`, with any pair style via `--pair-style` / `--pair-coeff` |
 
 Only install the backend(s) you need. Classical potentials (Lennard-Jones, Buckingham+Coulomb) are built-in and require no GPU. Use `amorphgen --list-models` to see all available models.
 
-For ensembles on a GPU there is a second execution engine, [torch-sim](https://github.com/torchsim/torch-sim), selected with `--engine torchsim`. It relaxes structures in batches and supports NVT annealing and quenching in the hybrid workflow. Batch sizes adapt to available memory. It works with MACE, SevenNet and Lennard-Jones (CHGNet and Buckingham stay on the ASE engine), needs Python 3.12+, the `[torchsim]` extra and a C/C++ compiler (it compiles kernels while it runs), and writes the same files as the ASE engine. See the [backends guide](https://smtg-bham.github.io/AmorphGen/guides/backends.html) for details.
+For ensembles on a GPU there is a second execution engine, [torch-sim](https://github.com/torchsim/torch-sim), selected with `--engine torchsim`. It relaxes structures in batches and supports NVT annealing and quenching in the hybrid workflow. Batch sizes adapt to available memory. It works with MACE, SevenNet and Lennard-Jones (CHGNet, Buckingham, ACE and LAMMPS stay on the ASE engine), needs Python 3.12+, the `[torchsim]` extra and a C/C++ compiler (it compiles kernels while it runs), and writes the same files as the ASE engine. See the [backends guide](https://smtg-bham.github.io/AmorphGen/guides/backends.html) for details.
 
 > **ASE pass-through.** AmorphGen wraps each backend's upstream ASE calculator without modifying unit conventions, stress signs, or PBC handling; energies (eV), forces (eV/Å), stress (eV/Å³), and `atoms.pbc` are inherited directly from the upstream MLIP package. See [docs/guides/backends](https://smtg-bham.github.io/AmorphGen/guides/backends.html) for details.
 
@@ -184,6 +186,7 @@ AmorphGen requires Python 3.10+ and supports Linux and macOS. Windows is not sup
 | MLIP relaxation and melt-quench MD | `pip install -e ".[mace]"` or `pip install -e ".[chgnet]"` |
 | MACE + CHGNet | `pip install -e ".[all]"` |
 | Batched relaxation and hybrid MD (`--engine torchsim`) | `pip install -e ".[mace,torchsim]"` (Python 3.12+, a C/C++ compiler, CUDA or CPU; no Apple MPS) |
+| A published ACE potential or LAMMPS pair style | `pip install -e ".[ace]"` (Linux x86_64 wheels, Python 3.10-3.13) or `pip install -e ".[lammps]"` |
 
 Install from source:
 
@@ -304,6 +307,17 @@ pipe = MeltQuenchPipeline(
 pipe = MeltQuenchPipeline(
     input_file="POSCAR",
     cfg_override={"model_path": "/data/models/InO_finetuned.model"},
+)
+
+# ACE potential file (pacemaker) or a LAMMPS pair style
+pipe = MeltQuenchPipeline(
+    input_file="POSCAR",
+    cfg_override={"model": "ace", "model_path": "output_potential.yaml"},
+)
+pipe = MeltQuenchPipeline(
+    input_file="POSCAR",
+    cfg_override={"model": "lammps", "lammps_params": {
+        "pair_style": "tersoff", "pair_coeff": "* * SiC.tersoff Si C"}},
 )
 
 # Run specific stages
@@ -950,6 +964,8 @@ For `--quench-T-step -100` and `--timestep 0.5`, common cooling rates are:
 | `7net-mf-ompa` | SevenNet | Multi-fidelity foundation, OMat+MPtrj+Alexandria |
 | `lennard-jones` | Classical | Pair potential, no GPU needed |
 | `buckingham` | Classical | Buckingham + Coulomb (Wolf summation), no GPU needed |
+| `ace` | ACE | Potential file via `--model-path pot.yace` (pyace, CPU) |
+| `lammps` | LAMMPS | Any pair style via `--pair-style` / `--pair-coeff` (LAMMPSlib, CPU) |
 
 ```bash
 amorphgen --list-models   # full table of all models grouped by backend
@@ -1121,6 +1137,8 @@ dependency conditions and restart limits.
 | `chgnet` | CHGNet calculator (optional) |
 | `sevenn` | SevenNet calculator (optional) |
 | `torch-sim-atomistic` | Batched GPU engine for ensembles, `--engine torchsim` (optional, Python 3.12+) |
+| `python-ace` | ACE potential files via pyace (optional) |
+| `lammps` | LAMMPS pair styles via ASE's LAMMPSlib (optional) |
 
 </details>
 
@@ -1130,7 +1148,7 @@ dependency conditions and restart limits.
 <summary><h2>Citation</h2></summary>
 
 If you use AmorphGen in your research, please cite the package
-and the foundation model(s) you used.
+and the potential(s) you used.
 
 **AmorphGen:**
 ```bibtex
@@ -1175,6 +1193,46 @@ A Zenodo DOI for tagged releases will be added on first stable release.
   author  = {Park, Yutack and Kim, Jaesun and Hwang, Seungwoo and Han, Seungwu},
   journal = {Journal of Chemical Theory and Computation},
   year    = {2024},
+}
+```
+
+**ACE potentials** (cite the potential's own paper as well):
+```bibtex
+@article{drautz2019ace,
+  title   = {Atomic cluster expansion for accurate and transferable interatomic potentials},
+  author  = {Drautz, Ralf},
+  journal = {Physical Review B},
+  volume  = {99},
+  pages   = {014104},
+  year    = {2019},
+}
+@article{lysogorskiy2021pace,
+  title   = {Performant implementation of the atomic cluster expansion (PACE) and application to copper and silicon},
+  author  = {Lysogorskiy, Yury and others},
+  journal = {npj Computational Materials},
+  volume  = {7},
+  pages   = {97},
+  year    = {2021},
+}
+@article{bochkarev2022pacemaker,
+  title   = {Efficient parametrization of the atomic cluster expansion},
+  author  = {Bochkarev, Anton and others},
+  journal = {Physical Review Materials},
+  volume  = {6},
+  pages   = {013804},
+  year    = {2022},
+}
+```
+
+**LAMMPS** (cite the pair style's own paper as well):
+```bibtex
+@article{thompson2022lammps,
+  title   = {LAMMPS - a flexible simulation tool for particle-based materials modeling at the atomic, meso, and continuum scales},
+  author  = {Thompson, Aidan P. and others},
+  journal = {Computer Physics Communications},
+  volume  = {271},
+  pages   = {108171},
+  year    = {2022},
 }
 ```
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 # ----------------------------------------------------------------------------
 # AmorphGen — amorphous IrO2 ensemble, CUBIC cell relaxation, as a job ARRAY
-# on BlueBear bbshort (quick CPU queue). 20 tasks x 1 structure = 20 samples.
+# on BlueBEAR bbgpu. 20 tasks x 1 structure = 20 samples.
 #
 # This is the CUBIC-RELAX control run: the cell volume relaxes (shape stays
 # cubic), so MACE-MPA-0 is allowed to choose the density. For IrO2 it
@@ -13,10 +13,13 @@
 # Each task uses seed 2026 + task ID, producing distinct reproducible samples
 # and preserving the same sample when a preempted task resumes.
 #
-# bbshort is CPU-only with a short walltime cap (~10 min). Each task is sized
-# to fit: 1 structure, CPU+float32, opt-steps 200. If your bbshort allows more
-# time, raise --time and --opt-steps. If you have GPU access on a short queue,
-# add `#SBATCH --gres=gpu:1` and switch to `--device cuda --default-dtype float64`.
+# To resume only selected tasks, submit this same script with scheduler
+# overrides (replaces the former run_iro2_cubic_resubmit_bluebear.slurm):
+#   sbatch --array=0,4,6,9,11,12,13,14 --job-name=amg_iro2_cubic_re \
+#     --output=logs/iro2_cubic_re_%A_%a.out --error=logs/iro2_cubic_re_%A_%a.err \
+#     examples/run_iro2_cubic_array_bluebear.slurm
+# Add your usual --account option. Task IDs retain their seeds and output
+# directories; --resume continues any unfinished relaxation.
 # ----------------------------------------------------------------------------
 
 #SBATCH --signal=B:USR1@120

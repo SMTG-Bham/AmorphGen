@@ -298,6 +298,38 @@ eq_high:
 The other MD stages default to NVT, and Stage 7 inherits the fixed-cell
 `opt:` settings. See {doc}`backends` for parameter and electrostatics options.
 
+## Example: ACE and LAMMPS potentials
+
+An ACE potential needs only its file; the `.yaml` / `.yace` / `.ace` suffix
+selects the ACE backend:
+
+```yaml
+model: ace                    # optional, implied by the suffix
+model_path: output_potential.yaml
+ace_params:                   # optional pyace evaluator settings
+  recursive_evaluator: false
+  recursive: false
+  fast_nl: true
+```
+
+A LAMMPS pair style goes in a `lammps_params` block, which implies
+`model: lammps`:
+
+```yaml
+lammps_params:
+  pair_style: tersoff
+  pair_coeff: "* * SiC.tersoff Si C"   # or a list of lines
+  elements: [Si, C]          # type order; read from "* *" lines when omitted
+  commands: []               # more LAMMPS commands after the pair_coeff lines
+  masses: {Si: 28.0855}      # amu; default ASE masses
+  log_file: lammps.log
+  # lammps_header / amendments: passed to ASE's LAMMPSlib unchanged
+```
+
+Both keep stress, so the default NPT stages run unchanged. File paths are
+relative to where `amorphgen` is run, not to the YAML file, as for
+`model_path`. See {doc}`backends` for the type-order rules and installation.
+
 ## Loading YAML in Python
 
 ```python
@@ -311,7 +343,8 @@ pipe.run()
 
 `load_yaml_config()` rejects unknown keys and invalid types with `ValueError`
 before running a workflow. Validation covers every block, including
-`final_opt`, `random_gen`, `analysis`, `classical_params`, and `convert`, and
+`final_opt`, `random_gen`, `analysis`, `classical_params`, `lammps_params`,
+`ace_params` and `convert`, and
 reports the full path to an invalid setting (for example,
 `classical_params.params.Si-O.rhoo`). Element and pair maps accept chemical
 symbols such as `Si` and pairs such as `Si-O`; their values are checked too.

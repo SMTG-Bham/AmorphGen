@@ -16,7 +16,10 @@ Python API.
 
 | Section | Key | Default | Description |
 |---------|-----|---------|-------------|
-| top-level | `model` | `"mace-mpa-0"` | MLIP model name |
+| top-level | `model` | `"mace-mpa-0"` | MLIP model name, or `ace` / `lammps` |
+| top-level | `model_path` | `None` | Potential file: a MACE `.model`, or an ACE `.yaml` / `.yace` / `.ace` (selects ACE) |
+| top-level | `lammps_params` | — | LAMMPS pair style (`pair_style`, `pair_coeff`, ...); selects `lammps`, see {doc}`/guides/backends` |
+| top-level | `ace_params` | — | pyace evaluator options (`recursive_evaluator`, `recursive`, `fast_nl`) |
 | top-level | `device` | `"auto"` | Compute device (`cpu`, `cuda`, `mps`) |
 | top-level | `default_dtype` | `"auto"` | Calculator precision: `float32` for CHGNet; `float64` for MACE and SevenNet |
 | top-level | `engine` | `"ase"` | Ensemble engine (`ase` or optional `torchsim`; see {doc}`/guides/backends`) |
@@ -53,7 +56,8 @@ All MD stages default to a `0.5` fs timestep. The `opt` section supplies
 settings for stages 1 and 7; a partial `final_opt` section overrides individual
 settings for stage 7. The CLI defaults to `cell_filter: cubic` for
 `--random-gen --relax`, `--batch-opt`, and `--hybrid-ensemble` unless a filter
-is selected explicitly. Classical calculators ignore `default_dtype`.
+is selected explicitly. Classical calculators ignore `default_dtype`; ACE and
+LAMMPS always evaluate in float64.
 
 See {doc}`/guides/yaml-config` for the `safety` and `repulsive_core` blocks,
 including per-step failure limits and optional reference-model spot checks.

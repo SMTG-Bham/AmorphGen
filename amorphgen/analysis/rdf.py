@@ -17,9 +17,9 @@ Applied Crystallography 34(2), 172-177 (2001).
 from __future__ import annotations
 
 import numpy as np
-from ase.neighborlist import neighbor_list
 
 from .cutoff import check_rmax
+from ._rdf_kernel import raw_frame_rdfs
 from .uncertainty import summarize_structures
 
 # Default Gaussian smearing (A) applied to g(r)
@@ -90,27 +90,12 @@ def _rdf_curves(atoms_list, pair, rmax, nbins, sigma):
     shell_vols = 4 * np.pi * r**2 * dr
     curves = []
     for atoms in atoms_list:
-        idx_i, idx_j, dists = neighbor_list('ijd', atoms, cutoff=rmax)
-        syms = np.array(atoms.get_chemical_symbols())
-        vol = atoms.get_volume()
-        if pair is not None:
-            p1, p2 = pair.split("-")
-            n_source = int(np.sum(syms == p1))
-            n_target = int(np.sum(syms == p2)) - int(p1 == p2)
-            pair_dists = dists[(syms[idx_i] == p1) & (syms[idx_j] == p2)]
-        else:
-            n_source = len(atoms)
-            n_target = n_source - 1
-            pair_dists = dists
-        if n_source == 0 or n_target <= 0:
+        g = raw_frame_rdfs(atoms, [pair], rmax, shell_vols)[pair]
+        if g is None:
             # An absent species has no defined partial RDF. A present pair
             # with no neighbours inside rmax, on the other hand, has g=0.
             curves.append(np.full(nbins, np.nan))
             continue
-        in_range = (pair_dists > 0) & (pair_dists < rmax)
-        hist, _ = np.histogram(pair_dists[in_range], bins=nbins,
-                               range=(0, rmax))
-        g = hist / (n_source * (n_target / vol) * shell_vols)
         curves.append(_gaussian_smear(r, g, sigma))
     return r, np.asarray(curves, dtype=float).reshape(len(atoms_list), nbins)
 

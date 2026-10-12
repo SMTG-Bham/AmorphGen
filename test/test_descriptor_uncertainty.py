@@ -73,6 +73,25 @@ def test_no_energy_has_unavailable_uncertainty():
     assert result["uncertainty"]["energy_per_atom"]["sem"] is None
 
 
+@pytest.mark.parametrize("stored,expected", [(None, -9), (float("nan"), None),
+                                            ("invalid", None), (-3, -3)])
+def test_energy_source_precedence_retains_ranking_and_screening_policies(stored, expected):
+    from ase.calculators.singlepoint import SinglePointCalculator
+    from amorphgen.analysis.screening import screen_structures
+
+    atoms = Atoms("Si", cell=[10] * 3)
+    atoms.info.update(energy=stored, Energy=-5, potential_energy=-7)
+    atoms.calc = SinglePointCalculator(atoms, energy=-9)
+    ranking = compute_energy_ranking([atoms])
+    assert ranking["per_structure"][0]["energy"] == expected
+    screen = screen_structures([atoms], {"energy": {"max": 0}})
+    row = screen["per_structure"][0]["screens"]["energy"]
+    # A stored None permits ranking's calculator fallback, but screening
+    # treats invalid stored metadata as unavailable rather than selecting a
+    # lower-priority field or falling through to a cached calculator result.
+    assert row["status"] == ("passed" if stored == -3 else "unavailable")
+
+
 def test_void_ensemble_sem_is_distinct_from_monte_carlo_error():
     structures = [Atoms("Si", cell=[length] * 3, pbc=True) for length in [3, 7]]
     result = compute_void_distribution(structures, n_samples=400, nbins=10, seed=2)

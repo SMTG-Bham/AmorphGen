@@ -87,13 +87,10 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high",
 
     if calc is None:
         from ..utils.common import resolve_device
-        device = resolve_device(global_cfg.get("device", "cuda"))
-        calc = get_calculator(
-            model=global_cfg.get("model", "mace-mpa-0"),
-            device=device,
-            model_path=global_cfg.get("model_path"),
-            default_dtype=global_cfg.get("default_dtype", "auto"),
-        )
+        from ..utils.calculators import calculator_kwargs
+        arguments = calculator_kwargs(global_cfg)
+        arguments["device"] = resolve_device(arguments["device"])
+        calc = get_calculator(**arguments)
     from ..utils.repulsion import with_repulsive_core
     calc = with_repulsive_core(calc, global_cfg.get("repulsive_core"))
     atoms.calc = calc
@@ -133,6 +130,12 @@ def run(atoms_or_file, cfg_override=None, calc=None, stage="high",
     finally:
         logger.close()
         traj.close()
+
+    from ..utils.md_diagnostics import write_stage_diagnostics
+    write_stage_diagnostics(
+        logfile, trajfile, timestep_fs=cfg.get("timestep", 1.0),
+        stage=int(stage_label), T_target=T,
+        traj_format=global_cfg.get("traj_format", "extxyz"))
 
     out_xyz = stage_file(cfg.get("output_xyz", f"stage{stage_label}_eq.xyz"), work_dir)
     write(out_xyz, atoms, format="extxyz")

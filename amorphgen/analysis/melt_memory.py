@@ -16,6 +16,7 @@ import numpy as np
 from ase.io import read
 
 from .bond_order import compute_bond_order
+from ._serialization import numpy_json_default
 
 
 _INTERPRETATION = (
@@ -181,13 +182,9 @@ def format_melt_memory(report):
 
 
 def _json_default(value):
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, np.generic):
-        return value.item()
     if isinstance(value, Path):
         return str(value)
-    raise TypeError(f"Cannot serialize {type(value).__name__}")
+    return numpy_json_default(value)
 
 
 def prepare_melt_memory(input_file, cutoff="auto-rdf", qbar6_threshold=0.3,

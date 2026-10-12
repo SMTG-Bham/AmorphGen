@@ -1,6 +1,7 @@
 # Calculators
 
-The calculator module provides a unified interface to MLIP and classical backends.
+The calculator module provides a unified interface to MLIP, classical, ACE and
+LAMMPS backends.
 
 ## Calculator factory
 
@@ -15,9 +16,11 @@ The calculator module provides a unified interface to MLIP and classical backend
 ## Backend detection
 
 ```{eval-rst}
+.. autofunction:: amorphgen.utils.calculators.backend_for
 .. autofunction:: amorphgen.utils.calculators.backend_available
 .. autofunction:: amorphgen.utils.calculators.available_backends
 .. autofunction:: amorphgen.utils.calculators.require_backend
+.. autofunction:: amorphgen.utils.calculators.require_potential
 ```
 
 ## MACE models
@@ -97,6 +100,30 @@ calc = get_calculator("buckingham", classical_params={
 ```{eval-rst}
 .. autoclass:: amorphgen.utils.classical.LennardJonesCalculator
 .. autoclass:: amorphgen.utils.classical.BuckinghamCalculator
+```
+
+## ACE and LAMMPS potential files
+
+| Model name | Potential | Settings |
+|------------|-----------|----------|
+| `ace` | ACE potential file via pyace's `PyACECalculator` | `model_path` (`.yaml` / `.yace` / `.ace`, which alone selects ACE); optional `ace_params` |
+| `lammps` | any LAMMPS pair style via ASE's `LAMMPSlib` | `lammps_params` (`pair_style`, `pair_coeff`, optional `elements`, `commands`, `masses`, `lammps_header`, `amendments`, `log_file`) |
+
+Both run on the CPU in float64 and supply stress; neither runs on the torch-sim
+engine. Install the `ace` or `lammps` extra. See {doc}`../guides/backends` for
+the LAMMPS type-order rules.
+
+```python
+from amorphgen.utils.calculators import get_calculator
+
+calc = get_calculator(model_path="output_potential.yaml")
+calc = get_calculator("lammps", lammps_params={
+    "pair_style": "tersoff", "pair_coeff": "* * SiC.tersoff Si C"})
+```
+
+```{eval-rst}
+.. autofunction:: amorphgen.utils.lammps_potential.lammps_setup
+.. autoclass:: amorphgen.utils.lammps_potential.LAMMPSCalculator
 ```
 
 ## Deprecated aliases

@@ -209,7 +209,7 @@ class TestRateConfig:
                                        stage, rate, timestep, expected_steps):
         """The stage uses rate magnitude and timestep, overriding steps_per_T."""
         from unittest.mock import Mock, call
-        from amorphgen.pipeline import melt_cell, quench
+        from amorphgen.pipeline import melt_cell, quench, md_ramp
 
         module = melt_cell if stage == "melt" else quench
         temperatures = [300, 400, 500, 600]
@@ -222,8 +222,8 @@ class TestRateConfig:
             "steps_per_T": 99999,
         }})
         dyn = Mock(spec=["set_temperature", "run"])
-        monkeypatch.setattr(module, "build_md_dynamics", Mock(return_value=dyn))
-        monkeypatch.setattr(module, "attach_outputs",
+        monkeypatch.setattr(md_ramp, "build_md_dynamics", Mock(return_value=dyn))
+        monkeypatch.setattr(md_ramp, "attach_outputs",
                             Mock(return_value=(Mock(), Mock())))
 
         module.run(cu_supercell, cfg_override=cfg, calc=emt_calc)
@@ -486,11 +486,16 @@ class TestStageWorkDir:
         quench.run(cu_supercell, EMT_CFG, emt_calc, work_dir="a/quench")
         assert sorted(os.listdir(".")) == ["a", "eq", "input.xyz", "melt"]
         assert sorted(os.listdir("eq")) == [
-            "stage4_eq.log", "stage4_eq.xyz", "stage4_eq_traj.xyz"]
+            "stage4_eq.log", "stage4_eq.xyz", "stage4_eq_diagnostics.json",
+            "stage4_eq_diagnostics.txt", "stage4_eq_traj.xyz"]
         assert sorted(os.listdir("melt")) == [
-            "stage3_melt.log", "stage3_melt_traj.xyz", "stage3_melted.xyz"]
+            "stage3_melt.log", "stage3_melt_diagnostics.json",
+            "stage3_melt_diagnostics.txt", "stage3_melt_traj.xyz",
+            "stage3_melted.xyz"]
         assert sorted(os.listdir("a/quench")) == [
-            "stage5_quench.log", "stage5_quench_traj.xyz", "stage5_quenched.xyz"]
+            "stage5_quench.log", "stage5_quench_diagnostics.json",
+            "stage5_quench_diagnostics.txt", "stage5_quench_traj.xyz",
+            "stage5_quenched.xyz"]
 
     def test_opt_stages(self, cu_supercell, emt_calc, tmp_work_dir):
         from amorphgen.pipeline import opt_cell, final_opt

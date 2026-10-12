@@ -22,6 +22,7 @@ from numbers import Real
 import numpy as np
 from scipy.stats import t
 
+from ._serialization import finite_native as _native
 
 _ASSUMPTIONS = [
     "Structures are independent draws from the same generating distribution; "
@@ -67,14 +68,6 @@ def _finite_real(value, message):
     if not np.isfinite(result):
         raise ValueError(message)
     return result
-
-
-def _native(value):
-    array = np.asarray(value)
-    if array.ndim:
-        return [_native(item) for item in array]
-    value = float(array)
-    return value if np.isfinite(value) else None
 
 
 def _matrix(values, name):

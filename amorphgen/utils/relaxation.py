@@ -8,13 +8,44 @@ metadata have unknown convergence.
 
 from __future__ import annotations
 
-import hashlib
+import importlib
 import json
-import os
-import tempfile
 from pathlib import Path
 
 import numpy as np
+
+from .persistence import atomic_write_text, sha256_file as _sha256
+
+
+OPTIMIZERS = {
+    "LBFGS": ("ase.optimize", "LBFGS"),
+    "FIRE": ("ase.optimize", "FIRE"),
+    "BFGSLineSearch": ("ase.optimize", "BFGSLineSearch"),
+    "BFGS": ("ase.optimize", "BFGS"),
+    "MDMin": ("ase.optimize", "MDMin"),
+}
+
+
+def get_optimizer_class(name):
+    """Import an ASE optimizer, preserving the supported names and errors."""
+    if name not in OPTIMIZERS:
+        raise ValueError(f"Unknown optimizer '{name}'. Choose from: {', '.join(OPTIMIZERS)}")
+    module_path, cls_name = OPTIMIZERS[name]
+    return getattr(importlib.import_module(module_path), cls_name)
+
+
+def build_cell_filter(atoms, cell_filter):
+    """Build the ASE relaxation target; the caller checks stress capability."""
+    if cell_filter == "none" or cell_filter is None:
+        return atoms
+    if cell_filter == "cubic":
+        from .common import cubic_cell_filter
+        return cubic_cell_filter(atoms)
+    from ase.filters import ExpCellFilter, StrainFilter, UnitCellFilter, FrechetCellFilter
+    # Retain the established Frechet fallback for unrecognized names.
+    cls = {"ExpCellFilter": ExpCellFilter, "StrainFilter": StrainFilter,
+           "UnitCellFilter": UnitCellFilter}.get(cell_filter, FrechetCellFilter)
+    return cls(atoms)
 
 
 _FIELDS = {
@@ -61,14 +92,6 @@ def record_relaxation_metadata(atoms, *, converged, fmax, max_force, steps,
         atoms.info["relaxation_pressure_gpa"] = float(pressure_gpa)
 
 
-def _sha256(path):
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def write_relaxation_metadata(path, atoms):
     """Atomically write a sidecar for an already-written structure file."""
     # ASE's extxyz reader returns NumPy scalars for numerical info fields.
@@ -78,20 +101,9 @@ def write_relaxation_metadata(path, atoms):
         return
     destination = Path(str(path) + ".relaxation.json")
     payload = {"schema_version": 1, "sha256": _sha256(path), "metadata": metadata}
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
-                                         dir=destination.parent,
-                                         prefix=destination.name + ".",
-                                         suffix=".tmp", delete=False) as handle:
-            temporary = handle.name
-            json.dump(payload, handle, indent=2, sort_keys=True, allow_nan=False)
-            handle.write("\n")
-        os.replace(temporary, destination)
-        temporary = None
-    finally:
-        if temporary is not None:
-            os.unlink(temporary)
+    atomic_write_text(destination,
+                      json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                      fsync=False)
 
 
 def read_relaxation_metadata(path, atoms=None):
