@@ -176,6 +176,26 @@ See the bundled
 [`example_classical.yaml`](https://github.com/SMTG-Bham/AmorphGen/blob/main/amorphgen/configs/example_classical.yaml)
 for a complete example.
 
+#### Buckingham on the batched engine
+
+The same `classical_params` run on the torch-sim engine (`--engine torchsim`,
+`pip install "amorphgen[torchsim]"`), batched over structures and on the GPU
+when one is present: random + relax, `--batch-opt` and the hybrid-ensemble MD
+stages. The model is assembled from torch-sim's pair-potential and
+electrostatics models; `coulomb_method: ewald` uses its Ewald sum (agrees
+with the NumPy calculator to ~2e-4 eV/atom), `wolf` maps to its
+damped-shifted-force kernel with the same `alpha` (forces within a few per
+cent of the NumPy Wolf sum; the energies carry a different self-term, so
+compare energies between engines only with `ewald`). Stress is available, so
+`--cell-filter cubic` works. On one CPU core the batched model is ~5x faster
+than the NumPy calculator for a 648-atom SiO2 cell; on a GPU the whole
+ensemble runs in one batch.
+
+```bash
+amorphgen --random-gen --composition "SiO2*216" -n 20 --target-density 2.20 \
+    --relax --config bks_sio2.yaml --engine torchsim --batch-size auto -C none -o sio2_bks
+```
+
 ## Potential files: ACE and LAMMPS
 
 Potentials fitted for one system are often published as an ACE potential file
@@ -318,9 +338,10 @@ to torch-sim's unit-cell filter with hydrostatic strain, `FrechetCellFilter` to
 its Frechet filter, `none` to fixed cell). Gradient descent is available through
 YAML/Python as `optimizer: gradient_descent`; ASE-only choices such as `MDMin`
 and `BFGSLineSearch` are rejected by this engine. Supported models: MACE foundation
-models and `.model` files, SevenNet checkpoints, and Lennard-Jones with a
-single sigma/epsilon pair. For mixtures with different pair parameters, use
-ASE. CHGNet, Buckingham+Coulomb, ACE and LAMMPS have no torch-sim
+models and `.model` files, SevenNet checkpoints, Lennard-Jones with a
+single sigma/epsilon pair, and Buckingham+Coulomb with per-pair parameters
+(see above). For Lennard-Jones mixtures with different pair parameters, use
+ASE. CHGNet, ACE and LAMMPS have no torch-sim
 implementation and raise a clear error; use the ASE engine for those.
 
 With a cell filter, convergence also requires the absolute mean pressure to

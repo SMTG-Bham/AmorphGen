@@ -73,6 +73,20 @@ class _RunWriter:
         write(self.traj, img, format="extxyz", append=True)
 
 
+def _step_unit_factor(key: str) -> float:
+    """Unit factor torch-sim applies to a step kwarg of its nvt_langevin integrator.
+
+    ``ts.integrate`` applies ``INTEGRATOR_KWARG_UNITS`` only when the integrator is
+    given as an ``Integrator`` enum; a custom ``(init, step)`` pair receives the
+    kwargs raw.
+    """
+    from torch_sim.integrators import INTEGRATOR_KWARG_UNITS, Integrator
+    meta = INTEGRATOR_KWARG_UNITS.get(Integrator.nvt_langevin, {}).get(key)
+    if meta is None:
+        return 1.0
+    return float(dict(meta.factors).get("step", 1.0))
+
+
 def batch_nvt(atoms_list, model, temperatures, n_steps: int, timestep_fs: float = 0.5,
               friction: float = 0.01, seed=None, stage: int = 4, tag: int = 0,
               run_index: int = 0, interval: int = TRAJ_LOG_INTERVAL,
@@ -162,8 +176,14 @@ def batch_nvt(atoms_list, model, temperatures, n_steps: int, timestep_fs: float 
         block = min(int(interval), n_steps - done)
         T_block = T_sched[done:done + block]
         temp = float(T_block[0]) if np.allclose(T_block, T_block[0]) else T_block.tolist()
+        # ts.integrate converts unit-carrying kwargs (gamma, 1/ps -> internal time) only
+        # when the integrator is given as an Integrator enum; a custom (init, step) pair
+        # receives them raw, which makes the Langevin friction ~100x too strong (the
+        # thermostat still reports the right T, but the atoms barely move). Apply the
+        # same factors here.
         md = ts.integrate(system=md, model=model, integrator=(checked_init, checked_step),
-                          n_steps=block, temperature=temp, timestep=dt_ps, gamma=gamma_ps)
+                          n_steps=block, temperature=temp, timestep=dt_ps,
+                          gamma=gamma_ps * _step_unit_factor("gamma"))
         done += block
         if writers is not None:
             frames = guard.check(md)

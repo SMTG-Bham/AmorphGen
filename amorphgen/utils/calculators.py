@@ -195,7 +195,7 @@ MODEL_DESCRIPTIONS: dict[str, str] = {
     "7net-omni":          "SevenNet-omni       | omni model (multi-task)",
     # Classical
     "lennard-jones":      "Lennard-Jones       | pair potential | no GPU needed",
-    "buckingham":         "Buckingham+Coulomb  | rigid-ion | Wolf summation | no GPU needed",
+    "buckingham":         "Buckingham+Coulomb  | rigid-ion | Ewald or Wolf | CPU, or batched on torch-sim",
     # Potential files
     "ace":                "ACE (pacemaker)     | --model-path pot.yace (.yaml/.ace) | CPU",
     "lammps":             "LAMMPS pair style   | --pair-style ... --pair-coeff ... | CPU",

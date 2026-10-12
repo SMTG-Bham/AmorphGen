@@ -396,3 +396,33 @@ class TestSeedReachesTheBatchedEngine:
             out.append(read(str(runs[0])).get_positions())
         monkeypatch.delenv("SLURM_ARRAY_TASK_ID")
         assert not np.allclose(out[0], out[1])
+
+
+def test_batch_nvt_langevin_friction_matches_torchsim_enum_integrator():
+    """batch_nvt wraps torch-sim's nvt_langevin in a checked (init, step) pair; ts.integrate
+    converts unit-carrying kwargs (gamma, 1/ps) only for its Integrator enum, so the wrapped
+    path must apply the same factor itself. Without it the friction is ~100x too strong and
+    the atoms barely move while the thermostat still reports the target temperature."""
+    import torch_sim as ts
+    from amorphgen.utils.torchsim_md import batch_nvt, _derive_seed
+    atoms = _rattled_cu(0)
+    model = build_model("lennard-jones", device="cpu", classical_params=LJ)
+    n_steps, T, dt_fs, friction = 300, 1500.0, 1.0, 0.01
+    out = batch_nvt([atoms.copy()], model, np.full(n_steps, T), n_steps, timestep_fs=dt_fs,
+                    friction=friction, seed=7, log=lambda *a: None)[0]
+    state = ts.initialize_state([atoms.copy()], model.device, model.dtype)
+    state.rng = _derive_seed(7, 4, 0, 0)
+    ref = ts.integrate(system=state, model=model, integrator=ts.Integrator.nvt_langevin,
+                       n_steps=n_steps, temperature=T, timestep=dt_fs / 1000.0, gamma=friction * 1000.0)
+    L = atoms.cell.lengths()
+
+    def mean_disp(pos):
+        d = pos - atoms.positions; d -= np.round(d / L) * L
+        return np.sqrt((d ** 2).sum(1)).mean()
+
+    d_wrapped, d_enum = mean_disp(out.positions), mean_disp(ref.positions.cpu().numpy())
+    # The two paths are seeded alike but integrate in different blocks, so compare the
+    # diffusive displacement, not the trajectory: with the friction factor missing the
+    # wrapped path moves ~3x less.
+    assert d_enum > 0.3
+    assert 0.6 < d_wrapped / d_enum < 1.6, f"wrapped {d_wrapped:.2f} A vs torch-sim {d_enum:.2f} A"
