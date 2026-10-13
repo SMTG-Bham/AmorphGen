@@ -57,8 +57,11 @@ def _format_descriptor(name, result):
         cutoff = result["cutoff"]
         cutoff_text = (", ".join(f"{key}={value:g}" for key, value in cutoff.items())
                        if isinstance(cutoff, dict) else f"{cutoff:g}")
+        nodes = result.get("nodes") or [result["bond_pair"][0]]
         lines = [f"\n  Ring statistics ({pair}; network nodes):",
-                 f"    nodes-bridge: {pair}",
+                 f"    nodes-bridge: {pair}"
+                 + (f" (every {', '.join(nodes)} atom is a node; a ring size counts "
+                    "nodes of any species)" if len(nodes) > 1 else ""),
                  f"    Shortest closure per network edge; cutoff={cutoff_text} A; "
                  f"maximum ring size={result['max_ring']}.",
                  "    Counts are edge assignments, not unique cycles; "
@@ -79,6 +82,14 @@ def _format_descriptor(name, result):
         lines.append(f"    Unresolved edges: {result['n_unresolved_edges']} "
                      f"(no closure found with size <= {result['max_ring']}; "
                      "larger rings may exist).")
+        three = dict(zip(result["ring_sizes"], result["fractions"])).get(3, 0.0)
+        if len(nodes) > 1 and three > 90:
+            lines.append("    Note: nearly every edge closes a 3-ring, as in any close-packed "
+                         "oxide whose anions bridge three or more cations; the shortest-ring "
+                         "statistic separates network glasses (SiO2, GeO2, B2O3, a-Si), not "
+                         "these. See the polyhedral connectivity (--connectivity) instead; if "
+                         "the compound has modifiers (Na, K, Ca...), name the formers as the "
+                         "nodes, e.g. --rings Si/Al-O.")
         return "\n".join(lines)
     if name == "oxygen_speciation":
         lines = ["\n  Oxygen speciation (network formers: "
