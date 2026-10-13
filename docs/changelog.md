@@ -35,6 +35,23 @@
   runs on the torch-sim engine. `--model` and `--model-path` can now be given
   together.
 
+### Fixed
+
+- **Ring statistics traced one cation only in multi-cation compounds.** The
+  auto-detected ring network took the least electronegative element as its
+  only node, so a-InGaZnO₄ was analysed as a Zn–O–Zn sub-network (one third of
+  the cations; Ga and In absent from the graph) and reported that network's
+  triangles as the oxide's ring statistics, under a header that did not say so.
+  With three or more elements every non-anion element is now a node and the
+  anion(s) the bridge, by the same charge-balance rule the coordination and
+  connectivity reports use for a bond (`anion_elements`), each node–bridge pair
+  with its own auto cutoff, and a ring size counts nodes of any species. The
+  report names the nodes. `bond_pair` and `--rings` accept a `/`-joined node
+  group (`Si/Al-O`); one- and two-element systems are unchanged. The report
+  also notes when nearly every edge closes a 3-ring, which is what a close-packed
+  oxide gives and what the shortest-ring statistic cannot separate. **Re-run
+  ring statistics of compounds with more than one cation.**
+
 - Stage 3 preserves the input cell and bond lengths before heating. Cubic
   reshaping now requires an explicit `melt: make_cubic: true` setting.
 - Ensemble collection handles flat single-input batch outputs, including the

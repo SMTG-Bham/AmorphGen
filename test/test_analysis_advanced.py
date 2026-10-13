@@ -203,6 +203,48 @@ class TestRingNodeSelection:
         r = compute_ring_statistics([si], cutoff=2.6)
         assert r["ring_sizes"] == [6]
 
+    def test_mixed_cation_network_uses_every_cation_as_node(self):
+        # Cristobalite with half the Si relabelled Ge (and Al, a third cation):
+        # the rings of the network are still 6-rings over all cations. The old
+        # auto pair took ONE cation (the least electronegative) as the node and
+        # traced only its sub-network; in a-InGaZnO4 that was Zn-O-Zn alone.
+        from ase.spacegroup import crystal
+        from amorphgen.analysis.rings import compute_ring_statistics
+        crist = crystal(["Si", "O"], basis=[(0, 0, 0), (0.125, 0.125, 0.125)], spacegroup=227,
+                        cellpar=[7.16, 7.16, 7.16, 90, 90, 90]).repeat((2, 2, 2))
+        syms = crist.get_chemical_symbols()
+        si = [i for i, s in enumerate(syms) if s == "Si"]
+        for k, i in enumerate(si):
+            syms[i] = ("Si", "Ge", "Al")[k % 3]
+        crist.set_chemical_symbols(syms)
+        r = compute_ring_statistics([crist], cutoff=2.0)
+        assert r["bond_pair"] == ("Al/Ge/Si", "O")
+        assert r["nodes"] == ["Al", "Ge", "Si"] and r["bridges"] == ["O"]
+        assert r["n_network_nodes"] == len(si)
+        assert r["ring_sizes"] == [6] and r["fractions"][0] == pytest.approx(100.0)
+        # an explicit group and a single cation are both still accepted
+        assert compute_ring_statistics([crist], bond_pair=("Si/Ge/Al", "O"), cutoff=2.0)["ring_sizes"] == [6]
+        sub = compute_ring_statistics([crist], bond_pair=("Si", "O"), cutoff=2.0)
+        assert sub["n_network_nodes"] == syms.count("Si")
+        assert sub["n_network_edges"] < r["n_network_edges"] / 4     # the Si-O-Si sub-network only
+        with pytest.raises(ValueError, match="share"):
+            compute_ring_statistics([crist], bond_pair=("Si/O", "O"), cutoff=2.0)
+
+    def test_mixed_cation_auto_cutoff_is_per_pair(self):
+        # with the analyser's cutoff callback each node-bridge pair keeps its own cutoff
+        from ase.spacegroup import crystal
+        from amorphgen.analysis.rings import compute_ring_statistics
+        crist = crystal(["Si", "O"], basis=[(0, 0, 0), (0.125, 0.125, 0.125)], spacegroup=227,
+                        cellpar=[7.16, 7.16, 7.16, 90, 90, 90]).repeat((2, 2, 2))
+        syms = crist.get_chemical_symbols()
+        for i in [i for i, s in enumerate(syms) if s == "Si"][::2]:
+            syms[i] = "Ge"
+        crist.set_chemical_symbols(syms)
+        table = {("Ge", "O"): 2.1, ("Si", "O"): 1.9}
+        r = compute_ring_statistics([crist], get_cutoff_fn=lambda a, b: table[(a, b)])
+        assert r["cutoff"] == {"Ge-O": 2.1, "O-Si": 1.9}
+        assert r["ring_sizes"] == [6]
+
 
 class TestRingPeriodicImages:
     """A path back to another periodic image of its start is not a ring."""

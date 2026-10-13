@@ -681,8 +681,10 @@ def _add_arguments(p):
     g_an.add_argument("--rings", nargs="?", const="auto", default=None, metavar="PAIR",
                       help="Ring statistics (shortest-ring per network edge). "
                            "Optional PAIR such as Ge-O selects the node-bridge "
-                           "pair; default auto (least electronegative element as "
-                           "nodes). Printed, appended to --save-report, and "
+                           "pair; a /-joined group such as Si/Al-O makes every "
+                           "listed element a node. Default auto: every cation is "
+                           "a node and the anion the bridge (two elements: the "
+                           "less electronegative one). Printed, appended to --save-report, and "
                            "written as analysis_rings.{json,csv,png} with "
                            "per-structure CSVs under --save-plot.")
     g_an.add_argument("--ring-max-size", type=int, default=None, metavar="N",
