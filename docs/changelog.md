@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.0.0rc5 (2026-10-14)
+
 ### Added
 
 - `examples/softwarex_*.slurm` and `examples/softwarex_bks_sio2.yaml`: the
