@@ -21,6 +21,12 @@
 
 ### Added
 
+- **Buckingham+Coulomb on the torch-sim engine** (#76). `--engine torchsim` now
+  accepts the classical potential: the pair tables and an Ewald sum (or the
+  damped-shifted-force kernel for `coulomb_method: wolf`) are assembled into
+  torch-sim's batched model, with stress, so a whole BKS silica ensemble relaxes
+  and anneals in one GPU batch. Agrees with the NumPy calculator to ~2e-4
+  eV/atom with Ewald and 0.1 % in the forces.
 - `examples/softwarex_*.slurm` and `examples/softwarex_bks_sio2.yaml`: the
   generation, anneal and analysis jobs behind the illustrative examples of the
   software paper (a-Ga2O3, a-TiO2, a-InGaZnO4 and a-SiO2 with a foundation MLIP;
@@ -60,6 +66,16 @@
 
 ### Fixed
 
+- **torch-sim MD ran with a Langevin friction about 100x too strong** (#74,
+  #75). torch-sim converts the unit-carrying `gamma` keyword only when the
+  integrator is passed as its enum; the batched NVT stages passed a wrapped
+  integrator, so the friction arrived unconverted. The thermostat reported the
+  right temperature but the atoms barely moved (a-As, 72 ps at 1500 K: 1.4 A
+  mean displacement instead of 10 A; anneal energy gain +35 instead of
+  +7 meV/atom). The factor is now read from torch-sim's own unit table, with a
+  regression test against the enum integrator. **Hybrid-ensemble and batch
+  quench results produced with `--engine torchsim` between rc4 and this
+  release should be re-run.** Runs on the ASE engine were never affected.
 - **Ring statistics traced one cation only in multi-cation compounds.** The
   auto-detected ring network took the least electronegative element as its
   only node, so a-InGaZnO₄ was analysed as a Zn–O–Zn sub-network (one third of
