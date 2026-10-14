@@ -89,6 +89,13 @@ jobs:
   backends:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The lammps[mpi] extra brings MPICH, whose UCX layer probes the Azure
+    # runner's RDMA device (mana_0) at MPI_Init and, on some runners, aborts
+    # the process ("failed to create UD QP ... Operation not supported", exit
+    # 143) before the import under test has run. Everything here is a single
+    # process, so restrict UCX to the in-node transports.
+    env:
+      UCX_TLS: sm,self,tcp
     steps:
     - uses: actions/checkout@v7
 

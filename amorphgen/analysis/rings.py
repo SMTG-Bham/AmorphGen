@@ -90,8 +90,21 @@ def compute_ring_statistics(atoms_list, bond_pair=None, cutoff=None,
     summarizes equal-weight structure values, with structures as sampling
     units rather than their correlated edges. The size standard deviation
     is descriptive (population standard deviation), not a standard error.
-    ``cutoff`` accepts a positive scalar or ASE pair-cutoff mapping in
-    angstrom. Mapping metadata uses canonical ``"A-B"`` string keys for JSON.
+    ``bond_pair`` is ``(nodes, bridges)``; each may be one element or a
+    ``/``-joined group, ``("Ga/In/Zn", "O")``. Auto-detection (``None``):
+    with three or more elements the nodes are every element that is not an
+    anion and the bridges the anion(s), by the charge-balance rule of
+    :func:`amorphgen.utils.radii.anion_elements` (the rule the coordination
+    and connectivity reports use for a bond); with two elements the less
+    electronegative one is the node. Taking one cation as the node (old
+    behaviour, the least electronegative) traced a Zn-O-Zn sub-network in
+    a-InGaZnO4 and reported its triangles as the ring statistics of the
+    oxide; Ga and In nodes were not in the graph. Ring sizes count nodes of
+    any species. Every non-anion element is a node, modifiers included, so
+    for a modified glass (Na-Al-Si-O) name the formers: ``("Si/Al", "O")``. ``cutoff`` accepts a positive scalar or ASE pair-cutoff
+    mapping in angstrom; with ``get_cutoff_fn`` and no ``cutoff``, every
+    node-bridge pair gets its own cutoff. Mapping metadata uses canonical
+    ``"A-B"`` string keys for JSON.
     """
     if (isinstance(max_ring, (bool, np.bool_))
             or not isinstance(max_ring, Integral) or max_ring < 3):
@@ -132,13 +145,21 @@ def compute_ring_statistics(atoms_list, bond_pair=None, cutoff=None,
             bond_pair = (unique[0], unique[0])
         else:
             try:
-                from ..utils.radii import PAULING_EN
+                from ..utils.radii import PAULING_EN, anion_elements
             except ImportError:
-                from amorphgen.utils.radii import PAULING_EN
-            # A symbol tie-break makes both the result and equal-EN cases
-            # independent of frame order, while keeping distinct endpoints.
-            en = lambda sym: (PAULING_EN.get(sym, 2.0), sym)
-            bond_pair = (min(unique, key=en), max(unique, key=en))
+                from amorphgen.utils.radii import PAULING_EN, anion_elements
+            counts = Counter()
+            for atoms in atoms_list:
+                counts.update(atoms.get_chemical_symbols())
+            anions = anion_elements(counts) if len(unique) > 2 else set()
+            if anions and anions != set(unique):
+                bond_pair = ("/".join(s for s in unique if s not in anions),
+                             "/".join(s for s in unique if s in anions))
+            else:
+                # A symbol tie-break makes both the result and equal-EN cases
+                # independent of frame order, while keeping distinct endpoints.
+                en = lambda sym: (PAULING_EN.get(sym, 2.0), sym)
+                bond_pair = (min(unique, key=en), max(unique, key=en))
     else:
         if isinstance(bond_pair, (str, bytes)):
             raise ValueError("bond_pair must contain two element symbols")
@@ -147,13 +168,24 @@ def compute_ring_statistics(atoms_list, bond_pair=None, cutoff=None,
         except TypeError as exc:
             raise ValueError("bond_pair must contain two element symbols") from exc
         if len(bond_pair) != 2 or any(
-                not isinstance(symbol, str) or symbol not in atomic_numbers
-                for symbol in bond_pair):
-            raise ValueError("bond_pair must contain two valid element symbols")
+                not isinstance(group, str) or not group
+                or any(symbol not in atomic_numbers for symbol in group.split("/"))
+                for group in bond_pair):
+            raise ValueError("bond_pair must contain two valid element symbols "
+                             "(or /-joined groups such as Ga/In/Zn)")
 
     p1, p2 = bond_pair
-    cut = (cutoff if cutoff is not None else
-           get_cutoff_fn(p1, p2) if get_cutoff_fn is not None else 2.5)
+    nodes, bridges = frozenset(p1.split("/")), frozenset(p2.split("/"))
+    if p1 != p2 and nodes & bridges:
+        raise ValueError("bond_pair nodes and bridges must not share an element")
+    if cutoff is not None:
+        cut = cutoff
+    elif get_cutoff_fn is None:
+        cut = 2.5
+    elif len(nodes) == 1 and len(bridges) == 1:
+        cut = get_cutoff_fn(p1, p2)
+    else:                                   # one cutoff per node-bridge pair
+        cut = {(a, b): get_cutoff_fn(a, b) for a in sorted(nodes) for b in sorted(bridges)}
     cut, cutoff_metadata = _validate_cutoff(cut)
 
     ring_counts = Counter()
@@ -168,13 +200,13 @@ def compute_ring_statistics(atoms_list, bond_pair=None, cutoff=None,
         adj = defaultdict(set)
         for i, j, s in zip(idx_i.tolist(), idx_j.tolist(), shifts.tolist()):
             si, sj = syms[i], syms[j]
-            if (si == p1 and sj == p2) or (si == p2 and sj == p1):
+            if (si in nodes and sj in bridges) or (si in bridges and sj in nodes):
                 adj[i].add((j, *s))
 
-        # Build network graph: p1-p1 edges through bridging p2, or the
-        # direct p1-p1 bonds for a single-element network (a-Si, a-Ge, C).
+        # Build network graph: node-node edges through a bridging atom, or
+        # the direct bonds for a single-element network (a-Si, a-Ge, C).
         # Each edge is (b, sx, sy, sz): atom b in the cell at that offset.
-        p1_indices = [i for i in range(n) if syms[i] == p1]
+        p1_indices = [i for i in range(n) if syms[i] in nodes]
         net_adj = defaultdict(set)
         if p1 == p2:
             for a in p1_indices:
@@ -182,12 +214,12 @@ def compute_ring_statistics(atoms_list, bond_pair=None, cutoff=None,
         else:
             for a in p1_indices:
                 for bridge, *s1 in adj[a]:
-                    if syms[bridge] == p2:
+                    if syms[bridge] in bridges:
                         for b, *s2 in adj[bridge]:
                             s = (s1[0] + s2[0], s1[1] + s2[1], s1[2] + s2[2])
                             # a -> bridge -> the same a is no edge; a -> bridge
                             # -> another image of a is one, in a small cell
-                            if syms[b] == p1 and (b != a or s != (0, 0, 0)):
+                            if syms[b] in nodes and (b != a or s != (0, 0, 0)):
                                 net_adj[a].add((b, *s))
 
         # For each edge, find shortest ring
@@ -256,8 +288,8 @@ def compute_ring_statistics(atoms_list, bond_pair=None, cutoff=None,
             "one shortest-cycle observation per undirected periodic network edge; "
             "counts and total_rings count edge observations, not unique cycles"),
         "ring_size_definition": (
-            "number of network-former nodes in the shortest cycle; bridging atoms "
-            "are omitted for unlike-element bond pairs"),
+            "number of network-former nodes (any node species) in the shortest cycle; "
+            "bridging atoms are omitted for unlike-element bond pairs"),
         "unresolved_edge_definition": (
             "network edge without a closed cycle of size <= max_ring; "
             "may belong to a larger ring and is not necessarily acyclic"),
@@ -266,6 +298,7 @@ def compute_ring_statistics(atoms_list, bond_pair=None, cutoff=None,
         "counts": counts,
         "fractions": fractions,
         "bond_pair": bond_pair,
+        "nodes": sorted(nodes), "bridges": sorted(bridges),
         "total_rings": total,
         "n_network_nodes": sum(frame["n_network_nodes"] for frame in per_structure),
         "n_network_edges": n_edges, "n_ring_edges": total,

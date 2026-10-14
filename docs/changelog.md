@@ -4,6 +4,35 @@
 
 ### Added
 
+- Tutorial 8, `Tutorials/T8_validation_workflow/`: the analysis of the software
+  paper through the Python API on a shipped ensemble (ten relaxed and ten
+  annealed 400-atom a-Ga2O3 cells, MACE-MPA-0): partial RDFs, coordination and
+  angles with ensemble intervals, the dimer, connectivity and ring reports,
+  X-ray and neutron S(q), T(r)/G(r) and the relaxed-versus-annealed comparison,
+  each with its `--analyse` command line. Uses the production analyser directly
+  and needs no MLIP.
+
+### Fixed
+
+- The sdist ships `examples/reference_a_*.yaml`; Tutorial 8 and the `--reference`
+  examples of the documentation read them.
+
+## v1.0.0rc5 (2026-10-14)
+
+### Added
+
+- **Buckingham+Coulomb on the torch-sim engine** (#76). `--engine torchsim` now
+  accepts the classical potential: the pair tables and an Ewald sum (or the
+  damped-shifted-force kernel for `coulomb_method: wolf`) are assembled into
+  torch-sim's batched model, with stress, so a whole BKS silica ensemble relaxes
+  and anneals in one GPU batch. Agrees with the NumPy calculator to ~2e-4
+  eV/atom with Ewald and 0.1 % in the forces.
+- `examples/softwarex_*.slurm` and `examples/softwarex_bks_sio2.yaml`: the
+  generation, anneal and analysis jobs behind the illustrative examples of the
+  software paper (a-Ga2O3, a-TiO2, a-InGaZnO4 and a-SiO2 with a foundation MLIP;
+  a-SiO2 with the BKS potential on the ASE and torch-sim engines, its cubic-cell
+  relaxation and a 10 K/ps slow quench), in the shared Slurm conventions of the
+  other examples. Documented in the HPC guide.
 - Declared per-descriptor precision tolerances and ensemble convergence
   reports via `--convergence`, repeatable `--tolerance NAME=VALUE`, YAML and
   Python. Order-independent Student-t half-width planning curves, per-descriptor
@@ -35,6 +64,33 @@
   runs on the torch-sim engine. `--model` and `--model-path` can now be given
   together.
 
+### Fixed
+
+- **torch-sim MD ran with a Langevin friction about 100x too strong** (#74,
+  #75). torch-sim converts the unit-carrying `gamma` keyword only when the
+  integrator is passed as its enum; the batched NVT stages passed a wrapped
+  integrator, so the friction arrived unconverted. The thermostat reported the
+  right temperature but the atoms barely moved (a-As, 72 ps at 1500 K: 1.4 A
+  mean displacement instead of 10 A; anneal energy gain +35 instead of
+  +7 meV/atom). The factor is now read from torch-sim's own unit table, with a
+  regression test against the enum integrator. **Hybrid-ensemble and batch
+  quench results produced with `--engine torchsim` between rc4 and this
+  release should be re-run.** Runs on the ASE engine were never affected.
+- **Ring statistics traced one cation only in multi-cation compounds.** The
+  auto-detected ring network took the least electronegative element as its
+  only node, so a-InGaZnO₄ was analysed as a Zn–O–Zn sub-network (one third of
+  the cations; Ga and In absent from the graph) and reported that network's
+  triangles as the oxide's ring statistics, under a header that did not say so.
+  With three or more elements every non-anion element is now a node and the
+  anion(s) the bridge, by the same charge-balance rule the coordination and
+  connectivity reports use for a bond (`anion_elements`), each node–bridge pair
+  with its own auto cutoff, and a ring size counts nodes of any species. The
+  report names the nodes. `bond_pair` and `--rings` accept a `/`-joined node
+  group (`Si/Al-O`); one- and two-element systems are unchanged. The report
+  also notes when nearly every edge closes a 3-ring, which is what a close-packed
+  oxide gives and what the shortest-ring statistic cannot separate. **Re-run
+  ring statistics of compounds with more than one cation.**
+
 - Stage 3 preserves the input cell and bond lengths before heating. Cubic
   reshaping now requires an explicit `melt: make_cubic: true` setting.
 - Ensemble collection handles flat single-input batch outputs, including the
@@ -60,6 +116,17 @@
   directory `amorphgen` runs in, not the work directory.
 - Stage functions called without a calculator pass `classical_params` (and the
   new `lammps_params` / `ace_params`) to the calculator they build.
+
+### Removed
+
+- The historical experiment scripts and configurations that drove earlier
+  development studies (IrO2, the class benchmark, torch-sim benchmarks, PCM
+  chalcogenides, the SiO2 anneal tests, their YAML configurations and the
+  GeTe/HfO2/IrO2 reference files) are no longer shipped in `examples/`; the
+  directory keeps the configuration templates, the Ga2O3/GeO2/SiO2 reference
+  files, the validation data, the generic Slurm examples and the software-paper
+  scripts. The removed files remain in the repository history.
+
 
 ## v1.0.0rc4 (2026-09-24)
 

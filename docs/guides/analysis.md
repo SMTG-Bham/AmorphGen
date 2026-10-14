@@ -1267,7 +1267,7 @@ sa = StructureAnalyser("silica/", cutoff={"Si-O": 2.0})
 voids = sa.void_distribution(n_samples=20000, probe_radius=0.5, seed=42,
                              probe_radii=[0, 0.25, 0.5, 0.75, 1.0])
 print(voids["clearance_quantiles"], voids["probe_curve"])
-rings = sa.ring_statistics(bond_pair=("Si", "O"), max_ring=16)
+rings = sa.ring_statistics(bond_pair=("Si", "O"), max_ring=16)   # ("Si/Al", "O") for every cation as a node
 save_descriptor("rings", rings, "descriptors/", save_pdf=True)
 oxygen = sa.oxygen_speciation(network_formers=["Si"])
 save_descriptor("voids", voids, "descriptors/", save_pdf=True)
@@ -1345,7 +1345,7 @@ amorphgen --analyse \
 | `--pair-panels` | One small panel per element pair for the partial g(r) (`analysis_rdf_panels.png`) and, with `--sq-partials`, for S_ab(q) (`analysis_sq_partials_panels.png`). |
 | `--total-cn SPEC` | Total first-shell coordination of one element over several partner types, repeatable: `O` counts every bonded partner, `O:In+Ga` only the named ones. Printed, and plotted as `analysis_cn_total.png` + CSV. |
 | `--check-dimers` | Report unphysical close contacts (O–O peroxide, N–N) per structure. |
-| `--rings [PAIR]` | Shortest ring per network edge, size summaries and search coverage; `--rings Ge-O` sets nodes–bridge explicitly. |
+| `--rings [PAIR]` | Shortest ring per network edge, size summaries and search coverage. Default: every cation is a node and the anion the bridge (a-InGaZnO₄: Ga/In/Zn–O, each pair with its own cutoff; a ring size counts nodes of any species); `--rings Ge-O` sets one node–bridge pair, `--rings Si/Al-O` a group of nodes. Shortest rings separate network glasses; in a close-packed oxide almost every edge closes a 3-ring and the report says so, see `--connectivity` instead. |
 | `--ring-max-size INT`, `--ring-cutoff FLOAT` | Maximum searched size in network nodes (default 12) and ring-specific bond cutoff in Å (default: analyser pair cutoff). |
 | `--voronoi [ELEMENT]` | Voronoi indices <n3 n4 n5 n6> for all atoms or one element. Added to the report; `analysis_voronoi.csv` under ``--save-plot``. |
 | `--connectivity` | Corner/edge/face sharing between cation-centred polyhedra (two cations sharing one anion = corner, two = edge, three or more = face) and the percentage of cations in at least one edge- or face-sharing pair, which is near zero in a corner-sharing network glass and tens of percent in a random packing. Added to the report; `analysis_connectivity.csv` under ``--save-plot``. |
