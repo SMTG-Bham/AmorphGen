@@ -9,3 +9,4 @@ recursive-include test/data *.xyz *.md
 # The Slurm regression tests exercise these workflow/script examples.
 include examples/slurm_workflow.yaml
 include examples/*.slurm
+include examples/softwarex_bks_sio2.yaml

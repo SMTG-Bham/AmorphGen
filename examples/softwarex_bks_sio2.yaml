@@ -1,0 +1,25 @@
+# BKS potential for SiO2 (van Beest, Kramer & van Santen, PRL 64, 1955 (1990)), as used by the
+# classical-IP comparison in softwarex_run_sio2_bks.slurm.  Coulomb by Ewald summation (the Wolf
+# sum is ~10 % off in forces for ionic melts).  The calculator has no stress, so every cell
+# stays at the generation density (2.20 g/cm3): cell_filter none throughout.
+model: buckingham
+classical_params:
+  params:
+    Si-O: {A: 18003.7572, rho: 0.205205, C: 133.5381}
+    O-O:  {A: 1388.7730,  rho: 0.362319, C: 175.0}
+  charges: {Si: 2.4, O: -1.2}
+  cutoff: 10.0
+  coulomb: true
+  coulomb_method: ewald
+
+# Short-range wall. The BKS Si-O pair curve is flat between 1.1 and 1.6 A and then plunges
+# (-37 eV at 1.0 A, -196 eV at 0.8 A: the C/r^6 term beats the exponential), so a relaxation
+# or 3000 K MD step that takes one pair past ~1.0 A collapses it (seen on 648-atom random
+# seeds, all four relax tasks of the first run). U(r) = strength (cutoff/r - 1)^2 below the
+# cutoff adds +98 eV at 1.0 A, +10 eV at 1.2 A, 2 eV at 1.25 A and nothing at the 1.6 A bond;
+# O-O (> 2.3 A) and Si-Si (> 2.9 A) never reach it. Same role as the 24-6 term of
+# Saika-Voivod/Poole/Sciortino (2004) or the Vollmayr-Kob-Binder modification.
+repulsive_core:
+  enabled: true
+  cutoff: 1.3        # Angstrom
+  strength: 1500.0   # eV

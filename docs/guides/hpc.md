@@ -144,7 +144,7 @@ settings and work directories when a job starts again.
 
 ## Configuring the bundled examples
 
-The 27 existing `examples/*.slurm` scripts remain available for the original
+The `examples/*.slurm` scripts remain available for the original
 BlueBEAR experiments. They use BlueBEAR module and QoS names. Adapt those
 settings to your cluster, choose your own allocation account at submission,
 and export the path to a virtualenv containing AmorphGen and the required
@@ -200,6 +200,33 @@ Updated generation scripts use deterministic seeds for reproducible restarts.
 If an older run used an unspecified seed or different settings, its saved
 metadata may reject resume with the new script. Use a fresh output directory
 for that protocol; preserve the old checkpoints instead of overwriting them.
+
+### The SoftwareX paper examples
+
+The `examples/softwarex_*.slurm` scripts are the jobs behind the
+illustrative examples of the AmorphGen software paper: one protocol for every
+system, with only the composition and the pinned density changed. They follow
+the conventions above (account at submission, `AMORPHGEN_VENV`, BlueBEAR module
+names to adapt) and write their outputs to the submission directory, reading
+`examples/softwarex_bks_sio2.yaml` and the `examples/reference_*.yaml` files
+from `AMORPHGEN_ROOT`. Arguments are positional, because exported variables do
+not survive `sbatch` on every site.
+
+| Script | What it produces | Paper |
+|---|---|---|
+| `softwarex_run_oxide.slurm SYSTEM [MODEL]` | 100 random + relax and 20 hybrid (50 ps at 3000 K, quench at 100 K/ps, 10 ps at 300 K, relax) structures of a-Ga₂O₃, a-TiO₂, a-InGaZnO₄ or a-SiO₂ with a foundation MLIP; array task 0 generates, tasks 1–K anneal | Figs. 3–5, Tables 2–3 |
+| `softwarex_run_sio2_bks.slurm` | the same a-SiO₂ seeds and protocol with the classical BKS potential, one structure per CPU task | Fig. 4j–l, Table 3 |
+| `softwarex_run_sio2_bks_torchsim.slurm` | the BKS campaign batched on the torch-sim engine (GPU); the engine cross-check and timing | Section 2.2, Fig. 5 |
+| `softwarex_run_sio2_bks_cubic.slurm` | cubic-cell relaxation of the fixed-cell BKS sets, i.e. the density the potential prefers | Fig. 5 |
+| `softwarex_run_sio2_slow.slurm` | the slow protocol: 10 K/ps cooling from a 50 ps hold, ten seeds per potential | the "limit" of the anneal in Section 3 |
+| `softwarex_analyse_oxide.slurm SYSTEM [MODEL]` | RDF, coordination, angles, rings, connectivity, voids, dimers, X-ray *S(q)*, the convergence report of the random set and the reference-file score, for the placed, relaxed, annealed and paired sets | every number in Tables 2–4 |
+
+A complete oxide set is `softwarex_run_oxide.slurm` for the system, then
+`softwarex_analyse_oxide.slurm` for the same `SYSTEM [MODEL]`; the outputs land
+in `<system>_<model>/` (`random_initial/`, `random_opt/`, `hybrid/final/`,
+`analysis_*/`). The a-As examples of the paper used the 2000-atom protocol of
+Liu et al. with their published potential through `--model-path` and
+`--target-cn As=3`, and are not scripted here.
 
 ## Resuming timed-out jobs
 
