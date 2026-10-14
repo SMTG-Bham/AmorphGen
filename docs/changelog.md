@@ -4,6 +4,12 @@
 
 ### Added
 
+- `examples/softwarex_*.slurm` and `examples/softwarex_bks_sio2.yaml`: the
+  generation, anneal and analysis jobs behind the illustrative examples of the
+  software paper (a-Ga2O3, a-TiO2, a-InGaZnO4 and a-SiO2 with a foundation MLIP;
+  a-SiO2 with the BKS potential on the ASE and torch-sim engines, its cubic-cell
+  relaxation and a 10 K/ps slow quench), in the shared Slurm conventions of the
+  other examples. Documented in the HPC guide.
 - Declared per-descriptor precision tolerances and ensemble convergence
   reports via `--convergence`, repeatable `--tolerance NAME=VALUE`, YAML and
   Python. Order-independent Student-t half-width planning curves, per-descriptor
@@ -77,6 +83,17 @@
   directory `amorphgen` runs in, not the work directory.
 - Stage functions called without a calculator pass `classical_params` (and the
   new `lammps_params` / `ace_params`) to the calculator they build.
+
+### Removed
+
+- The historical experiment scripts and configurations that drove earlier
+  development studies (IrO2, the class benchmark, torch-sim benchmarks, PCM
+  chalcogenides, the SiO2 anneal tests, their YAML configurations and the
+  GeTe/HfO2/IrO2 reference files) are no longer shipped in `examples/`; the
+  directory keeps the configuration templates, the Ga2O3/GeO2/SiO2 reference
+  files, the validation data, the generic Slurm examples and the software-paper
+  scripts. The removed files remain in the repository history.
+
 
 ## v1.0.0rc4 (2026-09-24)
 
