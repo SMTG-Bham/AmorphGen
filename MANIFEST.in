@@ -10,3 +10,8 @@ recursive-include test/data *.xyz *.md
 include examples/slurm_workflow.yaml
 include examples/*.slurm
 include examples/softwarex_bks_sio2.yaml
+# Tutorial 8 and the --reference examples read the shipped reference files.
+include examples/reference_a_*.yaml
+recursive-include Tutorials/T8_validation_workflow/structures *.xyz
+# An executed copy of Tutorial 8 left by nbconvert must not reach the sdist.
+exclude Tutorials/T8_validation_workflow/executed.ipynb

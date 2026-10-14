@@ -33,6 +33,7 @@ simulation settings):
 | [Tutorial 4: Melt-and-quench](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T4_MQ_via_7_steps/tutorial_4_melt_quench.ipynb) | Full 7-stage pipeline | CHGNet (CPU) / MACE (GPU) | SiO₂ |
 | [Tutorial 5: Hybrid batch quench](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T5_mix_random_MQ/tutorial_5_batch_quench.ipynb) | Random gen → equilibrate → batch quench | CHGNet | TiO₂ |
 | [Tutorial 6: Classical potentials](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T6_classical_potential/tutorial_6_classical_potential.ipynb) | Buckingham+Coulomb relaxation, hybrid workflow | Classical; optional MACE refinement | SiO₂, Al₂O₃, TiO₂ |
+| [Tutorial 8: Ensemble analysis](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T8_validation_workflow/tutorial_8_validation_workflow.ipynb) | The analysis of `--analyse` through the API on a shipped ensemble: partial RDFs, CN, angles, dimers, connectivity, rings, X-ray/neutron S(q), T(r)/G(r), relaxed vs annealed; uses the production analyser directly | none (geometric analysis) | Ga₂O₃ (10 relaxed + 10 annealed 400-atom cells from the paper) |
 
 Application case studies (these assume you have done the workflow tutorials):
 
