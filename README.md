@@ -1040,6 +1040,7 @@ Workflow tutorials (each reports the wall time measured on the CPU it was valida
 | [Tutorial 4](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T4_MQ_via_7_steps/tutorial_4_melt_quench.ipynb) | Full 7-stage melt-quench from crystalline SiO₂ (CHGNet on CPU; flip the backend toggle for MACE on GPU) |
 | [Tutorial 5](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T5_mix_random_MQ/tutorial_5_batch_quench.ipynb) | Hybrid workflow: random gen → high-T equilibration → batch quench (TiO₂) |
 | [Tutorial 6](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T6_classical_potential/tutorial_6_classical_potential.ipynb) | Classical potential (Buckingham+Coulomb) relaxation, no GPU needed (SiO₂, Al₂O₃, TiO₂) |
+| [Tutorial 8](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T8_validation_workflow/tutorial_8_validation_workflow.ipynb) | Analysis through the Python API: partial RDFs, CN and angles with ensemble intervals, O–O dimers, polyhedral connectivity, rings, X-ray and neutron S(q), T(r)/G(r), and a relaxed-vs-annealed comparison, on ten relaxed and ten annealed 400-atom a-Ga₂O₃ cells from the software paper (shipped); each step with its `--analyse` line. No MLIP needed; ~1 min |
 
 Application case studies (these assume you have done the workflow tutorials):
 
@@ -1112,8 +1113,8 @@ signals and grace periods are configured by the site. Completed structures
 are reused, unfinished optimisations restart, and MD resumes from saved
 frames without promising bitwise continuation.
 
-The existing 27 BlueBEAR scripts in `examples/` also support signal handling
-and dependency submission. Set `AMORPHGEN_VENV`, choose your account with
+The `examples/*.slurm` scripts (the generic examples and the software-paper
+runs) also support signal handling and dependency submission. Set `AMORPHGEN_VENV`, choose your account with
 `sbatch --account=your-project`, and create `logs/` before submitting.
 See the [HPC guide](https://smtg-bham.github.io/AmorphGen/guides/hpc.html) for the YAML format, array isolation,
 dependency conditions and restart limits.

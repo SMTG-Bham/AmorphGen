@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Added
+
+- Tutorial 8, `Tutorials/T8_validation_workflow/`: the analysis of the software
+  paper through the Python API on a shipped ensemble (ten relaxed and ten
+  annealed 400-atom a-Ga2O3 cells, MACE-MPA-0): partial RDFs, coordination and
+  angles with ensemble intervals, the dimer, connectivity and ring reports,
+  X-ray and neutron S(q), T(r)/G(r) and the relaxed-versus-annealed comparison,
+  each with its `--analyse` command line. Uses the production analyser directly
+  and needs no MLIP.
+
+### Fixed
+
+- The sdist ships `examples/reference_a_*.yaml`; Tutorial 8 and the `--reference`
+  examples of the documentation read them.
+
 ## v1.0.0rc5 (2026-10-14)
 
 ### Added

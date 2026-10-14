@@ -149,6 +149,13 @@ CARRY_FORWARD.md
 # (underscore-prefixed dirs are large auto-generated outputs)
 # ======================
 Tutorials/_*/
+# Tutorial 8 ships its twenty input cells (*.xyz is ignored above)
+!Tutorials/T8_validation_workflow/structures/
+!Tutorials/T8_validation_workflow/structures/**/*.xyz
+# Tutorial 8's command-line equivalents write their outputs next to the notebook
+Tutorials/T8_validation_workflow/analysis_*/
+Tutorials/T8_validation_workflow/*.log
+Tutorials/T8_validation_workflow/executed.ipynb
 
 # ======================
 # LaTeX scratch
