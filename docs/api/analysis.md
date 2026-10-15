@@ -91,8 +91,9 @@ save_descriptor("voids", voids, "analysis/")
 ```
 
 `ring_statistics(..., criterion="primitive")` returns the census of unique
-primitive rings instead (each ring counted once, `rings_per_node` = R_C(n),
-`nodes_in_ring_fraction`); the default `criterion="shortest"` (Guttman's criterion) is the
+primitive rings instead (each ring counted once, `rings_per_node` = R_C(n) as
+defined in the RINGS code of Le Roux and Jund, Comput. Mater. Sci. 49, 70
+(2010), `nodes_in_ring_fraction`); the default `criterion="shortest"` (Guttman's criterion) is the
 shortest ring per edge. With the default, ring `counts` and legacy `total_rings` count
 shortest-cycle observations per network edge, not unique cycles. `mean_ring_size`, `std_ring_size` (population
 spread), `min_ring_size` and `max_ring_size` summarize the resolved edges.

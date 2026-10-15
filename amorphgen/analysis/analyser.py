@@ -684,10 +684,13 @@ class StructureAnalyser:
             ``"shortest"`` (default; ``"guttman"``, its literature name, is
             accepted): the shortest ring through each network edge, counted
             per edge. ``"primitive"``: the census of unique
-            primitive rings (no shortcut through the network), counted once
-            each, with ``rings_per_node`` (R_C(n)). The primitive search is
-            exponential in ``max_ring`` on dense networks; use 8 for a
-            close-packed oxide.
+            primitive rings (no shortcut through the network; Goetzke and
+            Klein 1991, Yuan and Cormack 2002), counted once each, with
+            ``rings_per_node``, the R_C(n) of the RINGS code (Le Roux and
+            Jund, Comput. Mater. Sci. 49, 70 (2010)), so the numbers compare
+            directly with RINGS output and the glass literature. The
+            primitive search is exponential in ``max_ring`` on dense
+            networks; use 8 for a close-packed oxide.
 
         Returns
         -------

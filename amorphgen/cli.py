@@ -695,8 +695,9 @@ def _add_arguments(p):
                            "assigns each network edge its shortest ring and reports the fraction "
                            "of edges per size; "
                            "'primitive' counts every ring without a shortcut once "
-                           "(Goetzke-Klein / Yuan-Cormack) and reports rings per node, the "
-                           "statistic of the glass literature. The primitive search grows "
+                           "(Goetzke-Klein / Yuan-Cormack) and reports rings per node, "
+                           "R_C(n) as in the RINGS code (Le Roux and Jund 2010) and the "
+                           "glass literature. The primitive search grows "
                            "quickly with the node degree: use --ring-max-size 8 for a "
                            "close-packed oxide.")
     g_an.add_argument("--ring-cutoff", type=float, default=None, metavar="A",
