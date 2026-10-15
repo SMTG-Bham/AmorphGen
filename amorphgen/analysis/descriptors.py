@@ -58,17 +58,28 @@ def _format_descriptor(name, result):
         cutoff_text = (", ".join(f"{key}={value:g}" for key, value in cutoff.items())
                        if isinstance(cutoff, dict) else f"{cutoff:g}")
         nodes = result.get("nodes") or [result["bond_pair"][0]]
+        primitive = result.get("method") == "primitive_rings"
         lines = [f"\n  Ring statistics ({pair}; network nodes):",
                  f"    nodes-bridge: {pair}"
                  + (f" (every {', '.join(nodes)} atom is a node; a ring size counts "
-                    "nodes of any species)" if len(nodes) > 1 else ""),
-                 f"    Shortest closure per network edge; cutoff={cutoff_text} A; "
-                 f"maximum ring size={result['max_ring']}.",
-                 "    Counts are edge assignments, not unique cycles; "
-                 "size fractions use resolved edges."]
-        for size, count, fraction in zip(result["ring_sizes"], result["counts"],
-                                         result["fractions"]):
-            lines.append(f"    {size:2d}-ring: {count:6d} ({fraction:6.2f}%)")
+                    "nodes of any species)" if len(nodes) > 1 else "")]
+        if primitive:
+            lines += [f"    Primitive rings (no shortcut through the network), each counted once; "
+                      f"cutoff={cutoff_text} A; maximum ring size={result['max_ring']}.",
+                      "    Size fractions use rings; rings/node is the count per network node (R_C(n))."]
+            per_node = result.get("rings_per_node") or [None] * len(result["ring_sizes"])
+            for size, count, fraction, rc in zip(result["ring_sizes"], result["counts"],
+                                                 result["fractions"], per_node):
+                rc_text = f"; {rc:.3f} rings/node" if rc is not None else ""
+                lines.append(f"    {size:2d}-ring: {count:6d} ({fraction:6.2f}%{rc_text})")
+        else:
+            lines += [f"    Shortest closure per network edge; cutoff={cutoff_text} A; "
+                      f"maximum ring size={result['max_ring']}.",
+                      "    Counts are edge assignments, not unique cycles; "
+                      "size fractions use resolved edges."]
+            for size, count, fraction in zip(result["ring_sizes"], result["counts"],
+                                             result["fractions"]):
+                lines.append(f"    {size:2d}-ring: {count:6d} ({fraction:6.2f}%)")
         if result["mean_ring_size"] is not None:
             lines.append(f"    Ring size: mean={result['mean_ring_size']:.3f}; "
                          f"std={result['std_ring_size']:.3f}; "
@@ -80,9 +91,12 @@ def _format_descriptor(name, result):
         lines.append(f"    Resolved network edges: {result['n_ring_edges']}/"
                      f"{result['n_network_edges']}{coverage_text}")
         lines.append(f"    Unresolved edges: {result['n_unresolved_edges']} "
-                     f"(no closure found with size <= {result['max_ring']}; "
-                     "larger rings may exist).")
+                     + ("(on no primitive ring" if primitive else "(no closure found")
+                     + f" with size <= {result['max_ring']}; larger rings may exist).")
         three = dict(zip(result["ring_sizes"], result["fractions"])).get(3, 0.0)
+        if primitive:
+            three = dict(zip(result["ring_sizes"], result.get("rings_per_node") or [])).get(3) or 0.0
+            three = 100.0 if three > 1.5 else 0.0   # more than 1.5 triangles per cation: close-packed
         if len(nodes) > 1 and three > 90:
             lines.append("    Note: nearly every edge closes a 3-ring, as in any close-packed "
                          "oxide whose anions bridge three or more cations; the shortest-ring "
@@ -183,9 +197,16 @@ def save_descriptor(name, result, output_dir, *, dpi=300, save_pdf=False,
 
     if name == "rings":
         from .plotting import plot_rings
-        # Retain the original pooled CSV interface for existing workflows.
-        write_csv(base.with_suffix(".csv"), ["ring_size", "count", "fraction_percent"],
-                  zip(result["ring_sizes"], result["counts"], result["fractions"]))
+        # Retain the original pooled CSV interface for existing workflows; the
+        # primitive census adds its rings-per-node column.
+        if result.get("method") == "primitive_rings":
+            write_csv(base.with_suffix(".csv"),
+                      ["ring_size", "count", "fraction_percent", "rings_per_node"],
+                      zip(result["ring_sizes"], result["counts"], result["fractions"],
+                          result["rings_per_node"]))
+        else:
+            write_csv(base.with_suffix(".csv"), ["ring_size", "count", "fraction_percent"],
+                      zip(result["ring_sizes"], result["counts"], result["fractions"]))
         columns = ["mean_ring_size", "std_ring_size", "min_ring_size", "max_ring_size",
                    "n_network_nodes", "n_network_edges", "n_ring_edges",
                    "n_unresolved_edges", "ring_edge_fraction", "total_rings"]

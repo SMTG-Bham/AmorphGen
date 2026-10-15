@@ -668,7 +668,7 @@ class StructureAnalyser:
 
     # ── Advanced analysis ───────────────────────────────────────────────
 
-    def ring_statistics(self, bond_pair=None, cutoff=None, max_ring=12):
+    def ring_statistics(self, bond_pair=None, cutoff=None, max_ring=12, criterion="shortest"):
         """Compute ring size statistics for network-forming structures.
 
         Parameters
@@ -680,19 +680,30 @@ class StructureAnalyser:
             Uses analyser pair cutoff if None.
         max_ring : int
             Maximum ring size to search (default 12).
+        criterion : {"shortest", "primitive"}
+            ``"shortest"`` (default; ``"guttman"``, its literature name, is
+            accepted): the shortest ring through each network edge, counted
+            per edge. ``"primitive"``: the census of unique
+            primitive rings (no shortcut through the network), counted once
+            each, with ``rings_per_node`` (R_C(n)). The primitive search is
+            exponential in ``max_ring`` on dense networks; use 8 for a
+            close-packed oxide.
 
         Returns
         -------
         dict
             Size distribution, mean/spread, resolved and unresolved network
             edge counts, and per-structure statistics with uncertainty.
-            Counts (including legacy ``total_rings``) are shortest-cycle
-            observations per edge, not the number of unique rings. Unresolved
-            edges have no closure within ``max_ring``. See
+            With the shortest-ring criterion, counts (including legacy
+            ``total_rings``) are shortest-cycle observations per edge, not
+            the number of unique rings; with the primitive criterion they are
+            unique rings. Unresolved edges have no closure (lie on no ring)
+            within ``max_ring``. See
             :func:`amorphgen.analysis.rings.compute_ring_statistics`.
         """
         return compute_ring_statistics(
-            self.atoms_list, bond_pair, cutoff, max_ring, self._get_cutoff)
+            self.atoms_list, bond_pair, cutoff, max_ring, self._get_cutoff,
+            criterion=criterion)
 
     def polyhedral_connectivity(self, cation=None, anion=None):
         """Corner/edge/face sharing between cation-centred polyhedra.

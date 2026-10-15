@@ -447,8 +447,9 @@ analysis:
   tr_window: lorch        # lorch | none
   tr_scan: true           # sweep qmax / window and report the spread
   rings: true             # or a nodes-bridge pair such as Ge-O, or a node group such as Si/Al-O
-  ring_max_size: 12        # maximum searched ring size in network nodes
+  ring_max_size: 12        # maximum searched ring size in network nodes (8 is the primitive default)
   # ring_cutoff: 2.0       # optional A, otherwise uses the analyser pair cutoff
+  # ring_criterion: shortest  # or primitive: unique primitive rings with rings per node
   voronoi: Ge             # or true for all atoms
   connectivity: true      # corner/edge/face sharing of cation polyhedra
 ```

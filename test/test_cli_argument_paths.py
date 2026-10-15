@@ -733,3 +733,24 @@ def test_single_optimisation_stage_writes_input_named_outputs(tmp_path, monkeypa
     assert len(read(tmp_path / "run" / "crystal_opt.xyz")) == 4
     # The direct optimisation path bypasses the pipeline and its manifest.
     assert not (tmp_path / "run" / "run_manifest.json").exists()
+
+
+def test_ring_criterion_flag_reaches_the_analyser(tmp_path, monkeypatch, capsys):
+    source = tmp_path / "si.xyz"
+    write(source, bulk("Si", "diamond", a=5.43, cubic=True))
+    seen = {}
+    original = StructureAnalyser.ring_statistics
+
+    def ring_statistics(self, **kwargs):
+        seen.update(kwargs)
+        return original(self, **kwargs)
+
+    monkeypatch.setattr(StructureAnalyser, "ring_statistics", ring_statistics)
+    run_cli(monkeypatch, ["--analyse", source, "--cutoff", "2.6", "--rings",
+                          "--ring-criterion", "primitive"])
+    assert seen["criterion"] == "primitive" and seen["max_ring"] == 8   # primitive default limit
+    out = capsys.readouterr().out
+    assert "Primitive rings (no shortcut through the network), each counted once" in out
+    assert "2.000 rings/node" in out
+    with pytest.raises(SystemExit):
+        run_cli(monkeypatch, ["--analyse", source, "--rings", "--ring-criterion", "king"])
