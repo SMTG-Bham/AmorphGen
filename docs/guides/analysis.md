@@ -1001,6 +1001,30 @@ image. The default pair is selected by electronegativity. Set it explicitly
 for mixed chemistries. `--ring-cutoff` overrides the analyser's resolved pair
 cutoff for this calculation only; `--ring-max-size` defaults to 12.
 
+Two ring criteria are available through `--ring-criterion`:
+
+- `shortest` (default): every network edge is assigned the shortest ring that
+  contains it (Guttman's criterion, J. Non-Cryst. Solids 116, 145 (1990);
+  `guttman` is accepted as a synonym); the report gives the fraction of edges
+  per ring size. Fast, and the statistic the earlier releases produced.
+- `primitive`: the census of unique primitive rings, rings that no path
+  through the network can shorten (Goetzke and Klein, J. Non-Cryst. Solids
+  127, 215 (1991); Yuan and Cormack, Comput. Mater. Sci. 24, 343 (2002)), each
+  counted once; the report gives the number of rings per size and per network
+  node, R_C(n), the quantity of the RINGS code and of the silica literature.
+  The two criteria differ where it matters: a link shared by a 5- and a 6-ring
+  is credited to the 5 by the shortest-ring rule, so annealed silica peaks at
+  5 under `shortest` and at 6 under `primitive`. The primitive search enumerates
+  shortest-path pairs to depth `max_ring // 2 + 1`, which grows quickly with
+  the number of links per node; its default `--ring-max-size` is therefore 8
+  (seconds per 400-atom cell, 12 is seconds for a silica network but minutes
+  for a close-packed oxide, and the analyser warns).
+
+In a close-packed oxide every anion bridging three cations is a 3-ring, so
+either criterion returns a census dominated by 3-rings whatever the
+preparation route; rings discriminate for network glasses (SiO₂, GeO₂, B₂O₃,
+a-Si, a-As), and `--connectivity` is the descriptor for the oxides.
+
 Each undirected network edge contributes its shortest cycle, if one closes
 within the limit. **Counts describe edges, not unique rings**: a lone
 six-node polygon contributes six observations of size six. Multiple bridges
@@ -1346,7 +1370,8 @@ amorphgen --analyse \
 | `--total-cn SPEC` | Total first-shell coordination of one element over several partner types, repeatable: `O` counts every bonded partner, `O:In+Ga` only the named ones. Printed, and plotted as `analysis_cn_total.png` + CSV. |
 | `--check-dimers` | Report unphysical close contacts (O–O peroxide, N–N) per structure. |
 | `--rings [PAIR]` | Shortest ring per network edge, size summaries and search coverage. Default: every cation is a node and the anion the bridge (a-InGaZnO₄: Ga/In/Zn–O, each pair with its own cutoff; a ring size counts nodes of any species); `--rings Ge-O` sets one node–bridge pair, `--rings Si/Al-O` a group of nodes. Shortest rings separate network glasses; in a close-packed oxide almost every edge closes a 3-ring and the report says so, see `--connectivity` instead. |
-| `--ring-max-size INT`, `--ring-cutoff FLOAT` | Maximum searched size in network nodes (default 12) and ring-specific bond cutoff in Å (default: analyser pair cutoff). |
+| `--ring-max-size INT`, `--ring-cutoff FLOAT` | Maximum searched size in network nodes (default 12; 8 for the primitive census) and ring-specific bond cutoff in Å (default: analyser pair cutoff). |
+| `--ring-criterion {shortest,primitive}` | `shortest` (default; Guttman's criterion, `guttman` accepted): shortest ring per network edge, fraction of edges per size. `primitive`: unique primitive rings (no shortcut), counted once, with rings per node R_C(n); the statistic of the glass literature, exponential in the search depth on dense networks. |
 | `--voronoi [ELEMENT]` | Voronoi indices <n3 n4 n5 n6> for all atoms or one element. Added to the report; `analysis_voronoi.csv` under ``--save-plot``. |
 | `--connectivity` | Corner/edge/face sharing between cation-centred polyhedra (two cations sharing one anion = corner, two = edge, three or more = face) and the percentage of cations in at least one edge- or face-sharing pair, which is near zero in a corner-sharing network glass and tens of percent in a random packing. Added to the report; `analysis_connectivity.csv` under ``--save-plot``. |
 | `--bond-order` | Steinhardt $q_6$, Lechner–Dellago $\bar q_6$, ordered atom fraction and largest connected ordered cluster. |
@@ -1388,7 +1413,7 @@ listed flags.
 | `analysis_density.csv` | One row per structure: ``structure_index, density_g_per_cm3`` (at least two structures). |
 | `analysis_sq.png` / `.pdf`, `analysis_sq.csv` | With ``--sq``: S(q) and, for the direct method, the number of q-vectors per bin; raw values are also saved when smoothing is enabled. |
 | `analysis_tr.png` / `.pdf`, `analysis_tr.csv` | With ``--tr``: the total correlation function and its scattering-weighted g(r) and reduced PDF G(r). |
-| `analysis_rings.{json,csv,png,pdf}` | With ``--rings``: shortest-cycle size distribution (size, edge count, percent of resolved edges); full JSON includes coverage and uncertainty. PDF requires `--save-pdf`. |
+| `analysis_rings.{json,csv,png,pdf}` | With ``--rings``: ring-size distribution (size, edge count, percent of resolved edges; with `--ring-criterion primitive` unique rings, percent of rings and a `rings_per_node` column); full JSON includes coverage and uncertainty. PDF requires `--save-pdf`. |
 | `analysis_rings_structures.csv`, `analysis_rings_per_structure.csv` | Ring-size summaries and search coverage per structure; per-structure size distributions. |
 | `analysis_voronoi.csv` | With ``--voronoi``: the ten most common Voronoi indices with counts and percentages. |
 | `analysis_connectivity.csv` | With ``--connectivity``: corner/edge/face link percentages and the edge-sharing cation fraction, overall and per structure. |
