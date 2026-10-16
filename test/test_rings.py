@@ -217,3 +217,77 @@ def test_invalid_geometry(defect, message):
         atoms.set_cell([(2, 0, 0), (1, 0, 0), (0, 0, 2)])
     with pytest.raises(ValueError, match=message):
         compute_ring_statistics([atoms])
+
+
+# ── Primitive-ring census ────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("size", [3, 4, 6, 9])
+def test_primitive_census_counts_an_isolated_polygon_once(size):
+    result = compute_ring_statistics([polygon(size)], cutoff=1.05, max_ring=size,
+                                     criterion="primitive")
+    assert result["method"] == "primitive_rings" and result["criterion"] == "primitive"
+    shortest = compute_ring_statistics([polygon(size)], cutoff=1.05, max_ring=size, criterion="guttman")
+    assert shortest["criterion"] == "shortest" and shortest["counts"] == [size]   # alias of the default
+    assert result["ring_sizes"] == [size]
+    assert result["counts"] == [1]                     # one unique ring, not size observations
+    assert result["fractions"] == [100.0]
+    assert result["rings_per_node"] == [pytest.approx(1 / size)]
+    assert result["nodes_in_ring_fraction"] == [1.0]
+    assert result["n_ring_edges"] == size and result["n_unresolved_edges"] == 0
+    assert result["total_rings"] == 1
+    assert result["per_structure"][0]["rings_per_node"] == {size: pytest.approx(1 / size)}
+    assert result["uncertainty"]["rings_per_node"][size]["mean"] == pytest.approx(1 / size)
+    assert "each counted once" in result["count_definition"]
+    json.dumps(result, allow_nan=False)
+
+
+def test_primitive_census_rejects_rings_with_a_shortcut():
+    # two equilateral triangles sharing an edge (a rhombus with its short diagonal):
+    # both triangles are primitive, the 4-cycle round the rhombus has the shortcut
+    atoms = Atoms("Si4", positions=[(0, 0, 0), (1, 0, 0), (0.5, 0.8660254, 0), (1.5, 0.8660254, 0)])
+    result = compute_ring_statistics([atoms], cutoff=1.05, max_ring=6, criterion="primitive")
+    assert result["n_network_edges"] == 5
+    assert result["ring_sizes"] == [3] and result["counts"] == [2]
+    assert result["rings_per_node"] == [pytest.approx(0.5)]
+    guttman = compute_ring_statistics([atoms], cutoff=1.05, max_ring=6)
+    assert guttman["ring_sizes"] == [3] and guttman["counts"] == [5]
+
+
+def test_primitive_census_of_the_diamond_network_is_two_six_rings_per_node():
+    for repeat in ((1, 1, 1), (2, 1, 1)):
+        diamond = bulk("Si", "diamond", a=5.43, cubic=True).repeat(repeat)
+        result = compute_ring_statistics([diamond], cutoff=2.6, max_ring=8, criterion="primitive")
+        assert result["ring_sizes"] == [6]
+        assert result["counts"] == [2 * len(diamond)]
+        assert result["rings_per_node"] == [pytest.approx(2.0)]
+        assert result["nodes_in_ring_fraction"] == [1.0]
+        assert result["ring_edge_fraction"] == 1.0
+
+
+def test_primitive_census_counts_formers_through_bridges():
+    atoms = polygon(6, side=2.0)
+    bridges = (atoms.positions + np.roll(atoms.positions, -1, axis=0)) / 2
+    atoms += Atoms("O6", positions=bridges)
+    result = compute_ring_statistics([atoms], cutoff=1.05, criterion="primitive")
+    assert result["bond_pair"] == ("Si", "O")
+    assert result["ring_sizes"] == [6] and result["counts"] == [1]
+
+
+def test_unknown_ring_criterion_is_a_named_value_error():
+    with pytest.raises(ValueError, match="criterion must be one of shortest, primitive"):
+        compute_ring_statistics([polygon(6)], cutoff=1.05, criterion="king")
+
+
+def test_primitive_census_of_alpha_quartz_matches_the_reference_count():
+    # Levien et al. alpha-quartz, Si on the 3a site of P3_221: the correct primitive census is
+    # six 6-rings and forty 8-rings per Si (Yuan and Cormack 2002, after Marians and Hobbs),
+    # i.e. one unique 6-ring and five unique 8-rings per Si node
+    from ase.spacegroup import crystal
+    quartz = crystal(["Si", "O"], basis=[(0.4697, 0, 2 / 3), (0.4135, 0.2669, 0.1191 + 2 / 3)],
+                     spacegroup=154, cellpar=[4.913, 4.913, 5.405, 90, 90, 120]).repeat((2, 2, 2))
+    result = compute_ring_statistics([quartz], cutoff=2.0, max_ring=8, criterion="primitive")
+    assert result["ring_sizes"] == [6, 8]
+    assert result["rings_per_node"] == [pytest.approx(1.0), pytest.approx(5.0)]
+    assert result["nodes_in_ring_fraction"] == [1.0, 1.0]
+    shortest = compute_ring_statistics([quartz], cutoff=2.0, max_ring=8)
+    assert shortest["ring_sizes"] == [6]          # every link's shortest ring is a 6-ring

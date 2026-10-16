@@ -179,6 +179,7 @@ _BLOCK_SCHEMA = {
         "ring_bond_pair": (bool, str, list, type(None)),
         "ring_max_size": int,
         "ring_cutoff": _OPTIONAL_NUMBER,
+        "ring_criterion": str,
         "connectivity": bool,
         "voronoi": (bool, str, type(None)),
         "voronoi_element": (bool, str, type(None)),
@@ -385,6 +386,9 @@ def _validate_nested_values(cfg: dict, errors: list[str], path: str) -> None:
     if (type(ring_cutoff) in _NUMBER
             and (not math.isfinite(ring_cutoff) or ring_cutoff <= 0)):
         errors.append("analysis.ring_cutoff must be finite and positive")
+    ring_criterion = analysis.get("ring_criterion")
+    if isinstance(ring_criterion, str) and ring_criterion not in ("shortest", "primitive", "guttman"):
+        errors.append("analysis.ring_criterion must be 'shortest' or 'primitive'")
     probe_radii = analysis.get("void_probe_radii")
     if isinstance(probe_radii, list):
         if not probe_radii:

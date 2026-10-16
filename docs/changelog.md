@@ -4,6 +4,22 @@
 
 ### Added
 
+- `--ring-criterion primitive` (YAML `ring_criterion`, API
+  `ring_statistics(criterion="primitive")`): the census of unique primitive
+  rings (rings that no path through the network can shorten; Goetzke–Klein,
+  Yuan–Cormack), each counted once, reported as rings per network node
+  R_C(n) next to the counts, with `nodes_in_ring_fraction`, per-structure
+  values and ensemble intervals, a `rings_per_node` CSV column and the plot in
+  rings per node. The default criterion, `shortest` (Guttman's rule; `guttman` is
+  accepted), is unchanged: the shortest ring through each network edge, as a
+  fraction of edges. The two differ where
+  a link lies on rings of two sizes (annealed silica peaks at 5 per edge and at
+  6 per node). The primitive search is exponential in the depth on dense
+  networks, so its default `--ring-max-size` is 8 and the analyser warns above
+  that on a close-packed oxide. Validated on β-cristobalite (two 6-rings per
+  Si) and α-quartz (one 6-ring and five 8-rings per Si, i.e. six 6-rings and
+  forty 8-rings through each Si, the reference count of Yuan and Cormack).
+
 - Tutorial 8, `Tutorials/T8_validation_workflow/`: the analysis of the software
   paper through the Python API on a shipped ensemble (ten relaxed and ten
   annealed 400-atom a-Ga2O3 cells, MACE-MPA-0): partial RDFs, coordination and

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from collections import Counter, defaultdict, deque
 from collections.abc import Mapping
 from numbers import Integral, Real
@@ -62,16 +63,179 @@ def _validate_cutoff(cutoff):
     return validated, metadata
 
 
-def compute_ring_statistics(atoms_list, bond_pair=None, cutoff=None,
-                            max_ring=12, get_cutoff_fn=None):
-    """
-    Compute the shortest-ring distribution observed by network edges.
+RING_CRITERIA = ("shortest", "primitive")
+_CRITERION_ALIASES = {"guttman": "shortest"}   # the literature name of the shortest-ring-per-edge rule
 
-    For each edge in the network graph (A-B-A path through bridging B),
-    find the shortest ring by BFS excluding that edge. Counts are edge
-    observations, not unique cycles: an isolated six-member ring contributes
-    six observations. Ring sizes count A nodes, not the intervening B atoms.
-    For a same-element pair, the network uses direct bonds instead.
+
+def _edge_key(a, oa, b, ob):
+    """Canonical key of the periodic network edge between the unfolded nodes (a, oa) and (b, ob)."""
+    s = (ob[0] - oa[0], ob[1] - oa[1], ob[2] - oa[2])
+    return min((a, b, *s), (b, a, -s[0], -s[1], -s[2]))
+
+
+def _unfolded_bfs(net_adj, src, depth):
+    """BFS from (src, home cell) over (atom, offset) states: distances and shortest-path predecessors."""
+    start = (src, (0, 0, 0))
+    dist = {start: 0}
+    preds = defaultdict(list)
+    queue = deque([start])
+    while queue:
+        u = queue.popleft()
+        d = dist[u]
+        if d >= depth:
+            continue
+        a, off = u
+        for b, sx, sy, sz in net_adj[a]:
+            v = (b, (off[0] + sx, off[1] + sy, off[2] + sz))
+            if v not in dist:
+                dist[v] = d + 1
+                queue.append(v)
+                preds[v].append(u)
+            elif dist[v] == d + 1:
+                preds[v].append(u)
+    return dist, preds
+
+
+def _shortest_paths(preds, target, start):
+    """Every shortest path start -> target through the predecessor lists."""
+    out = []
+    stack = [(target, [target])]
+    while stack:
+        u, path = stack.pop()
+        if u == start:
+            out.append(path[::-1])
+            continue
+        for p in preds[u]:
+            stack.append((p, path + [p]))
+    return out
+
+
+def _closer_than(net_adj, u, v, bound):
+    """True if the unfolded network distance u -> v is below ``bound``."""
+    dist = {u: 0}
+    queue = deque([u])
+    while queue:
+        x = queue.popleft()
+        d = dist[x]
+        if d + 1 >= bound:
+            continue
+        a, off = x
+        for b, sx, sy, sz in net_adj[a]:
+            y = (b, (off[0] + sx, off[1] + sy, off[2] + sz))
+            if y not in dist:
+                if y == v:
+                    return True
+                dist[y] = d + 1
+                queue.append(y)
+    return False
+
+
+def _is_primitive(net_adj, ring):
+    """A ring is primitive when no two of its nodes are closer through the network than round it."""
+    n = len(ring)
+    for i in range(n):
+        for j in range(i + 2, n):
+            ring_distance = min(j - i, n - (j - i))
+            if ring_distance >= 2 and _closer_than(net_adj, ring[i], ring[j], ring_distance):
+                return False
+    return True
+
+
+def _canonical_ring(ring):
+    """Rotation- and direction-independent key of a ring of unfolded nodes, offsets relative to its first node."""
+    n = len(ring)
+    best = None
+    for seq in (ring, ring[::-1]):
+        for k in range(n):
+            o0 = seq[k][1]
+            key = tuple((seq[(k + t) % n][0],
+                         (seq[(k + t) % n][1][0] - o0[0], seq[(k + t) % n][1][1] - o0[1],
+                          seq[(k + t) % n][1][2] - o0[2])) for t in range(n))
+            if best is None or key < best:
+                best = key
+    return best
+
+
+def _primitive_rings(net_adj, p1_indices, max_ring):
+    """Unique primitive rings of the periodic network graph, as {canonical key: size}.
+
+    Rings through each node are built from pairs of node-disjoint shortest paths
+    (the construction of Yuan and Cormack, Comput. Mater. Sci. 24, 343 (2002)): a
+    ring of 2d nodes joins two shortest paths to a node at distance d, a ring of
+    2d + 1 nodes two shortest paths to the ends of an edge whose ends are both at
+    distance d. A candidate is kept when it has no shortcut (Goetzke and Klein,
+    J. Non-Cryst. Solids 127, 215 (1991)). Offsets make a loop that winds round
+    the cell no ring.
+    """
+    rings = {}
+    depth = max_ring // 2 + 1
+    for s in p1_indices:
+        start = (s, (0, 0, 0))
+        dist, preds = _unfolded_bfs(net_adj, s, depth)
+        by_distance = defaultdict(list)
+        for v, d in dist.items():
+            by_distance[d].append(v)
+        for d in range(1, depth + 1):
+            if d >= 2 and 2 * d <= max_ring:          # even rings; d = 1 would be a double edge
+                for x in by_distance[d]:
+                    paths = _shortest_paths(preds, x, start)
+                    for i in range(len(paths)):
+                        inner_i = set(paths[i][1:-1])
+                        for j in range(i + 1, len(paths)):
+                            if inner_i.isdisjoint(paths[j][1:-1]):
+                                ring = paths[i][:-1] + paths[j][::-1][:-1]
+                                key = _canonical_ring(ring)
+                                if key not in rings and _is_primitive(net_adj, ring):
+                                    rings[key] = len(ring)
+            if 2 * d + 1 <= max_ring:                  # odd rings through an edge at distance d
+                for x in by_distance[d]:
+                    a, off = x
+                    for b, sx, sy, sz in net_adj[a]:
+                        y = (b, (off[0] + sx, off[1] + sy, off[2] + sz))
+                        if dist.get(y) != d or y <= x:
+                            continue
+                        paths_x = _shortest_paths(preds, x, start)
+                        paths_y = _shortest_paths(preds, y, start)
+                        for p1 in paths_x:
+                            tail = set(p1[1:])
+                            for p2 in paths_y:
+                                if tail.isdisjoint(p2[1:]):
+                                    ring = p1 + p2[::-1][:-1]
+                                    key = _canonical_ring(ring)
+                                    if key not in rings and _is_primitive(net_adj, ring):
+                                        rings[key] = len(ring)
+    return rings
+
+
+def compute_ring_statistics(atoms_list, bond_pair=None, cutoff=None,
+                            max_ring=12, get_cutoff_fn=None, criterion="shortest"):
+    """
+    Compute ring statistics of the network graph by one of two criteria.
+
+    ``criterion="shortest"`` (default; ``"guttman"`` is accepted as its literature
+    name): the shortest-ring distribution observed by
+    network edges. For each edge in the network graph (A-B-A path through
+    bridging B), find the shortest ring by BFS excluding that edge (Guttman,
+    J. Non-Cryst. Solids 116, 145 (1990)). Counts are edge observations, not
+    unique cycles: an isolated six-member ring contributes six observations.
+
+    ``criterion="primitive"``: the census of unique primitive rings, rings that
+    cannot be shortened by a path through the network (Goetzke and Klein,
+    J. Non-Cryst. Solids 127, 215 (1991); Yuan and Cormack, Comput. Mater. Sci.
+    24, 343 (2002)), each counted once. ``counts`` are unique rings, ``fractions``
+    per cent of rings, ``rings_per_node`` the rings of each size per network
+    node (the R_C(n) of the RINGS code, Le Roux and Jund, Comput. Mater. Sci.
+    49, 70 (2010)) and ``nodes_in_ring_fraction`` the fraction of nodes on at
+    least one ring of that size. The search enumerates shortest-path pairs to
+    depth ``max_ring // 2 + 1``, which grows quickly with the node degree: a
+    400-atom close-packed oxide takes seconds at ``max_ring=8`` and much longer
+    at 12, a 648-atom silica network seconds at 12. In a close-packed oxide
+    the census is dominated by 3-rings whatever the preparation route (every
+    anion bridging three cations is a triangle), so it discriminates for
+    network glasses only.
+
+    Ring sizes count A nodes, not the intervening B atoms. For a same-element
+    pair, the network uses direct bonds instead.
 
     The graph is periodic: every bond carries the cell offset of its partner,
     and a path closes a ring only when it comes back to the image it started
@@ -110,6 +274,9 @@ def compute_ring_statistics(atoms_list, bond_pair=None, cutoff=None,
             or not isinstance(max_ring, Integral) or max_ring < 3):
         raise ValueError("max_ring must be an integer of at least 3")
     max_ring = int(max_ring)
+    criterion = _CRITERION_ALIASES.get(criterion, criterion)
+    if criterion not in RING_CRITERIA:
+        raise ValueError(f"criterion must be one of {', '.join(RING_CRITERIA)}, not {criterion!r}")
     try:
         atoms_list = list(atoms_list)
     except TypeError as exc:
@@ -222,15 +389,54 @@ def compute_ring_statistics(atoms_list, bond_pair=None, cutoff=None,
                             if syms[b] in nodes and (b != a or s != (0, 0, 0)):
                                 net_adj[a].add((b, *s))
 
-        # For each edge, find shortest ring
         counted_edges = set()
+        for a in p1_indices:
+            for b, sx, sy, sz in net_adj[a]:
+                counted_edges.add(min((a, b, sx, sy, sz), (b, a, -sx, -sy, -sz)))
+        n_edges = len(counted_edges)
+        if criterion == "primitive":
+            # Unique primitive rings; an edge is resolved when it lies on one
+            degree = 2 * n_edges / len(p1_indices) if p1_indices else 0.0
+            if index == 0 and max_ring > 8 and degree > 5:
+                warnings.warn(
+                    f"primitive-ring search to max_ring={max_ring} on a network with "
+                    f"{degree:.1f} links per node (a close-packed oxide) enumerates shortest-path "
+                    "pairs exponentially in the depth and can take minutes per structure; "
+                    "max_ring=8 finds the same rings in seconds there", stacklevel=2)
+            found_rings = _primitive_rings(net_adj, p1_indices, max_ring)
+            ring_edges = set()
+            members = defaultdict(set)
+            for key, size in found_rings.items():
+                frame_counts[size] += 1
+                ring_counts[size] += 1
+                for t in range(size):
+                    (a, oa), (b, ob) = key[t], key[(t + 1) % size]
+                    ring_edges.add(_edge_key(a, oa, b, ob))
+                    members[size].add(a)
+            n_ring_edges = len(ring_edges)
+            n_nodes = len(p1_indices)
+            per_structure.append({
+                "index": index, "counts": dict(sorted(frame_counts.items())),
+                "total_rings": sum(frame_counts.values()),
+                "n_network_nodes": n_nodes, "n_network_edges": n_edges,
+                "n_ring_edges": n_ring_edges,
+                "n_unresolved_edges": n_edges - n_ring_edges,
+                "ring_edge_fraction": n_ring_edges / n_edges if n_edges else None,
+                "rings_per_node": {size: count / n_nodes for size, count in sorted(frame_counts.items())},
+                "nodes_in_ring_fraction": {size: len(members[size]) / n_nodes
+                                           for size in sorted(frame_counts)},
+                **_ring_size_summary(frame_counts),
+            })
+            continue
+
+        # shortest ring per edge (Guttman): for each edge, find its shortest ring
         for a in p1_indices:
             for edge in net_adj[a]:
                 b, sx, sy, sz = edge
                 key = min((a, b, sx, sy, sz), (b, a, -sx, -sy, -sz))
-                if key in counted_edges:
+                if key not in counted_edges:
                     continue
-                counted_edges.add(key)
+                counted_edges.discard(key)
 
                 # BFS over (atom, cell offset) from a in the home cell to the
                 # image of b this edge bonds to, without the edge itself
@@ -260,7 +466,6 @@ def compute_ring_statistics(atoms_list, bond_pair=None, cutoff=None,
                 if found and found <= max_ring:
                     ring_counts[found] += 1
                     frame_counts[found] += 1
-        n_edges = len(counted_edges)
         n_ring_edges = sum(frame_counts.values())
         per_structure.append({
             "index": index, "counts": dict(sorted(frame_counts.items())),
@@ -282,28 +487,68 @@ def compute_ring_statistics(atoms_list, bond_pair=None, cutoff=None,
                       "n_network_edges", "n_ring_edges", "n_unresolved_edges",
                       "ring_edge_fraction")
 
+    n_nodes = sum(frame["n_network_nodes"] for frame in per_structure)
+    n_ring_edges = sum(frame["n_ring_edges"] for frame in per_structure)
+    if criterion == "primitive":
+        definitions = {
+            "method": "primitive_rings",
+            "count_definition": (
+                "unique primitive rings (no two ring nodes closer through the network than "
+                "round the ring), each counted once; counts and total_rings are rings, "
+                "rings_per_node is rings of that size per network node"),
+            "ring_size_definition": (
+                "number of network-former nodes (any node species) in the ring; "
+                "bridging atoms are omitted for unlike-element bond pairs"),
+            "unresolved_edge_definition": (
+                "network edge on no primitive ring of size <= max_ring; "
+                "may belong to a larger ring and is not necessarily acyclic"),
+            "fraction_of_structures_definition": (
+                "structures with at least one primitive ring of this size"),
+        }
+        extra = {
+            "rings_per_node": [ring_counts[s] / n_nodes if n_nodes else None for s in sizes],
+            "nodes_in_ring_fraction": [
+                sum(r["nodes_in_ring_fraction"].get(s, 0.0) * r["n_network_nodes"] for r in per_structure)
+                / n_nodes if n_nodes else None for s in sizes],
+        }
+        extra_uncertainty = {
+            "rings_per_node": {size: summarize_structures([
+                r["rings_per_node"].get(size, 0.0) for r in per_structure]) for size in sizes},
+            "nodes_in_ring_fraction": {size: summarize_structures([
+                r["nodes_in_ring_fraction"].get(size, 0.0) for r in per_structure]) for size in sizes},
+        }
+    else:
+        definitions = {
+            "method": "shortest_cycle_per_network_edge",
+            "count_definition": (
+                "one shortest-cycle observation per undirected periodic network edge; "
+                "counts and total_rings count edge observations, not unique cycles"),
+            "ring_size_definition": (
+                "number of network-former nodes (any node species) in the shortest cycle; "
+                "bridging atoms are omitted for unlike-element bond pairs"),
+            "unresolved_edge_definition": (
+                "network edge without a closed cycle of size <= max_ring; "
+                "may belong to a larger ring and is not necessarily acyclic"),
+            "fraction_of_structures_definition": (
+                "structures with at least one network edge whose shortest ring has this size"),
+        }
+        extra, extra_uncertainty = {}, {}
+
     return {
-        "method": "shortest_cycle_per_network_edge",
-        "count_definition": (
-            "one shortest-cycle observation per undirected periodic network edge; "
-            "counts and total_rings count edge observations, not unique cycles"),
-        "ring_size_definition": (
-            "number of network-former nodes (any node species) in the shortest cycle; "
-            "bridging atoms are omitted for unlike-element bond pairs"),
-        "unresolved_edge_definition": (
-            "network edge without a closed cycle of size <= max_ring; "
-            "may belong to a larger ring and is not necessarily acyclic"),
+        **definitions,
+        "criterion": criterion,
         "cutoff": cutoff_metadata, "max_ring": max_ring, "n_structures": len(atoms_list),
         "ring_sizes": sizes,
         "counts": counts,
         "fractions": fractions,
+        **extra,
         "bond_pair": bond_pair,
         "nodes": sorted(nodes), "bridges": sorted(bridges),
         "total_rings": total,
-        "n_network_nodes": sum(frame["n_network_nodes"] for frame in per_structure),
-        "n_network_edges": n_edges, "n_ring_edges": total,
-        "n_unresolved_edges": n_edges - total,
-        "ring_edge_fraction": total / n_edges if n_edges else None,
+        "n_network_nodes": n_nodes,
+        "n_network_edges": n_edges, "n_ring_edges": n_ring_edges,
+        "n_unresolved_edges": n_edges - n_ring_edges,
+        "ring_edge_fraction": n_ring_edges / n_edges if n_edges else None,
         **_ring_size_summary(ring_counts),
         "per_structure": per_structure,
         "uncertainty": {
@@ -316,10 +561,9 @@ def compute_ring_statistics(atoms_list, bond_pair=None, cutoff=None,
                 for r in per_structure]) for size in sizes},
             "fraction_of_structures": {size: summarize_structures([
                 float(r["counts"].get(size, 0) > 0) for r in per_structure]) for size in sizes},
+            **extra_uncertainty,
         },
         "fraction_of_structures": {
             size: sum(r["counts"].get(size, 0) > 0 for r in per_structure) / len(per_structure)
             for size in sizes},
-        "fraction_of_structures_definition": (
-            "structures with at least one network edge whose shortest ring has this size"),
     }

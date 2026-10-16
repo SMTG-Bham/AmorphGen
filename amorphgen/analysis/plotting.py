@@ -721,11 +721,13 @@ def plot_tr(tr_result, output_dir=".", prefix="analysis", dpi=300,
 
 def plot_rings(rings, output_dir, label="auto", dpi=300, save_pdf=False,
                show_title=False):
-    """Bar chart of ring-size assignments (percent of resolved network edges)."""
+    """Bar chart of ring sizes: percent of resolved network edges (shortest ring per
+    edge) or rings per node (primitive census)."""
     import os
     os.makedirs(output_dir, exist_ok=True)
     sizes = list(rings["ring_sizes"])
-    frac = list(rings["fractions"])
+    primitive = rings.get("method") == "primitive_rings"
+    frac = list(rings["rings_per_node"] if primitive else rings["fractions"])
     fig, ax = _figure(figsize=(5.0, 3.4), dpi=dpi)
     if sizes:
         ax.bar(sizes, frac, color=_PALETTE[0], width=0.7)
@@ -736,7 +738,7 @@ def plot_rings(rings, output_dir, label="auto", dpi=300, save_pdf=False,
         ax.text(0.5, 0.5, message, transform=ax.transAxes, ha="center", va="center")
         ax.set_ylim(0, 100)
     ax.set_xlabel("Ring size (network nodes)")
-    ax.set_ylabel("Fraction of resolved edges (%)")
+    ax.set_ylabel("Primitive rings per node" if primitive else "Fraction of resolved edges (%)")
     ax.set_xticks(sizes)
     _apply_pub_style(ax)
     if show_title:

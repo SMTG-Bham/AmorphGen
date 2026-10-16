@@ -679,7 +679,8 @@ def _add_arguments(p):
                            "FSDP width (~0.3 1/A). Raw values are always "
                            "kept in the CSV as s_q_raw.")
     g_an.add_argument("--rings", nargs="?", const="auto", default=None, metavar="PAIR",
-                      help="Ring statistics (shortest-ring per network edge). "
+                      help="Ring statistics (shortest ring per network edge, or the "
+                           "primitive-ring census with --ring-criterion primitive). "
                            "Optional PAIR such as Ge-O selects the node-bridge "
                            "pair; a /-joined group such as Si/Al-O makes every "
                            "listed element a node. Default auto: every cation is "
@@ -689,6 +690,16 @@ def _add_arguments(p):
                            "per-structure CSVs under --save-plot.")
     g_an.add_argument("--ring-max-size", type=int, default=None, metavar="N",
                       help="Largest ring to search in network nodes (default 12).")
+    g_an.add_argument("--ring-criterion", choices=("shortest", "primitive", "guttman"), default=None,
+                      help="Ring criterion: 'shortest' (default; 'guttman' is its literature name) "
+                           "assigns each network edge its shortest ring and reports the fraction "
+                           "of edges per size; "
+                           "'primitive' counts every ring without a shortcut once "
+                           "(Goetzke-Klein / Yuan-Cormack) and reports rings per node, "
+                           "R_C(n) as in the RINGS code (Le Roux and Jund 2010) and the "
+                           "glass literature. The primitive search grows "
+                           "quickly with the node degree: use --ring-max-size 8 for a "
+                           "close-packed oxide.")
     g_an.add_argument("--ring-cutoff", type=float, default=None, metavar="A",
                       help="Bond cutoff in A for rings only (default: analyser pair cutoff).")
     g_an.add_argument("--voronoi", nargs="?", const="all", default=None, metavar="ELEMENT",
@@ -2061,13 +2072,17 @@ def _main():
                 rings_opt = y
         if rings_opt:
             pair = None if rings_opt == "auto" else tuple(rings_opt.split("-"))
+            ring_criterion = (args.ring_criterion if args.ring_criterion is not None
+                              else an_cfg.get("ring_criterion", "shortest"))
+            # the primitive census is exponential in the search depth on dense
+            # networks, so its default limit is 8 nodes (12 for the shortest ring)
             ring_max_size = (args.ring_max_size if args.ring_max_size is not None
-                             else an_cfg.get("ring_max_size", 12))
+                             else an_cfg.get("ring_max_size", 8 if ring_criterion == "primitive" else 12))
             ring_cutoff = (args.ring_cutoff if args.ring_cutoff is not None
                            else an_cfg.get("ring_cutoff"))
             try:
                 rings = sa.ring_statistics(bond_pair=pair, cutoff=ring_cutoff,
-                                           max_ring=ring_max_size)
+                                           max_ring=ring_max_size, criterion=ring_criterion)
             except ValueError as exc:
                 print(f"Error: ring analysis: {exc}")
                 sys.exit(1)
