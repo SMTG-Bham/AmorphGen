@@ -197,7 +197,7 @@ class TestGenerateRandom:
         assert len(atoms) == 80
 
     def test_auto_expand_dense_covalent_network(self):
-        """BeO (covalent_network_oxide) is too dense to place at its full
+        """BeO (small_cation_oxide) is too dense to place at its full
         equilibrium density with physical minseps; generate_random should
         auto-expand the cell and succeed for every seed, WITHOUT shrinking the
         (physical) O-O minimum separation."""

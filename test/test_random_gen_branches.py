@@ -385,12 +385,12 @@ def test_density_and_packing_edge_cases():
 
 @pytest.mark.parametrize("symbol, cls, composition, expected", [
     ("Sb", "high_valent_oxide", {"Sb": 2, "O": 5}, 0.60),
-    ("Sb", "covalent_oxide", {"Sb": 2, "O": 3}, covalent_radii[atomic_numbers["Sb"]]),
+    ("Sb", "network_forming_oxide", {"Sb": 2, "O": 3}, covalent_radii[atomic_numbers["Sb"]]),
     ("Tc", "metal_oxide", {"Tc": 1, "O": 2}, covalent_radii[atomic_numbers["Tc"]]),
     ("Tc", "boride", {"Tc": 1, "B": 2}, covalent_radii[atomic_numbers["Tc"]]),
     ("Tc", "default", {"Tc": 1, "Cl": 4}, covalent_radii[atomic_numbers["Tc"]]),
     # Ambiguous charge balance still promotes an oxoanion centre to its top state.
-    ("S", "covalent_oxide", {"N": 1, "S": 1, "O": 5}, radii.SHANNON_IONIC_RADII["S"][6][6]),
+    ("S", "network_forming_oxide", {"N": 1, "S": 1, "O": 5}, radii.SHANNON_IONIC_RADII["S"][6][6]),
 ])
 def test_density_radius_selection(symbol, cls, composition, expected):
     assert radii._radius_for_density(symbol, cls, composition) == pytest.approx(expected)
