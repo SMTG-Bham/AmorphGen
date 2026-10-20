@@ -460,7 +460,7 @@ a validated density or coordination distribution.
   covalent or metallic radii, with separate handling for anion packing and
   cation–cation contacts. Explicit `--target-cn` also selects CN-aware radii.
 - **Density:** material classes select a radius source and packing factor. For
-  example, `group_iv` uses Cordero radii at packing factor 0.30, `metal_oxide`
+  example, `tetrahedral_element` uses Cordero radii at packing factor 0.30, `metal_oxide`
   uses Shannon CN6 at 0.52, and `rutile_dioxide` uses Shannon CN6 at 0.66.
   Set `--target-density` when a validated density is available.
 - **Coordination:** targets and over-coordination tolerance are derived from

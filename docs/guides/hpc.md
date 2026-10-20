@@ -225,8 +225,9 @@ A complete oxide set is `softwarex_run_oxide.slurm` for the system, then
 `softwarex_analyse_oxide.slurm` for the same `SYSTEM [MODEL]`; the outputs land
 in `<system>_<model>/` (`random_initial/`, `random_opt/`, `hybrid/final/`,
 `analysis_*/`). The a-As examples of the paper used the 2000-atom protocol of
-Liu et al. with their published potential through `--model-path` and
-`--target-cn As=3`, and are not scripted here.
+Liu et al. with their published potential through `--model-path`, and are not
+scripted here. (Releases up to 1.0.0rc5 gave pure As the metal target CN of 8, so
+those runs set `--target-cn As=3`; the automatic target is now 3.)
 
 ## Resuming timed-out jobs
 

@@ -520,7 +520,7 @@ _RUTILE_DIOXIDE_EXCEPTIONS = frozenset({"Pb"})
 # amorphous 3.01 g/cm3); treating it with Cordero covalent radii for BOTH atoms
 # + an open-network packing factor recovers ~2.96. Kept as an explicit element
 # set (not a radius gate) so it cannot misfire on small-but-ionic cations such
-# as Al3+. Distinct from "covalent_oxide" (SiO2/GeO2/B2O3), whose metalloid
+# as Al3+. Distinct from "network_forming_oxide" (SiO2/GeO2/B2O3), whose metalloid
 # cations have usable small Shannon radii and stay on the ionic path.
 _COVALENT_OXIDE_CATIONS = frozenset({"Be"})
 
@@ -624,6 +624,12 @@ def _nonmetal_cation_cn(sym: str, composition: dict) -> int:
     return max(1, _NONMETAL_CATION_CN.get(sym, 4) - (top - ox) // 2)
 
 
+# Target CN of a one-element low-coordinated solid: 8 - N for the pnictogens
+# and chalcogens, 3 for sp2 carbon.
+_LOW_COORDINATED_CN = {"P": 3, "As": 3, "Sb": 3, "Bi": 3,
+                       "S": 2, "Se": 2, "Te": 2, "C": 3}
+
+
 def _class_target_cn(composition: dict,
                      centres: frozenset) -> tuple[dict | None, int]:
     """The per-class rules of :func:`auto_target_cn`, for every element but
@@ -636,10 +642,19 @@ def _class_target_cn(composition: dict,
     # Check compound class first (handles semiconductors, chalcogenides)
     cls = _classify_compound(composition)
 
-    if cls == "group_iv":
+    if cls == "tetrahedral_element":
         # Pure group IV (Si, Ge, SiGe) — tetrahedral CN=4
         target_cn = {s: 4 for s in elems}
         return target_cn, 0
+
+    if cls == "low_coordinated_element":
+        # Pure P, As, Sb, Bi (CN 3), S, Se, Te (CN 2): the 8-N rule of a
+        # covalent element. Pure C takes 3, the sp2 network its packing factor
+        # assumes. Before this branch As and Sb fell through to the metal rule
+        # (CN 8) and Se, P and C got no target.
+        (only_el,) = elems
+        cn = _LOW_COORDINATED_CN.get(only_el)
+        return ({only_el: cn} if cn else None), 0
 
     if cls == "hydrogenated_network":
         # a-Si:H, a-C:H: tetravalent hosts, each H bonded to one of them.
@@ -1471,7 +1486,7 @@ def estimate_density(composition: dict, amorphous_factor: float = 0.80) -> float
 # representative systems in each class.
 PACKING_FACTORS = {
     # Ionic — Shannon ionic radii
-    "covalent_oxide":  0.50,  # SiO2, GeO2, B2O3 (network formers)
+    "network_forming_oxide":  0.50,  # SiO2, GeO2, B2O3 (network formers)
     "metal_oxide":     0.52,  # In2O3, Al2O3, Ga2O3 (and fluorite ZrO2/HfO2/CeO2)
     "rutile_dioxide":  0.66,  # TiO2, SnO2, RuO2, IrO2, OsO2 — dense rutile-type MO2
     "fluorite_dioxide": 0.63,  # ZrO2, HfO2, CeO2 — 8/7-coordinate fluorite/baddeleyite MO2
@@ -1484,7 +1499,7 @@ PACKING_FACTORS = {
                               # halogen fraction via _oxyhalide_packing_factor
                               # (NaTaOCl4 -> 0.568, rho 2.68 -> 2.93); this entry
                               # is the class's documented midpoint / fallback.
-    "nitride":         0.52,  # large-cation nitrides (ZrN, HfN, ScN). Kept low
+    "large_cation_nitride":         0.52,  # large-cation nitrides (ZrN, HfN, ScN). Kept low
                               # DELIBERATELY (verified 2026-07-31): placement
                               # saturates at ~73-82% of crystal density under
                               # the minsep constraints regardless of pf —
@@ -1499,8 +1514,8 @@ PACKING_FACTORS = {
                               # denser and still place. Cation-radius-gated.
     "hydride":         0.55,  # LiH, MgH2, NaAlH4
     # Covalent — Cordero covalent radii
-    "group_iv":        0.30,  # Si, Ge, C (tetrahedral covalent network)
-    "elemental_semiconductor": 0.28,  # a-Se, a-Te, a-As, a-Sb, a-P (chain/layer, Cordero)
+    "tetrahedral_element":        0.30,  # Si, Ge, SiGe, B (tetrahedral covalent network)
+    "low_coordinated_element": 0.28,  # a-C, a-P, a-As, a-Sb, a-S, a-Se, a-Te (chain/layer, Cordero)
     "pnictide":        0.32,  # GaAs, InP, InAs (III-V compounds)
     "chalcogenide":    0.30,  # ZnS, CdTe, GeTe (II-VI / IV-VI)
     "chalcogenide_glass": 0.23,  # GeS2, GeSe2, As2S3, As2Se3: corner-sharing
@@ -1511,14 +1526,14 @@ PACKING_FACTORS = {
                               # Cordero B (carbide-style; calibrated
                               # 2026-07-31: diborides land 80-84 % of
                               # crystal; was 56-89 % with all-Cordero/0.50)
-    "covalent_network_oxide": 0.35,  # BeO — covalent wurtzite oxide network;
+    "small_cation_oxide": 0.35,  # BeO — covalent wurtzite oxide network;
                                      # Cordero radii for both atoms (Be 0.96,
                                      # O 0.66) + 0.35 -> rho ~2.96 vs measured
                                      # amorphous 3.01 g/cm3 (ionic model: 1.42)
     "hydrogenated_network": 0.30,  # a-Si:H, a-Ge:H, a-C:H, a-SiC:H. NOMINAL
                                    # value only: get_packing_factor uses the
-                                   # class of the H-free host (group_iv 0.30,
-                                   # elemental_semiconductor 0.28 for a-C:H,
+                                   # class of the H-free host (tetrahedral_element 0.30,
+                                   # low_coordinated_element 0.28 for a-C:H,
                                    # covalent_carbide 0.32), so the estimate
                                    # runs continuously into a-Si / a-C / SiC
                                    # as the H goes to zero; see _NETWORK_H_RADIUS
@@ -1564,9 +1579,9 @@ def _classify_compound(composition: dict) -> str:
     """
     Classify a compound by material class for packing factor selection.
 
-    Returns one of: "group_iv", "hydrogenated_network", "pnictide",
-    "chalcogenide", "covalent_oxide", "covalent_network_oxide",
-    "metal_oxide", "halide", "oxyhalide", "nitride", "carbide", "hydride",
+    Returns one of: "tetrahedral_element", "hydrogenated_network", "pnictide",
+    "chalcogenide", "network_forming_oxide", "small_cation_oxide",
+    "metal_oxide", "halide", "oxyhalide", "large_cation_nitride", "carbide", "hydride",
     "boride", "alloy", "default".
     """
     elems = set(composition.keys())
@@ -1583,7 +1598,7 @@ def _classify_compound(composition: dict) -> str:
     # Group IV: pure Si, Ge, SiGe (all metalloid, no chalcogen/pnictogen)
     all_metalloid = all(s in METALLOIDS for s in elems)
     if all_metalloid and not chalcogens and not pnictogens:
-        return "group_iv"
+        return "tetrahedral_element"
 
     # Hydrogenated group-IV networks (a-Si:H, a-Ge:H, a-C:H, a-SiC:H): H caps
     # a covalent network (see _hydrogenated_host). As the anion of the
@@ -1602,7 +1617,7 @@ def _classify_compound(composition: dict) -> str:
         (only_el,) = elems
         if ((only_el in NONMETALS or only_el in METALLOIDS)
                 and only_el not in _DIATOMIC_NONMETALS):
-            return "elemental_semiconductor"
+            return "low_coordinated_element"
 
     # Metal-rich metal/metalloid glasses (Ni80P20, Fe80B20, Pd80Si20,
     # Pd40Ni40P20): a transition or noble metal with a minority of the glass-
@@ -1672,7 +1687,7 @@ def _classify_compound(composition: dict) -> str:
         # tetrahedral network. Routed before the ionic branches; uses Cordero
         # radii (see _radius_for_density) + a low packing factor.
         if cations and all(c in _COVALENT_OXIDE_CATIONS for c in cations):
-            return "covalent_network_oxide"
+            return "small_cation_oxide"
         # High-valent oxides (all cations in oxidation state >= 5): V2O5, Nb2O5,
         # Ta2O5, Sb2O5, MoO3, WO3, ... Small, highly-charged cations form short
         # M-O bonds and pack denser than the generic oxide factor predicts, so
@@ -1689,7 +1704,7 @@ def _classify_compound(composition: dict) -> str:
         # a metal MO2 whose 4+ cation radius is below the rutile/fluorite cutoff
         # (or a known covalent exception, e.g. PbO2). Fluorite dioxides
         # (ZrO2, HfO2, CeO2 — larger cations) and metalloid oxides (SiO2, GeO2)
-        # fall through to metal_oxide / covalent_oxide.
+        # fall through to metal_oxide / network_forming_oxide.
         metal_cations = [c for c in cations
                          if c not in NONMETALS and c not in METALLOIDS]
         if cations and len(metal_cations) == len(cations):
@@ -1715,7 +1730,7 @@ def _classify_compound(composition: dict) -> str:
             # every cation is a NONMETAL (P2O5, SO3), are covalent networks /
             # molecular glasses, not "default".
             # Pure oxygen (one element) still falls through to "default".
-            return "covalent_oxide"
+            return "network_forming_oxide"
 
     # Halides
     if anions & _HALOGENS:
@@ -1734,7 +1749,7 @@ def _classify_compound(composition: dict) -> str:
         if cations and all(cr is not None and cr < _SMALL_CATION_NITRIDE_RMAX
                            for cr in crs):
             return "small_cation_nitride"
-        return "nitride"
+        return "large_cation_nitride"
 
     # Carbides — split by cation chemistry
     #   Transition-metal carbides (TiC, WC, ZrC, ...) form rocksalt-like dense
@@ -1951,13 +1966,13 @@ def _radius_for_density(sym: str, cls: str,
     * Metallic alloys -> Goldschmidt metallic radii (close-packed
       atomic centres).
     """
-    ionic_classes = {"covalent_oxide", "metal_oxide", "rutile_dioxide",
+    ionic_classes = {"network_forming_oxide", "metal_oxide", "rutile_dioxide",
                      "fluorite_dioxide", "high_valent_oxide", "halide",
-                     "oxyhalide", "nitride",
+                     "oxyhalide", "large_cation_nitride",
                      "small_cation_nitride", "hydride"}
-    covalent_classes = {"group_iv", "elemental_semiconductor", "pnictide",
+    covalent_classes = {"tetrahedral_element", "low_coordinated_element", "pnictide",
                         "chalcogenide", "chalcogenide_glass", "covalent_carbide",
-                        "covalent_network_oxide", "hydrogenated_network"}
+                        "small_cation_oxide", "hydrogenated_network"}
     if cls == "hydrogenated_network" and sym == "H":
         return _NETWORK_H_RADIUS
     # Infer oxidation state from charge balance when a composition is
