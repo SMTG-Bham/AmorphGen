@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.0.0rc6 (2026-10-20)
 
 ### Changed
 
@@ -14,6 +14,12 @@
   are new.
 
 ### Added
+
+- `examples/calibration/`: the packing-factor calibration of the density
+  estimate, `fit_packing_factors.py` with its table of 108 sourced reference
+  densities (`packing_reference_densities.csv`). With the defaults (the 100 rows
+  with a verified source, amorphous/crystal ratio 0.80) it gives a leave-one-out
+  error of 9.8 % and 11.9 % for the factors in the code.
 
 - `--ring-criterion primitive` (YAML `ring_criterion`, API
   `ring_statistics(criterion="primitive")`): the census of unique primitive
