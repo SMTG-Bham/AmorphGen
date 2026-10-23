@@ -22,6 +22,9 @@ A complete example using two shipped Ga₂O₃ structures is available in
 `python examples/exafs/run_example.py all --executable /path/to/feff`.
 It retains the structures, FEFF inputs and outputs, spectra and a plot.
 Two sites are an execution demonstration, not a converged ensemble.
+[Tutorial 9](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T9_exafs/tutorial_9_exafs.ipynb)
+goes through all three calculations on the Tutorial 8 cells, including a
+FEFF convergence check.
 
 ## Descriptors
 

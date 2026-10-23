@@ -29,6 +29,10 @@
 - EXAFS figures follow the other analysis plots: standalone
   `analysis_<El>_feff_chik` and `_chir` figures saved without pyplot, with
   whole-structure bootstrap bands. A CSV of each is written automatically.
+- Tutorial 9, `Tutorials/T9_exafs/`: EXAFS on the Tutorial 8 a-Ga2O3 cells,
+  from first-shell cumulants and harmonic-fit bias to `feff_pipeline()`
+  spectra and a FEFF convergence check. Sections 1-3 run without FEFF.
+  The README gains an EXAFS section and Tutorial 9 entry.
 
 ## v1.0.0rc6 (2026-10-20)
 

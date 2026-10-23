@@ -17,3 +17,4 @@ include examples/reference_a_*.yaml
 recursive-include Tutorials/T8_validation_workflow/structures *.xyz
 # An executed copy of Tutorial 8 left by nbconvert must not reach the sdist.
 exclude Tutorials/T8_validation_workflow/executed.ipynb
+exclude Tutorials/T9_exafs/executed.ipynb
