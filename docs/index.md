@@ -194,6 +194,7 @@ guides/batch-quench
 guides/hybrid-workflow
 guides/best-practices
 guides/analysis
+guides/exafs
 guides/backends
 guides/yaml-config
 guides/benchmarks

@@ -81,6 +81,17 @@ class _ExamplesAction(argparse.Action):
         parser.exit()
 
 
+def _parse_feff_cards(items):
+    """``["RPATH=8", "CRITERIA=1.0 0.5"]`` -> ``{"RPATH": "8", ...}``."""
+    cards = {}
+    for item in items:
+        key, sep, value = item.partition("=")
+        if not sep or not key.strip() or not value.strip():
+            raise ValueError(f"--feff-card expects KEY=VALUE, got {item!r}")
+        cards[key.strip().upper()] = value.strip()
+    return cards
+
+
 def _typed(*flags, argv=None):
     """True if any of *flags* was typed on the command line (regardless of
     whether its value equals the parser default)."""
@@ -787,8 +798,120 @@ def _add_arguments(p):
                       help="RDF Gaussian smearing in A (default 0.05, ~thermal/"
                            "experimental broadening; 0 = raw histogram). "
                            "S(q) is always computed from the raw g(r).")
+    g_an.add_argument("--exafs", nargs="?", const="all", default=None,
+                      metavar="PAIR",
+                      help="First-shell EXAFS descriptors (N, R, sigma^2, C3) "
+                           "from geometric shells, not experimental fitting. "
+                           "PAIR is ordered: "
+                           "\"Ga-O\" = Ga edge, O scatterers. Written as "
+                           "analysis_exafs.csv under --save-plot. sigma^2 from "
+                           "a relaxed ensemble is configurational only "
+                           "(lower bound on a finite-T measurement).")
+    g_an.add_argument("--exafs-mfp", type=float, default=None, metavar="LAMBDA",
+                      help="Photoelectron mean free path in A for the "
+                           "effective-distribution correction behind R_eff "
+                           "(default 5.0).")
+    g_an.add_argument("--exafs-bootstrap", type=int, default=None,
+                      metavar="N",
+                      help="Bootstrap resamples for the ensemble-sampling "
+                           "error bars on the EXAFS descriptors (default "
+                           "200; 0 turns them off). Structures are resampled, "
+                           "not paths.")
     g_an.add_argument("--reference", default=None, metavar="YAML",
                       help="Reference YAML; adds validation table.")
+
+    g_hf = p.add_argument_group(
+        "harmonic fit",
+        "Fit the harmonic (Gaussian) EXAFS model to the ensemble's own "
+        "amplitude as an approximation to first-shell fitting bias. "
+        "Used with --analyse; needs no FEFF executable.")
+    g_hf.add_argument("--harmonic-fit", nargs="?", const="all", default=None,
+                      metavar="PAIR",
+                      help="Report geometric vs harmonic-fit N, R and sigma^2 "
+                           "side by side, with the bias. PAIR is ordered: "
+                           "\"Ga-O\" = Ga edge, O scatterers. Written as "
+                           "analysis_harmonic.csv under --save-plot.")
+    g_hf.add_argument("--harmonic-kmin", type=float, default=None,
+                      metavar="KMIN",
+                      help="Lower end of the fit window in A^-1 (default 3.0).")
+    g_hf.add_argument("--harmonic-kmax", type=float, default=None,
+                      metavar="KMAX",
+                      help="Upper end of the fit window in A^-1 (default "
+                           "12.0). The bias grows with this, so match the "
+                           "k-range of the paper you are comparing against.")
+    g_hf.add_argument("--harmonic-kweight", type=int, default=2, metavar="W",
+                      help="k-weighting of the fit residual (default 2).")
+    g_hf.add_argument("--harmonic-bootstrap", type=int, default=None,
+                      metavar="N",
+                      help="Bootstrap resamples for the error bars on both "
+                           "columns (default 50; 0 turns them off). Each "
+                           "resample is a full fit, so this dominates the "
+                           "cost.")
+    g_hf.add_argument("--harmonic-float-e0", action="store_true",
+                      help="Float an edge-energy shift, as a real fit "
+                           "usually does. It absorbs the third-cumulant "
+                           "phase distortion but leaves the N bias almost "
+                           "unchanged: a better-looking fit, the same wrong N.")
+
+    g_ff = p.add_argument_group(
+        "feff",
+        "Forward-model EXAFS chi(k) with FEFF. Used with --analyse. "
+        "AmorphGen writes and reads FEFF input/output but does not ship "
+        "FEFF; only --feff-run needs the binary on PATH.")
+    g_ff.add_argument("--feff-write", default=None, metavar="DIR",
+                      help="Write a FEFF job tree: one feff.inp per absorber "
+                           "site, plus manifest.json, joblist.txt and "
+                           "run_all.sh. Needs --feff-absorber. Several "
+                           "absorbers get one tree each, DIR/<El>.")
+    g_ff.add_argument("--feff-absorber", default=None, metavar="SYM[,SYM]",
+                      help="Absorbing element(s), e.g. Ga or In,Ga,Zn.")
+    g_ff.add_argument("--feff-sites", type=int, default=None, metavar="N",
+                      help="Absorber sites sampled per structure (default: "
+                           "every one). Check site and structure convergence; "
+                           "the reported SEM uses independent structure means.")
+    g_ff.add_argument("--feff-radius", type=float, default=None, metavar="R",
+                      help="Cluster radius around the absorber in A "
+                           "(default 6.0). Cost grows as R^3.")
+    g_ff.add_argument("--feff-edge", default=None, metavar="EDGE",
+                      help="Absorption edge: K (default), L1, L2, L3, ...")
+    g_ff.add_argument("--feff-stoichiometry", choices=("cluster", "structure"),
+                      default=None, help="Potential populations: cluster (legacy "
+                      "FEFF inference) or structure (parent-cell composition "
+                      "for a three-dimensional periodic solid).")
+    g_ff.add_argument("--feff-card", dest="feff_cards", action="append",
+                      default=None, metavar="KEY=VALUE",
+                      help="Override or add a FEFF header card, e.g. "
+                           "RPATH=8 or 'CRITERIA=1.0 0.5'. Repeatable; takes "
+                           "precedence over analysis.feff_cards.")
+    g_ff.add_argument("--feff-run", action="store_true",
+                      help="Run FEFF in each job directory straight after "
+                           "writing, then average and transform the result "
+                           "as --feff-collect does. With --resume, finished "
+                           "jobs whose fingerprints still match are kept.")
+    g_ff.add_argument("--feff-executable", default=None, metavar="PATH",
+                      help="FEFF executable for --feff-run (default: "
+                           "$FEFF_EXECUTABLE, else 'feff' on PATH).")
+    g_ff.add_argument("--feff-workers", type=int, default=None, metavar="N",
+                      help="FEFF jobs run at once by --feff-run (default 1).")
+    g_ff.add_argument("--feff-collect", default=None, metavar="DIR",
+                      help="Read a finished job tree, average chi(k) over "
+                           "absorber sites and Fourier transform it. A "
+                           "directory of per-element trees is read tree by "
+                           "tree. Writes analysis_<El>_feff_chik and _chir "
+                           "{png,csv} under --save-plot.")
+    g_ff.add_argument("--feff-kweight", type=int, default=2, metavar="W",
+                      help="k-weight for the Fourier transform (default 2).")
+    g_ff.add_argument("--feff-kmin", type=float, default=None,
+                      help="FT lower window endpoint in A^-1 (default 3).")
+    g_ff.add_argument("--feff-kmax", type=float, default=None,
+                      help="FT upper window endpoint in A^-1 (default 20; "
+                           "the full taper must fit inside shared data).")
+    g_ff.add_argument("--feff-dk", type=float, default=None,
+                      help="FT taper width in A^-1 (default 1).")
+    g_ff.add_argument("--feff-trust-external", action="store_true",
+                      help="Explicitly trust and import spectra run outside AmorphGen; "
+                           "requires matching current inputs. Historical correspondence "
+                           "is the caller's responsibility.")
 
     return p
 
@@ -2252,6 +2375,185 @@ def _main():
                     save_pdf=plot_kwargs.get("save_pdf", False))
 
         # Validation against literature reference YAML
+        # EXAFS first-shell descriptors: CLI flag > YAML
+        # (YAML: exafs: true | "Ga-O"; exafs_mfp: 5.0)
+        exafs_opt = args.exafs
+        if exafs_opt is None:
+            y = an_cfg.get("exafs")
+            if y is True:
+                exafs_opt = "all"
+            elif isinstance(y, str):
+                exafs_opt = y
+        if exafs_opt:
+            from .analysis.exafs import (format_exafs_report, write_exafs_csv,
+                                         DEFAULT_MFP)
+            mfp = args.exafs_mfp
+            if mfp is None:
+                mfp = an_cfg.get("exafs_mfp", DEFAULT_MFP)
+            pair = None if exafs_opt == "all" else exafs_opt
+            from .analysis.exafs import DEFAULT_BOOTSTRAP
+            n_boot = (args.exafs_bootstrap if args.exafs_bootstrap is not None
+                      else an_cfg.get("exafs_bootstrap", DEFAULT_BOOTSTRAP))
+            ex = sa.exafs_descriptors(pair=pair, mfp=mfp, bootstrap=n_boot)
+            # A named pair is an explicit request: show it even if the bond
+            # classifier would treat it as a second-shell contact.
+            ex_text = format_exafs_report(ex, bonded_only=(pair is None))
+            print(ex_text)
+            if report_path:
+                with open(report_path, "a") as rf:
+                    rf.write("\n" + ex_text + "\n")
+            if plot_dir and ex:
+                os.makedirs(plot_dir, exist_ok=True)
+                csv_path = os.path.join(plot_dir, "analysis_exafs.csv")
+                write_exafs_csv(ex, csv_path)
+                print(f"  Saved: {csv_path}")
+
+        # Harmonic-fit bias: CLI flag > YAML.
+        harm_opt = args.harmonic_fit
+        if harm_opt is None:
+            y = an_cfg.get("harmonic_fit")
+            if y is True:
+                harm_opt = "all"
+            elif isinstance(y, str):
+                harm_opt = y
+        if harm_opt:
+            from .analysis.harmonic import (
+                format_harmonic_report, write_harmonic_csv,
+                DEFAULT_KMIN, DEFAULT_KMAX,
+                DEFAULT_BOOTSTRAP as H_DEFAULT_BOOTSTRAP)
+            hpair = None if harm_opt == "all" else harm_opt
+            hf = sa.harmonic_fit(
+                pair=hpair,
+                kmin=(args.harmonic_kmin if args.harmonic_kmin is not None
+                      else an_cfg.get("harmonic_kmin", DEFAULT_KMIN)),
+                kmax=(args.harmonic_kmax if args.harmonic_kmax is not None
+                      else an_cfg.get("harmonic_kmax", DEFAULT_KMAX)),
+                kweight=(args.harmonic_kweight if _typed("--harmonic-kweight")
+                         else an_cfg.get("harmonic_kweight", args.harmonic_kweight)),
+                fit_e0=(args.harmonic_float_e0
+                        or an_cfg.get("harmonic_float_e0", False)),
+                bootstrap=(args.harmonic_bootstrap
+                           if args.harmonic_bootstrap is not None
+                           else an_cfg.get("harmonic_bootstrap",
+                                           H_DEFAULT_BOOTSTRAP)))
+            hf_text = format_harmonic_report(hf, bonded_only=(hpair is None))
+            print(hf_text)
+            if report_path:
+                with open(report_path, "a") as rf:
+                    rf.write("\n" + hf_text + "\n")
+            if plot_dir and hf:
+                os.makedirs(plot_dir, exist_ok=True)
+                csv_path = os.path.join(plot_dir, "analysis_harmonic.csv")
+                write_harmonic_csv(hf, csv_path)
+                print(f"  Saved: {csv_path}")
+
+        # FEFF: write one job tree per absorber, optionally run them, then
+        # average and transform finished trees (those just run and/or a
+        # --feff-collect directory).
+        feff_write = args.feff_write or an_cfg.get("feff_write")
+        feff_run = args.feff_run or an_cfg.get("feff_run", False)
+        if feff_run and not feff_write:
+            raise ValueError("--feff-run needs --feff-write (or analysis.feff_write)")
+        collect_trees = []
+        if feff_write:
+            from .analysis.feff import (write_feff_jobs, run_feff_jobs,
+                                        DEFAULT_RADIUS)
+            absorbers = list(dict.fromkeys(
+                a.strip() for a in str(args.feff_absorber
+                                       or an_cfg.get("feff_absorber") or "").split(",")
+                if a.strip()))
+            if not absorbers:
+                print("Error: --feff-write needs --feff-absorber "
+                      "(the absorbing element, e.g. Ga, or In,Ga,Zn).")
+                sys.exit(1)
+            n_sites = (args.feff_sites if args.feff_sites is not None
+                       else an_cfg.get("feff_sites"))
+            radius = (args.feff_radius if args.feff_radius is not None
+                      else an_cfg.get("feff_radius", DEFAULT_RADIUS))
+            edge = args.feff_edge or an_cfg.get("feff_edge", "K")
+            stoichiometry = (args.feff_stoichiometry or
+                             an_cfg.get("feff_stoichiometry", "cluster"))
+            cards = {str(key).upper(): str(value)
+                     for key, value in (an_cfg.get("feff_cards") or {}).items()}
+            cards.update(_parse_feff_cards(args.feff_cards or []))
+            trees = {el: (feff_write if len(absorbers) == 1
+                          else os.path.join(feff_write, el)) for el in absorbers}
+
+            for el, tree in trees.items():
+                manifest = write_feff_jobs(sa.atoms_list, el, tree,
+                                           n_sites=n_sites, radius=radius,
+                                           edge=edge, stoichiometry=stoichiometry,
+                                           cards=cards or None)
+                print(f"\n  FEFF job tree: {manifest['n_jobs']} jobs "
+                      f"({el} {edge} edge, {radius:.1f} A clusters) in {tree}/")
+                if cards:
+                    print("  Cards:       " + ", ".join(f"{k} {v}" for k, v in cards.items()))
+                print("  Wrote: manifest.json, joblist.txt, run_all.sh")
+                if not feff_run:
+                    print(f"  Serial run:  bash {tree}/run_all.sh")
+                    print(f"  Job array:   #SBATCH --array=0-{manifest['n_jobs'] - 1}")
+                    print('               # From inside the job-tree directory:')
+                    print('               DIR=$(sed -n "$((SLURM_ARRAY_TASK_ID+1))p" joblist.txt)')
+                    print('               python -m amorphgen.analysis.feff --jobs-dir . --job "$DIR"')
+            if not feff_run:
+                print(f"  Then:        amorphgen --analyse --input-dir ... "
+                      f"--feff-collect {feff_write}")
+
+            if feff_run:
+                executable = (args.feff_executable or an_cfg.get("feff_executable")
+                              or os.environ.get("FEFF_EXECUTABLE") or "feff")
+                workers = (args.feff_workers if args.feff_workers is not None
+                           else an_cfg.get("feff_workers", 1))
+                for el, tree in trees.items():
+                    print(f"\n  Running {el} FEFF jobs in {tree}/ "
+                          f"({workers} at a time{', resuming' if args.resume else ''})...")
+                    outcome = run_feff_jobs(tree, executable=executable,
+                                            workers=workers,
+                                            skip_complete=args.resume)
+                    print(f"  Finished: {outcome['ran']} ok, "
+                          f"{outcome['skipped']} already complete, "
+                          f"{len(outcome['failed'])} failed")
+                    for name, why in outcome["failed"][:5]:
+                        print(f"    {name}: {why}")
+                    if outcome["failed"]:
+                        sys.exit(1)
+                collect_trees = list(trees.values())
+
+        feff_collect = args.feff_collect or an_cfg.get("feff_collect")
+        if feff_collect:
+            from .analysis.feff import find_feff_trees
+            collect_trees += find_feff_trees(feff_collect)
+        if collect_trees:
+            from .analysis.feff import (collect_feff_results,
+                                        format_feff_report, plot_feff)
+            seen = set()
+            for tree in collect_trees:
+                if os.path.realpath(tree) in seen:
+                    continue
+                seen.add(os.path.realpath(tree))
+                ff = collect_feff_results(tree,
+                    kweight=(args.feff_kweight if _typed("--feff-kweight")
+                             else an_cfg.get("feff_kweight", args.feff_kweight)),
+                    kmin=(args.feff_kmin if args.feff_kmin is not None
+                          else an_cfg.get("feff_kmin", 3.0)),
+                    kmax=(args.feff_kmax if args.feff_kmax is not None
+                          else an_cfg.get("feff_kmax", 20.0)),
+                    dk=(args.feff_dk if args.feff_dk is not None
+                        else an_cfg.get("feff_dk", 1.0)),
+                    trust_external=(args.feff_trust_external
+                                    or an_cfg.get("feff_trust_external", False)))
+                ff_text = format_feff_report(ff)
+                print(ff_text)
+                if report_path:
+                    with open(report_path, "a") as rf:
+                        rf.write("\n" + ff_text + "\n")
+                if plot_dir:
+                    plot_feff(ff, output_dir=plot_dir,
+                              prefix=f"analysis_{ff['absorber']}",
+                              dpi=plot_kwargs.get("dpi", 300),
+                              save_pdf=plot_kwargs.get("save_pdf", False),
+                              show_title=plot_kwargs.get("show_title", False))
+
         ref_path = args.reference or an_cfg.get("reference")
         if ref_path:
             from .analysis.validate import (validate_against_reference,

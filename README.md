@@ -584,8 +584,9 @@ same run can add the structure factor, ring statistics, polyhedral connectivity,
 Voronoi indices, a close-contact check and a validation against literature
 ranges. Optional descriptors add crystal-like order and ordered cluster sizes,
 void distributions, oxygen speciation,
-stress-derived elastic moduli and harmonic vibrational DOS. Every quantity
-that is plotted is also written as a CSV.
+stress-derived elastic moduli and harmonic vibrational DOS. EXAFS options add
+first-shell distance cumulants, a harmonic-fit bias check and ensemble-averaged
+FEFF spectra. Every quantity that is plotted is also written as a CSV.
 
 ```bash
 # Summary to the terminal
@@ -631,6 +632,15 @@ amorphgen --analyse --input-dir gete_mq/final/ --bond-order \
 # Elastic response and harmonic cell modes, using the selected MLIP
 amorphgen --analyse --input-dir relaxed_silica/ --elastic --vdos \
     --model mace-mpa-0 --save-plot descriptors/ --save-report descriptors.txt
+
+# EXAFS: Ga-O first-shell cumulants and the bias of a Gaussian fit to them
+amorphgen --analyse --input-dir optimised_structures/ \
+    --exafs Ga-O --harmonic-fit Ga-O --save-plot exafs/
+
+# FEFF spectra for three edges: write, run, average and plot (FEFF is external)
+amorphgen --analyse --input-dir optimised_structures/ \
+    --feff-write feff --feff-absorber In,Ga,Zn --feff-run \
+    --feff-executable /path/to/feff8l --feff-workers 8 --save-plot exafs/
 ```
 
 Notes on the options:
@@ -685,6 +695,10 @@ Notes on the options:
   stresses; `--elastic-relax` adds fixed-cell atomic relaxation. `--vdos` uses
   6N force evaluations per cell for harmonic Gamma-point modes in THz.
   These four descriptors also save full per-structure JSON under `--save-plot`.
+- `--exafs A-B` and `--harmonic-fit A-B` work from the geometry alone; FEFF
+  options need a FEFF executable, which is not bundled. See
+  [EXAFS descriptors and FEFF spectra](#exafs-descriptors-and-feff-spectra)
+  below.
 - `--smearing SIGMA` sets the Gaussian smearing of g(r) (default 0.05 Å; 0 for the
   raw histogram). `--cutoff` is `auto-rdf` (first minimum of each partial g(r),
   so every pair gets its own value), `auto` (radii table), a number in Å, or
@@ -772,6 +786,56 @@ coordinate, value and optional one-sigma uncertainty columns. XRD returns
 coherent intensity per atom versus 2θ before instrument corrections. The
 analysis guide covers file formats, fit definitions, scattering conventions
 and the reference-YAML format.
+
+### EXAFS descriptors and FEFF spectra
+
+EXAFS analysis of the ensemble has three levels, kept separate because they
+answer different questions:
+
+1. `--exafs Ga-O` gives the geometric first shell around each Ga: N, mean R,
+   σ², the skewness cumulant C₃, C₄ and an effective distance, with bootstrap
+   errors over structures. These describe the model; they are not fitted
+   EXAFS values.
+2. `--harmonic-fit Ga-O` fits a single Gaussian shell to the ensemble's own
+   first shell, as a standard EXAFS fit would. In a skewed amorphous shell the
+   fit returns a lower N, a shorter R and a smaller σ² than the geometry; the
+   difference is the bias to expect when comparing with fitted experimental
+   values.
+3. FEFF spectra: `--feff-write DIR` writes one FEFF input per sampled absorber
+   site, `--feff-run` runs them in parallel (`--feff-workers N`) and collects
+   them, and `--feff-collect DIR` collects trees run elsewhere, for example as
+   a Slurm array. χ(k) is averaged over sites within each structure, then over
+   structures, before the Fourier transform. `--resume` skips finished jobs
+   whose inputs are unchanged, and `--feff-card KEY=VALUE` sets any FEFF card,
+   such as `--feff-card RPATH=8`.
+
+`--save-plot DIR` writes `analysis_<El>_feff_chik` (k-weighted χ(k)) and
+`analysis_<El>_feff_chir` (phase-uncorrected |χ(R)|) with 95% bootstrap bands
+over structures, a CSV beside each figure, and a text report. The same steps
+are available in Python:
+
+```python
+from amorphgen.analysis import StructureAnalyser
+from amorphgen.analysis.feff import feff_pipeline
+
+sa = StructureAnalyser("optimised_structures/")
+shell = sa.exafs_descriptors("Ga-O")["Ga-O"]           # N, R, sigma2, C3, C4, R_eff
+fit = sa.harmonic_fit("Ga-O", kmin=3, kmax=12)["Ga-O"]  # N_fit, R_fit, sigma2_fit, biases
+
+runs = feff_pipeline(sa.atoms_list, "Ga", "feff", executable="/path/to/feff8l",
+                     workers=8, n_sites=5, kmin=3, kmax=12, plot_dir="exafs")
+print(runs["Ga"]["report"])
+```
+
+Set `kmin`/`kmax` (and `--harmonic-kmin`/`--harmonic-kmax` on the command
+line) to the range of the experiment you compare with; the fit bias grows
+with `kmax`.
+
+The number of sites and structures should be chosen by a convergence test,
+which [Tutorial 9](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T9_exafs/tutorial_9_exafs.ipynb)
+walks through. The [EXAFS guide](https://smtg-bham.github.io/AmorphGen/guides/exafs.html)
+covers the FEFF settings, potential composition for periodic cells, FEFF's
+path limit and how to compare with measured spectra.
 
 </details>
 
@@ -1041,6 +1105,7 @@ Workflow tutorials (each reports the wall time measured on the CPU it was valida
 | [Tutorial 5](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T5_mix_random_MQ/tutorial_5_batch_quench.ipynb) | Hybrid workflow: random gen → high-T equilibration → batch quench (TiO₂) |
 | [Tutorial 6](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T6_classical_potential/tutorial_6_classical_potential.ipynb) | Classical potential (Buckingham+Coulomb) relaxation, no GPU needed (SiO₂, Al₂O₃, TiO₂) |
 | [Tutorial 8](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T8_validation_workflow/tutorial_8_validation_workflow.ipynb) | Analysis through the Python API: partial RDFs, CN and angles with ensemble intervals, O–O dimers, polyhedral connectivity, rings, X-ray and neutron S(q), T(r)/G(r), and a relaxed-vs-annealed comparison, on ten relaxed and ten annealed 400-atom a-Ga₂O₃ cells from the software paper (shipped); each step with its `--analyse` line. No MLIP needed; ~1 min |
+| [Tutorial 9](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T9_exafs/tutorial_9_exafs.ipynb) | EXAFS on the Tutorial 8 a-Ga₂O₃ cells: Ga–O first-shell cumulants and their skew, the bias of a Gaussian EXAFS fit, FEFF inputs for sampled Ga sites, then `feff_pipeline()` from structures to ensemble-averaged χ(k) and \|χ(R)\| with bootstrap bands, and a FEFF path-length convergence check; each step with its `--analyse` line. Sections 1–3 need no FEFF (seconds); sections 4–5 need an external FEFF8.5L (~1.5 min with 4 workers) |
 
 Application case studies (these assume you have done the workflow tutorials):
 
@@ -1066,7 +1131,7 @@ AmorphGen/
 │   │   ├── default_config.py       ← all default parameters
 │   │   ├── yaml_config.py          ← YAML config loader
 │   │   └── example_config.yaml     ← example YAML with all options
-│   ├── analysis/                  ← StructureAnalyser, RDF, CN, S(q), validation
+│   ├── analysis/                  ← StructureAnalyser, RDF, CN, S(q), EXAFS/FEFF, validation
 │   ├── pipeline/
 │   │   ├── run_pipeline.py         ← MeltQuenchPipeline orchestrator
 │   │   ├── opt_cell.py             ← Stages 1 & 7 (optimisation) + batch_optimize()
@@ -1140,6 +1205,7 @@ dependency conditions and restart limits.
 | `torch-sim-atomistic` | Batched GPU engine for ensembles, `--engine torchsim` (optional, Python 3.12+) |
 | `python-ace` | ACE potential files via pyace (optional) |
 | `lammps` | LAMMPS pair styles via ASE's LAMMPSlib (optional) |
+| FEFF8.5L / FEFF10 | EXAFS spectra for `--feff-run` (optional external executable, not bundled) |
 
 </details>
 

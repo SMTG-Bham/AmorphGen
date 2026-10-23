@@ -22,13 +22,20 @@ matplotlib.use("Agg")
 def pytest_addoption(parser):
     parser.addoption("--run-mace", action="store_true", default=False,
                      help="Run real MACE tests (may download models; GPU recommended)")
+    parser.addoption("--run-feff", action="store_true", default=False,
+                     help="Run local FEFF8.5L integration test (no downloads)")
 
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "mace: requires real MACE calculator")
+    config.addinivalue_line("markers", "feff: requires local FEFF8.5L executable")
 
 
 def pytest_collection_modifyitems(config, items):
+    if not config.getoption("--run-feff"):
+        for item in items:
+            if item.get_closest_marker("feff") is not None:
+                item.add_marker(pytest.mark.skip(reason="Pass --run-feff to run"))
     if not config.getoption("--run-mace"):
         skip = pytest.mark.skip(reason="Pass --run-mace to run")
         for item in items:

@@ -156,6 +156,10 @@ Tutorials/_*/
 Tutorials/T8_validation_workflow/analysis_*/
 Tutorials/T8_validation_workflow/*.log
 Tutorials/T8_validation_workflow/executed.ipynb
+# Tutorial 9 writes its FEFF job trees and figures next to the notebook
+Tutorials/T9_exafs/feff_*/
+Tutorials/T9_exafs/analysis*/
+Tutorials/T9_exafs/executed.ipynb
 
 # ======================
 # LaTeX scratch
