@@ -196,21 +196,33 @@ class TestGenerateRandom:
         )
         assert len(atoms) == 80
 
-    def test_auto_expand_dense_covalent_network(self):
+    @pytest.mark.parametrize("seed", [0, 1])
+    @pytest.mark.parametrize("soft_pack", [True, False], ids=["soft-pack", "expand"])
+    def test_dense_covalent_network_retries_keep_physical_floors(self, seed, soft_pack):
         """BeO (small_cation_oxide) is too dense to place at its full
-        equilibrium density with physical minseps; generate_random should
-        auto-expand the cell and succeed for every seed, WITHOUT shrinking the
-        (physical) O-O minimum separation."""
+        equilibrium density by sequential placement. Soft packing or cell
+        expansion must succeed while preserving the physical O-O floor."""
         from amorphgen.utils.radii import default_minsep, estimate_cell_length
         # O-O minsep must stay physical (Shannon ionic ~2.24 A), not covalent
         oo = default_minsep(["Be"] * 16 + ["O"] * 16)["O-O"]
         assert oo > 2.0, f"O-O minsep should stay physical, got {oo:.2f}"
         base_L = estimate_cell_length({"Be": 16, "O": 16})
-        for seed in range(2):
-            atoms = generate_random({"Be": 16, "O": 16}, seed=seed)
-            assert len(atoms) == 32
-            # cell was expanded beyond the (too-dense) base density estimate
-            assert atoms.cell[0, 0] >= base_L - 1e-6
+        # Exercise real packing and expansion without exhausting the much
+        # larger production rejection budget before every retry.
+        atoms = generate_random({"Be": 16, "O": 16}, seed=seed,
+                                max_attempts_per_atom=20_000, _soft_pack=soft_pack)
+        assert len(atoms) == 32
+        assert atoms.cell[0, 0] >= base_L - 1e-6
+        if soft_pack:
+            assert atoms.info.get("soft_pack") is True
+            assert atoms.cell[0, 0] == pytest.approx(base_L)
+        else:
+            assert atoms.cell[0, 0] > base_L + 1e-6
+        oxygen = atoms[[atom.index for atom in atoms if atom.symbol == "O"]]
+        distances = oxygen.get_all_distances(mic=True)
+        np.fill_diagonal(distances, np.inf)
+        # Soft packing converges to the original floors within 2%.
+        assert distances.min() >= 0.98 * oo
 
 
 class TestBatchRandom:

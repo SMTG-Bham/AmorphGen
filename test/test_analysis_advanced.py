@@ -1,14 +1,28 @@
-"""
-tests/test_analysis_advanced.py
---------------------------------
-Tests for analysis modules with low coverage: energy ranking, rings, voronoi.
-Uses pre-built Cu structures with EMT energies.
-"""
+"""Energy ranking and topology regressions on known periodic structures."""
+
+from pathlib import Path
 
 import pytest
 from ase.build import bulk
 from ase.calculators.emt import EMT
-from ase.io import write
+from ase.io import read, write
+
+from amorphgen_test_helpers import beta_cristobalite
+
+
+@pytest.fixture(scope="module")
+def copper_structures_with_energies(tmp_path_factory):
+    """Write the shared specimens once; each analyser loads its own atoms."""
+    struct_dir = tmp_path_factory.mktemp("copper_structures")
+    for i in range(5):
+        atoms = bulk("Cu", "fcc", a=3.6, cubic=True) * (2, 2, 2)
+        atoms.rattle(0.02 * (i + 1), seed=i)
+        atoms.calc = EMT()
+        energy = atoms.get_potential_energy()
+        atoms.calc = None  # detach to avoid extxyz write conflict
+        atoms.info["energy"] = energy
+        write(struct_dir / f"sample_{i}.xyz", atoms, format="extxyz")
+    return struct_dir
 
 
 class TestEnergyRanking:
@@ -116,6 +130,7 @@ class TestVoronoi:
         assert result["total_atoms"] == len(atoms)
         assert result["mean_faces"] == pytest.approx(12.0)
         assert result["distribution"] == {(0, 12, 0, 0): len(atoms)}
+        assert sum(result["distribution"].values()) == result["total_atoms"]
 
     def test_voronoi_with_element_filter(self):
         from amorphgen.analysis.voronoi import compute_voronoi
@@ -124,13 +139,6 @@ class TestVoronoi:
         # Should only count Na atoms
         n_na = sum(1 for s in atoms.get_chemical_symbols() if s == "Na")
         assert result["total_atoms"] == n_na
-
-    def test_voronoi_distribution_sums(self):
-        from amorphgen.analysis.voronoi import compute_voronoi
-        atoms = bulk("Cu", "fcc", a=3.6, cubic=True) * (2, 2, 2)
-        result = compute_voronoi([atoms])
-        total_from_dist = sum(result["distribution"].values())
-        assert total_from_dist == result["total_atoms"]
 
     def test_voronoi_multiple_structures(self):
         from amorphgen.analysis.voronoi import compute_voronoi
@@ -147,22 +155,11 @@ class TestAnalyserIntegration:
     """Test StructureAnalyser methods that had low coverage."""
 
     @pytest.fixture
-    def analyser_with_energies(self, tmp_path):
-        """Create structures with EMT energies for analysis."""
+    def analyser_with_energies(self, copper_structures_with_energies):
+        """Keep each test's analyser, atoms and cached results independent."""
         from amorphgen.analysis import StructureAnalyser
-        struct_dir = tmp_path / "structs"
-        struct_dir.mkdir()
 
-        for i in range(5):
-            atoms = bulk("Cu", "fcc", a=3.6, cubic=True) * (2, 2, 2)
-            atoms.rattle(0.02 * (i + 1), seed=i)
-            atoms.calc = EMT()
-            e = atoms.get_potential_energy()
-            atoms.calc = None  # detach to avoid extxyz write conflict
-            atoms.info["energy"] = e
-            write(str(struct_dir / f"sample_{i}.xyz"), atoms, format="extxyz")
-
-        return StructureAnalyser(str(struct_dir), cutoff=2.7)
+        return StructureAnalyser(str(copper_structures_with_energies), cutoff=2.7)
 
     def test_energy_ranking(self, analyser_with_energies):
         result = analyser_with_energies.energy_ranking()
@@ -189,10 +186,8 @@ class TestRingNodeSelection:
     """Ring nodes must be the network former (cation), not the alphabetically first element."""
 
     def test_cristobalite_auto_bond_pair_gives_six_rings(self):
-        from ase.spacegroup import crystal
         from amorphgen.analysis.rings import compute_ring_statistics
-        crist = crystal(["Si", "O"], basis=[(0, 0, 0), (0.125, 0.125, 0.125)], spacegroup=227,
-                        cellpar=[7.16, 7.16, 7.16, 90, 90, 90]).repeat((2, 2, 2))
+        crist = beta_cristobalite(repeat=(2, 2, 2))
         r = compute_ring_statistics([crist], cutoff=2.0)          # bond_pair auto-detected
         assert r["ring_sizes"] == [6] and r["fractions"][0] == pytest.approx(100.0)
 
@@ -208,10 +203,8 @@ class TestRingNodeSelection:
         # the rings of the network are still 6-rings over all cations. The old
         # auto pair took ONE cation (the least electronegative) as the node and
         # traced only its sub-network; in a-InGaZnO4 that was Zn-O-Zn alone.
-        from ase.spacegroup import crystal
         from amorphgen.analysis.rings import compute_ring_statistics
-        crist = crystal(["Si", "O"], basis=[(0, 0, 0), (0.125, 0.125, 0.125)], spacegroup=227,
-                        cellpar=[7.16, 7.16, 7.16, 90, 90, 90]).repeat((2, 2, 2))
+        crist = beta_cristobalite(repeat=(2, 2, 2))
         syms = crist.get_chemical_symbols()
         si = [i for i, s in enumerate(syms) if s == "Si"]
         for k, i in enumerate(si):
@@ -232,10 +225,8 @@ class TestRingNodeSelection:
 
     def test_mixed_cation_auto_cutoff_is_per_pair(self):
         # with the analyser's cutoff callback each node-bridge pair keeps its own cutoff
-        from ase.spacegroup import crystal
         from amorphgen.analysis.rings import compute_ring_statistics
-        crist = crystal(["Si", "O"], basis=[(0, 0, 0), (0.125, 0.125, 0.125)], spacegroup=227,
-                        cellpar=[7.16, 7.16, 7.16, 90, 90, 90]).repeat((2, 2, 2))
+        crist = beta_cristobalite(repeat=(2, 2, 2))
         syms = crist.get_chemical_symbols()
         for i in [i for i, s in enumerate(syms) if s == "Si"][::2]:
             syms[i] = "Ge"
@@ -254,10 +245,8 @@ class TestRingPeriodicImages:
         # and the 24-atom cristobalite cell gave 4-rings, the 2-atom primitive
         # diamond cell no rings at all
         from ase.build import bulk
-        from ase.spacegroup import crystal
         from amorphgen.analysis.rings import compute_ring_statistics
-        crist = crystal(["Si", "O"], basis=[(0, 0, 0), (0.125, 0.125, 0.125)],
-                        spacegroup=227, cellpar=[7.16, 7.16, 7.16, 90, 90, 90])
+        crist = beta_cristobalite()
         for atoms, cut, n_bonds in [
                 (bulk("Si", "diamond", a=5.43, cubic=True), 2.6, 16),
                 (bulk("Si", "diamond", a=5.43), 2.6, 4),
@@ -269,11 +258,11 @@ class TestRingPeriodicImages:
         # the old search gave the shipped 48-atom a-SiO2 84 % 4-rings, and a
         # different distribution for its 2x2x2 supercell
         from amorphgen.analysis.rings import compute_ring_statistics
-        from amorphgen.pipeline.random_gen import generate_random
-        st = generate_random({"Si": 16, "O": 32}, seed=2)
+        st = read(Path(__file__).parent / "data" / "experimental" / "sio2.xyz")
         one = compute_ring_statistics([st], cutoff=2.0, max_ring=10)
         eight = compute_ring_statistics([st.repeat(2)], cutoff=2.0, max_ring=10)
         assert one["total_rings"] > 0
+        assert len(one["ring_sizes"]) > 1  # Exercise an amorphous distribution.
         assert eight["ring_sizes"] == one["ring_sizes"]
         assert eight["counts"] == [8 * c for c in one["counts"]]
 
@@ -286,9 +275,7 @@ class TestPolyhedralConnectivity:
         return StructureAnalyser(str(tmp_path / "s.xyz"), cutoff="auto")
 
     def test_cristobalite_is_all_corner_sharing(self, tmp_path):
-        from ase.spacegroup import crystal
-        crist = crystal(["Si", "O"], basis=[(0, 0, 0), (0.125, 0.125, 0.125)], spacegroup=227,
-                        cellpar=[7.16, 7.16, 7.16, 90, 90, 90]).repeat((2, 2, 2))
+        crist = beta_cristobalite(repeat=(2, 2, 2))
         r = self._sa(crist, tmp_path).polyhedral_connectivity()
         assert r["anion"] == "O" and r["cations"] == ["Si"]
         assert r["link_percent"]["corner"] == pytest.approx(100.0)
@@ -312,10 +299,8 @@ class TestBondAnglePlots:
         """Every Si-O-Si of ideal beta-cristobalite is 180 deg. The angle bins
         used to stop at 178, which made that curve 0/0 (NaN, not drawn)."""
         import csv
-        from ase.spacegroup import crystal
         from amorphgen.analysis.comparison_plots import EnsembleSpec, plot_bond_angles
-        crist = crystal(["Si", "O"], basis=[(0, 0, 0), (0.125, 0.125, 0.125)], spacegroup=227,
-                        cellpar=[7.16, 7.16, 7.16, 90, 90, 90])
+        crist = beta_cristobalite()
         write(str(tmp_path / "c.xyz"), crist, format="extxyz")
         ens = EnsembleSpec("crist", [str(tmp_path / "c.xyz")], cutoff="auto")
         plot_bond_angles([ens], [("Si-O-Si", "-")], str(tmp_path), save_pdf=False)

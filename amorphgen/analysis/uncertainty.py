@@ -85,7 +85,14 @@ def summarize_structures(values, confidence=0.95, n_bootstrap=1000,
             np.divide(weights @ available, denominator,
                       out=bootstrap[start:stop], where=denominator > 0)
         tail = (1 - confidence) / 2
-        for point in np.flatnonzero(counts > 1):
+        # Most curves have a value in every draw. Compute their pointwise
+        # quantiles together instead of calling NumPy once per bin; retain
+        # the available-draw calculation for bins with missing samples.
+        complete = (counts > 1) & np.isfinite(bootstrap).all(axis=0)
+        if np.any(complete):
+            boot_low[complete], boot_high[complete] = np.quantile(
+                bootstrap[:, complete], [tail, 1 - tail], axis=0)
+        for point in np.flatnonzero((counts > 1) & ~complete):
             samples = bootstrap[:, point]
             samples = samples[np.isfinite(samples)]
             if samples.size:

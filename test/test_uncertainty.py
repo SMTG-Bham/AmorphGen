@@ -70,6 +70,34 @@ def test_curve_missing_bins_and_rows_preserve_alignment():
     json.dumps(result, allow_nan=False)
 
 
+@pytest.mark.parametrize("n_bootstrap", [1, 257])
+def test_bootstrap_bounds_match_direct_row_resampling(n_bootstrap):
+    # Include complete, partially missing, singleton and wholly missing bins,
+    # and a missing row. 257 draws also cross the internal batching boundary.
+    curves = np.array([[1, 10, 2, np.nan],
+                       [3, np.nan, np.nan, np.nan],
+                       [8, 40, np.nan, np.nan],
+                       [np.nan, np.nan, np.nan, np.nan]])
+    confidence, seed = 0.8, 82
+    result = summarize_structures(
+        curves, confidence=confidence, n_bootstrap=n_bootstrap, seed=seed)
+
+    rng = np.random.default_rng(seed)
+    draws = curves[rng.integers(0, 3, size=(n_bootstrap, 3))]
+    for point in (0, 1):
+        means = []
+        for sample in draws[:, :, point]:
+            available = sample[np.isfinite(sample)]
+            if available.size:
+                means.append(available.mean())
+        expected = np.quantile(means, [0.1, 0.9])
+        np.testing.assert_allclose(
+            [result["bootstrap_low"][point], result["bootstrap_high"][point]],
+            expected, rtol=0, atol=1e-14)
+    assert result["bootstrap_low"][2:] == [None, None]
+    assert result["bootstrap_high"][2:] == [None, None]
+
+
 def test_repeated_sites_do_not_create_additional_independent_samples():
     original = summarize_site_groups([[1, 3], [3, 5]])
     repeated = summarize_site_groups([[1, 3] * 100, [3, 5] * 100])

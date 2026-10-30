@@ -16,7 +16,7 @@ import pytest
 from ase import Atoms
 from ase.io import read, write
 
-from amorphgen_test_helpers import run_cli
+from amorphgen_test_helpers import beta_cristobalite, run_cli
 
 
 # ─── helpers ───────────────────────────────────────────────────────────────
@@ -396,9 +396,7 @@ class TestRingsAndVoronoiFlags:
     """--rings / --voronoi print sections, extend the report and write CSVs."""
 
     def _sio2(self, tmp_path):
-        from ase.spacegroup import crystal
-        crist = crystal(["Si", "O"], basis=[(0, 0, 0), (0.125, 0.125, 0.125)], spacegroup=227,
-                        cellpar=[7.16, 7.16, 7.16, 90, 90, 90]).repeat((2, 2, 2))
+        crist = beta_cristobalite(repeat=(2, 2, 2))
         crist.rattle(0.05, seed=1)
         src = tmp_path / "in"; src.mkdir()
         write(str(src / "s.xyz"), crist, format="extxyz")
@@ -424,9 +422,7 @@ class TestRingsAndVoronoiFlags:
 
 
 def test_connectivity_flag(tmp_path, monkeypatch, capsys):
-    from ase.spacegroup import crystal
-    crist = crystal(["Si", "O"], basis=[(0, 0, 0), (0.125, 0.125, 0.125)], spacegroup=227,
-                    cellpar=[7.16, 7.16, 7.16, 90, 90, 90]).repeat((2, 2, 2))
+    crist = beta_cristobalite(repeat=(2, 2, 2))
     src = tmp_path / "in"; src.mkdir(); write(str(src / "s.xyz"), crist, format="extxyz")
     plots = tmp_path / "plots"; rep = tmp_path / "report.txt"
     run_cli(monkeypatch, ["--analyse", "--input-dir", str(src), "--connectivity", "--cutoff", "auto",

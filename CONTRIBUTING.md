@@ -23,8 +23,8 @@ guidelines for contributing to this project.
 ## Development setup
 
 AmorphGen requires Python ≥ 3.10. The conda development environment installs
-your clone in editable mode with MACE, CHGNet, the torch-sim engine, pytest and
-the Sphinx toolchain:
+your clone in editable mode with MACE, CHGNet, ACE, LAMMPS, the torch-sim engine,
+C/C++ compilers, pytest and the Sphinx toolchain:
 
 ```bash
 conda env create -f build_tools/environment_dev.yml
@@ -37,10 +37,11 @@ For the core package, tests, and documentation without an MLIP backend:
 pip install -e ".[dev,docs]"
 ```
 
-For MACE, CHGNet, and torch-sim development, use Python 3.12 and install
-`pip install -e ".[all,torchsim,dev,docs]"`. The torch-sim engine also needs
-a C/C++ compiler on `PATH`. SevenNet's e3nn dependency conflicts with the
-MACE extra, so use a separate environment for SevenNet.
+For backend development outside conda, use Python 3.12 and install
+`pip install -e ".[mace,chgnet,torchsim,ace,lammps,dev,docs]"`. The torch-sim
+engine needs `gcc` and `g++` on `PATH`. SevenNet's e3nn dependency conflicts
+with the MACE extra, so use a separate environment for SevenNet; the `full`
+extra includes SevenNet and is not a substitute for this test environment.
 
 ## Running tests
 
@@ -57,6 +58,23 @@ pytest test/ -m mace --run-mace
 # Run CUDA torch-sim tests, including MACE (requires CUDA + torch-sim + MACE)
 pytest test/test_torchsim_gpu.py --run-mace
 ```
+
+To run every test, use the complete checkout on Linux with Python 3.12,
+`gcc`, `g++`, Bash, `setsid` and `ps` available. Install a CUDA-enabled PyTorch
+build compatible with the machine's NVIDIA driver, then install all tested
+backends and verify that the same Python process can access the GPU:
+
+```bash
+python -m pip install -e ".[mace,chgnet,torchsim,ace,lammps,dev]"
+python -c "import torch; assert torch.cuda.is_available(), 'CUDA unavailable'; print(torch.cuda.get_device_name(0))"
+pytest test/ --run-mace -rs
+```
+
+The conda development environment above already includes these backend extras.
+The first MACE run may download the `medium-mpa-0` foundation model. CHGNet's
+tested checkpoint is bundled, and the ACE and LAMMPS tests create their own
+potential files. The `-rs` option reports any remaining skips, including
+missing dependencies and unavailable CUDA devices.
 
 The experimental benchmarks run on CPU without downloads or optional backends:
 
