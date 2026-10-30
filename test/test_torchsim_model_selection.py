@@ -73,7 +73,19 @@ def test_mps_is_rejected_without_torchsim(monkeypatch):
 
 
 @pytest.fixture
-def batch_inputs(tmp_path, monkeypatch):
+def collect_garbage(monkeypatch):
+    """Observe cleanup without repeatedly scanning the full test process.
+
+    These chunk tests use a fake backend and allocate no GPU tensors; real
+    cleanup runs in the CPU/GPU backend integration tests.
+    """
+    collect = Mock(return_value=0)
+    monkeypatch.setattr("gc.collect", collect)
+    return collect
+
+
+@pytest.fixture
+def batch_inputs(tmp_path, monkeypatch, collect_garbage):
     """Keep chunk handling on the real file path, substituting only the backend."""
     from ase.build import bulk
     from ase.io import write
@@ -96,7 +108,7 @@ def batch_inputs(tmp_path, monkeypatch):
     "torch.OutOfMemoryError",
 ])
 def test_out_of_memory_splits_chunks_and_preserves_every_output(
-    batch_inputs, monkeypatch, message,
+    batch_inputs, monkeypatch, collect_garbage, message,
 ):
     import numpy as np
     from ase.calculators.singlepoint import SinglePointCalculator
@@ -105,8 +117,12 @@ def test_out_of_memory_splits_chunks_and_preserves_every_output(
 
     src, dest = batch_inputs
     attempts = []
+    cleanups = []
 
     def relax(atoms_list, *args, **kwargs):
+        # Each attempt starts after cleanup, including recursive retries.
+        assert collect_garbage.call_count > (cleanups[-1] if cleanups else 0)
+        cleanups.append(collect_garbage.call_count)
         attempts.append([a.info["input_index"] for a in atoms_list])
         if len(atoms_list) > 1:
             raise RuntimeError(message)
@@ -120,6 +136,7 @@ def test_out_of_memory_splits_chunks_and_preserves_every_output(
     monkeypatch.setattr(engine, "batch_relax", relax)
     outputs = batch_optimize(str(src), str(dest), engine="torchsim", batch_size=4)
     assert attempts == [[0, 1, 2, 3], [0, 1], [0], [1], [2, 3], [2], [3]]
+    assert collect_garbage.call_count > cleanups[-1]  # final batch cleanup
     assert outputs == [str(dest / f"s{i}_opt.xyz") for i in range(4)]
     for index, path in enumerate(outputs):
         atoms = read(path)
@@ -133,11 +150,18 @@ def test_out_of_memory_splits_chunks_and_preserves_every_output(
     (ValueError("composition must be a dict"), 4),
     (RuntimeError("CUDA out of memory"), 1),
 ])
-def test_batch_errors_propagate_without_retry(batch_inputs, monkeypatch, error, batch_size):
+def test_batch_errors_propagate_without_retry(
+    batch_inputs, monkeypatch, collect_garbage, error, batch_size,
+):
     from amorphgen.pipeline.opt_cell import batch_optimize
 
     src, dest = batch_inputs
-    relax = Mock(side_effect=error)
+
+    def fail(*args, **kwargs):
+        collect_garbage.assert_called_with()
+        raise error
+
+    relax = Mock(side_effect=fail)
     monkeypatch.setattr(engine, "batch_relax", relax)
     with pytest.raises(type(error), match=str(error)):
         batch_optimize(str(src), str(dest), engine="torchsim", batch_size=batch_size)

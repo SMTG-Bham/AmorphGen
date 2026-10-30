@@ -131,9 +131,10 @@ def test_torchsim_convergence_includes_pressure_and_records_steps(cell_filter, e
                 "stress": torch.eye(3, dtype=self.dtype).expand(state.n_systems, -1, -1) * 0.001,
             }
 
-    out = batch_relax([bulk("Cu", "fcc", a=3.6, cubic=True)], ConstantStressModel(),
-                      max_steps=1, cell_filter=cell_filter, pressure_tol_gpa=0.02,
-                      log=lambda *args: None)
+    with pytest.warns(UserWarning, match=r"All systems have reached the maximum number of steps: 1\."):
+        out = batch_relax([bulk("Cu", "fcc", a=3.6, cubic=True)], ConstantStressModel(),
+                          max_steps=1, cell_filter=cell_filter, pressure_tol_gpa=0.02,
+                          log=lambda *args: None)
     info = out[0].info
     assert info["relaxation_converged"] is expected
     assert info["relaxation_max_force"] == 0.0

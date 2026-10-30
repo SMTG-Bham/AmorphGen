@@ -163,10 +163,10 @@ namespaces = false
 [tool.pytest.ini_options]
 testpaths = ["test"]
 addopts = ["-v", "--tb=short", "--strict-markers", "--strict-config"]
-# Warnings raised inside dependencies, which AmorphGen cannot act on; its own
-# code raises none of them. Matched by message only: pytest.warns re-emits the
-# warnings it does not match under the module name "warnings", which a module
-# pattern (":ase") would miss.
+# Known warnings raised inside dependencies. Some filters match messages only:
+# pytest.warns re-emits unmatched warnings under the module name "warnings",
+# which a module pattern (":ase") would miss. Where possible, also restrict
+# the originating module so similar warnings from AmorphGen remain visible.
 filterwarnings = [
     # ASE <= 3.29 sets ndarray.shape in place (Atoms.copy, MolecularDynamics,
     # the .traj reader), which NumPy 2.5 deprecates: thousands per run. Drop
@@ -178,4 +178,14 @@ filterwarnings = [
     "ignore:`torch.jit.load` is deprecated:FutureWarning",
     "ignore:`torch.jit.script` is deprecated:FutureWarning",
     "ignore:Environment variable TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD detected:UserWarning",
+    'ignore:`torch.jit.save` is deprecated:FutureWarning:torch\.jit\._serialization$',
+    # CHGNet constructs a tensor from its differentiable cell volumes inside
+    # its bundled model. The real energy/force calculation remains exercised.
+    'ignore:Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior:UserWarning:chgnet\.model\.model$',
+    # torch-sim 0.6.2 uses nvalchemi's deprecated direct-output Ewald API.
+    # Keep the real energy/force/stress comparisons, without one notice per step.
+    'ignore:The direct-output flags .* on ewald_summation are deprecated:DeprecationWarning:torch_sim\.models\.electrostatics$',
+    # Triton 3.9 announces its future FP-fusion default at first compilation.
+    # Leave the caller's compiler settings intact; numerical tests still run.
+    'ignore:TRITON_DEFAULT_FP_FUSION is unset:UserWarning:triton\.knobs$',
 ]
