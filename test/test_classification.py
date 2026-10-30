@@ -14,15 +14,15 @@ from amorphgen.utils.radii import (
 
 @pytest.mark.parametrize("composition, expected", [
     # Group IV
-    ({"Si": 64}, "group_iv"),
-    ({"Ge": 64}, "group_iv"),
-    ({"Si": 32, "Ge": 32}, "group_iv"),
+    ({"Si": 64}, "tetrahedral_element"),
+    ({"Ge": 64}, "tetrahedral_element"),
+    ({"Si": 32, "Ge": 32}, "tetrahedral_element"),
     # Pure-element covalent / semimetal semiconductors (Cordero radii)
-    ({"Se": 64}, "elemental_semiconductor"),
-    ({"Te": 64}, "elemental_semiconductor"),
-    ({"As": 64}, "elemental_semiconductor"),
-    ({"Sb": 64}, "elemental_semiconductor"),
-    ({"P": 64}, "elemental_semiconductor"),
+    ({"Se": 64}, "low_coordinated_element"),
+    ({"Te": 64}, "low_coordinated_element"),
+    ({"As": 64}, "low_coordinated_element"),
+    ({"Sb": 64}, "low_coordinated_element"),
+    ({"P": 64}, "low_coordinated_element"),
     # Pnictides (III-V)
     ({"Ga": 16, "As": 16}, "pnictide"),
     ({"In": 16, "P": 16}, "pnictide"),
@@ -35,9 +35,9 @@ from amorphgen.utils.radii import (
     ({"Sb": 8, "Te": 12}, "chalcogenide"),
     ({"Bi": 8, "Te": 12}, "chalcogenide"),
     # Covalent oxides
-    ({"Si": 16, "O": 32}, "covalent_oxide"),
-    ({"Ge": 16, "O": 32}, "covalent_oxide"),
-    ({"B": 8, "O": 12}, "covalent_oxide"),
+    ({"Si": 16, "O": 32}, "network_forming_oxide"),
+    ({"Ge": 16, "O": 32}, "network_forming_oxide"),
+    ({"B": 8, "O": 12}, "network_forming_oxide"),
     # Metal oxides
     ({"Al": 16, "O": 24}, "metal_oxide"),
     ({"In": 16, "O": 24}, "metal_oxide"),
@@ -45,7 +45,7 @@ from amorphgen.utils.radii import (
     ({"Ca": 16, "O": 16}, "metal_oxide"),
     ({"Zn": 16, "O": 16}, "metal_oxide"),
     # BeO: anomalous small-cation covalent oxide (wurtzite network), not ionic
-    ({"Be": 16, "O": 16}, "covalent_network_oxide"),
+    ({"Be": 16, "O": 16}, "small_cation_oxide"),
     # ...but a mixed Be cation oxide (chrysoberyl-like) stays ionic metal_oxide
     ({"Be": 4, "Al": 8, "O": 16}, "metal_oxide"),
     # Rutile-type dioxides (MO2, small metal cation) → denser rutile_dioxide
@@ -81,8 +81,8 @@ from amorphgen.utils.radii import (
     ({"Ga": 16, "N": 16}, "small_cation_nitride"),
     ({"Si": 12, "N": 16}, "small_cation_nitride"),
     ({"Ti": 16, "N": 16}, "small_cation_nitride"),
-    ({"Zr": 16, "N": 16}, "nitride"),   # large cation r(Zr)>=cutoff
-    ({"Hf": 16, "N": 16}, "nitride"),   # large cation
+    ({"Zr": 16, "N": 16}, "large_cation_nitride"),   # large cation r(Zr)>=cutoff
+    ({"Hf": 16, "N": 16}, "large_cation_nitride"),   # large cation
     # Carbides — split by cation chemistry (2026-05-11):
     # main-group / metalloid + C  → covalent_carbide (SiC, B4C)
     # d-block transition metal + C → transition_metal_carbide (TiC, WC, ZrC)
@@ -109,7 +109,7 @@ from amorphgen.utils.radii import (
     ({"Ti": 72, "B": 144}, "boride"),         # MB2 stays a boride
     ({"La": 32, "B": 192}, "boride"),
     ({"Ga": 108, "As": 108}, "pnictide"),     # III-V stays a pnictide
-    ({"P": 64, "O": 160}, "covalent_oxide"),  # non-metal oxide, was "default"
+    ({"P": 64, "O": 160}, "network_forming_oxide"),  # non-metal oxide, was "default"
     ({"Be": 132, "N": 88}, "small_cation_nitride"),   # Be2+ radius was missing
     ({"Ge": 72, "Se": 144}, "chalcogenide_glass"),
     ({"Ge": 72, "S": 144}, "chalcogenide_glass"),
@@ -242,7 +242,7 @@ def test_oxyhalide_packing_interpolates_with_halogen_fraction():
 def test_oxyhalide_does_not_capture_pure_oxide_or_halide():
     """Regression: pure oxides and pure halides are unaffected by the new rule."""
     assert _classify_compound({"In": 32, "O": 48}) == "metal_oxide"
-    assert _classify_compound({"Si": 24, "O": 48}) == "covalent_oxide"
+    assert _classify_compound({"Si": 24, "O": 48}) == "network_forming_oxide"
     assert _classify_compound({"Li": 16, "Zr": 8, "Cl": 48}) == "halide"
 
 
@@ -512,7 +512,23 @@ def test_real_anions_keep_their_ionic_radii():
     downstream cell length."""
     from amorphgen.utils.radii import _radius_for_density as r
     assert r("Cl", "oxyhalide", {"Bi": 1, "O": 1, "Cl": 1}) > 1.5      # ionic, not 1.02
-    assert r("N", "nitride", {"Si": 2, "N": 2, "O": 1}) > 1.2          # ionic, not 0.71
-    assert r("S", "covalent_oxide", {"S": 1, "O": 3}) < 0.5            # S6+, promoted
-    assert r("Se", "covalent_oxide", {"Se": 1, "O": 2}) < 0.7          # Se6+/4+
+    assert r("N", "large_cation_nitride", {"Si": 2, "N": 2, "O": 1}) > 1.2          # ionic, not 0.71
+    assert r("S", "network_forming_oxide", {"S": 1, "O": 3}) < 0.5            # S6+, promoted
+    assert r("Se", "network_forming_oxide", {"Se": 1, "O": 2}) < 0.7          # Se6+/4+
     assert r("S", "chalcogenide", {"Zn": 1, "S": 1}) > 1.0             # anion in ZnS
+
+
+@pytest.mark.parametrize("comp, expected", [
+    ({"As": 64}, {"As": 3}),
+    ({"Sb": 64}, {"Sb": 3}),
+    ({"P": 64}, {"P": 3}),
+    ({"Se": 64}, {"Se": 2}),
+    ({"Te": 64}, {"Te": 2}),
+    ({"S": 64}, {"S": 2}),
+    ({"C": 64}, {"C": 3}),
+])
+def test_low_coordinated_element_target_cn(comp, expected):
+    """A pure pnictogen or chalcogen follows the 8-N rule (As 3, Se 2) and pure
+    C the sp2 value 3, not the metal value 8 the alloy rule used to give As."""
+    from amorphgen.utils.radii import auto_target_cn
+    assert auto_target_cn(comp) == (expected, 0)

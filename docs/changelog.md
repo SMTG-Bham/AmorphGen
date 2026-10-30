@@ -1,8 +1,25 @@
 # Changelog
 
-## Unreleased
+## v1.0.0rc6 (2026-10-20)
+
+### Changed
+
+- Five material classes are renamed so the name describes the structure, not
+  the bond: `covalent_oxide` → `network_forming_oxide` (SiO2, GeO2, B2O3),
+  `covalent_network_oxide` → `small_cation_oxide` (BeO), `nitride` →
+  `large_cation_nitride` (ZrN, HfN, ScN), `group_iv` → `tetrahedral_element`
+  (Si, Ge, SiGe, B) and `elemental_semiconductor` → `low_coordinated_element`
+  (C, P, As, Sb, S, Se, Te). Radii, packing factors and routing are unchanged;
+  only the class names the code reports, for example in the `[auto-derive]` log line,
+  are new.
 
 ### Added
+
+- `examples/calibration/`: the packing-factor calibration of the density
+  estimate, `fit_packing_factors.py` with its table of 108 sourced reference
+  densities (`packing_reference_densities.csv`). With the defaults (the 100 rows
+  with a verified source, amorphous/crystal ratio 0.80) it gives a leave-one-out
+  error of 9.8 % and 11.9 % for the factors in the code.
 
 - `--ring-criterion primitive` (YAML `ring_criterion`, API
   `ring_statistics(criterion="primitive")`): the census of unique primitive
@@ -29,6 +46,12 @@
   and needs no MLIP.
 
 ### Fixed
+
+- **Pure pnictogens and chalcogens got the wrong target CN.** The
+  `low_coordinated_element` class had no coordination rule, so As and Sb fell
+  through to the metal rule (CN 8, tolerance 2) and P, S, Se, Te and C got no
+  target. They now follow 8 − N: 3 for P, As and Sb, 2 for S, Se and Te, and
+  3 for C (the sp2 network its packing factor assumes).
 
 - The sdist ships `examples/reference_a_*.yaml`; Tutorial 8 and the `--reference`
   examples of the documentation read them.

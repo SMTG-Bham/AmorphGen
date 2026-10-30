@@ -148,17 +148,17 @@ over every anion-former (oxynitrides, oxyfluorides).
 | `oxyhalide` | Shannon ionic CN6 | 0.52–0.58 (interpolated by halogen fraction of the halogen+O anion pool; dopant-level halogens, <10%, keep the oxide class) | BiOCl, LaOCl, NaTaOCl4, ZrOCl2 |
 | `hydride` | Shannon ionic CN6 | 0.55 | LiH, MgH2, NaAlH4 |
 | `metal_oxide` | Shannon ionic CN6 | 0.52 | In2O3, Al2O3, Ga2O3, MgO, ZnO |
-| `nitride` | Shannon ionic CN6 | 0.52 | ZrN, HfN, ScN (large cation) |
-| `covalent_oxide` | Shannon ionic CN6 | 0.50 | SiO2, GeO2, B2O3 |
+| `large_cation_nitride` | Shannon ionic CN6 | 0.52 | ZrN, HfN, ScN (large cation) |
+| `network_forming_oxide` | Shannon ionic CN6 | 0.50 | SiO2, GeO2, B2O3 |
 | `boride` | Goldschmidt cation + Cordero B | 0.60 | TiB2, MgB2, ZrB2 (LaB6-type cage borides run ~100% of crystal; use `--density-scale` <1 if placement struggles) |
-| `covalent_network_oxide` | Cordero covalent | 0.35 | BeO (small polarizing cation) |
+| `small_cation_oxide` | Cordero covalent | 0.35 | BeO (small polarizing cation) |
 | `pnictide` | Cordero covalent | 0.32 | GaAs, InP, InAs |
 | `covalent_carbide` | Cordero covalent | 0.32 | SiC, B4C |
-| `group_iv` | Cordero covalent | 0.30 | Si, Ge, C |
+| `tetrahedral_element` | Cordero covalent | 0.30 | Si, Ge, SiGe, B |
 | `hydrogenated_network` | Cordero covalent (host), H 0.90 Å | the H-free host's (0.28–0.32) | a-Si:H, a-Ge:H, a-C:H, a-SiC:H, a-SiGe:H |
 | `chalcogenide` | Cordero covalent | 0.30 | ZnS, CdTe, GeTe |
 | `chalcogenide_glass` | Cordero covalent | 0.23 | GeS2, GeSe2, As2S3, As2Se3 (network glasses; tellurides stay `chalcogenide`) |
-| `elemental_semiconductor` | Cordero covalent | 0.28 | a-Se, a-Te, a-As, a-Sb, a-P |
+| `low_coordinated_element` | Cordero covalent | 0.28 | a-C, a-P, a-As, a-Sb, a-S, a-Se, a-Te |
 
 The dioxide split (rutile vs fluorite) and the small- vs large-cation nitride
 split are decided by a cation-radius rule; `high_valent_oxide` is gated on
@@ -177,6 +177,21 @@ When coordination targets are available, AmorphGen uses **SC ("Seed-Coordinate")
 SC is the placement half of the **Seed-Coordinate-Anneal (SCA)** algorithm of Youn et al., *Comput. Mater. Sci.* (2014). AmorphGen factors the *Anneal* step out into its own stages (the MLIP geometry optimisation (`--relax`) and the melt-quench / hybrid workflow) so the placement step is just **Seed-Coordinate** (hence "SC", not "SCA").
 
 Targets are inferred from composition by default; `--target-cn` overrides them.
+The automatic targets by class (tolerance 0 unless stated):
+
+| Class | Automatic target CN |
+|---|---|
+| `tetrahedral_element`, `pnictide` | 4 for every element (Si, Ge, B; Ga and As in GaAs) |
+| `low_coordinated_element` | 8 − N: 3 for P, As, Sb; 2 for S, Se, Te; 3 for C (sp²) |
+| `hydrogenated_network` | 4 for the host, 1 for H |
+| `network_forming_oxide`, `small_cation_oxide` | 4 for Si, Ge, B and Be |
+| `metal_oxide` and other oxides | 5 for the cation, tolerance 1 |
+| `rutile_dioxide`, `high_valent_oxide` / `fluorite_dioxide` | 6 / 8, tolerance 1 |
+| `small_cation_nitride`, `large_cation_nitride` | 4 for the cation |
+| `halide`, `hydride`, `boride`, `transition_metal_carbide` | 6 for the cation |
+| `chalcogenide`, `chalcogenide_glass`, `covalent_carbide` | 6 for the cation; 4 for metalloids and tetrahedral cations (Zn, Ge, Si, B) |
+| `alloy` | 8, tolerance 2 |
+
 The targets guide placement and cap over-coordination but do not guarantee that
 every atom reaches its target. Disable SC with `--no-sc` to fall back to plain
 random rejection sampling (or pass `target_cn={}` to the Python API).

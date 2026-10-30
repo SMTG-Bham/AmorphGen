@@ -46,8 +46,8 @@ def test_hydrogenated_networks(composition):
     ({"Mg": 8, "H": 16}, "hydride"),
     ({"Na": 36, "Al": 36, "H": 144}, "hydride"),
     ({"Ti": 72, "H": 144}, "hydride"),
-    ({"Si": 64}, "group_iv"),                         # the H-free hosts
-    ({"C": 64}, "elemental_semiconductor"),
+    ({"Si": 64}, "tetrahedral_element"),                         # the H-free hosts
+    ({"C": 64}, "low_coordinated_element"),
     ({"Si": 32, "C": 32}, "covalent_carbide"),
 ])
 def test_unchanged_classes(composition, expected):

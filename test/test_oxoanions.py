@@ -86,8 +86,8 @@ def test_oxidation_states(composition, sym, expected):
     ({"K": 6, "I": 6, "O": 18}, "metal_oxide"),      # was oxyhalide
     ({"Mg": 12, "O": 24, "H": 24}, "metal_oxide"),   # was high_valent_oxide
     ({"Be": 8, "S": 8, "O": 32}, "metal_oxide"),     # was the BeO covalent network
-    ({"P": 8, "O": 20}, "covalent_oxide"),           # unchanged
-    ({"S": 8, "O": 24}, "covalent_oxide"),
+    ({"P": 8, "O": 20}, "network_forming_oxide"),           # unchanged
+    ({"S": 8, "O": 24}, "network_forming_oxide"),
     ({"V": 8, "P": 8, "O": 40}, "high_valent_oxide"),  # high-valent through its V
     ({"Bi": 16, "O": 16, "Cl": 16}, "oxyhalide"),    # real oxyhalides unchanged
     ({"Sb": 16, "O": 45, "Cl": 5}, "oxyhalide"),     # needs Sb(V) as Sb's top state

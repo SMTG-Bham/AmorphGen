@@ -5,7 +5,7 @@ Targets:
   - Oxidation-state inference paths (TiO2, Fe2O3, SnO2, ZrN).
   - Auto-target-CN detection across material classes.
   - Density estimation across material classes.
-  - Single-element auto-density paths (covalent_oxide vs group_iv).
+  - Single-element auto-density paths (network_forming_oxide vs tetrahedral_element).
 """
 from __future__ import annotations
 
@@ -73,11 +73,11 @@ class TestGetIonicRadius:
 
 class TestClassifyCompound:
     @pytest.mark.parametrize("comp,expected_class", [
-        ({"Si": 16}, "group_iv"),
-        ({"Ge": 16}, "group_iv"),
+        ({"Si": 16}, "tetrahedral_element"),
+        ({"Ge": 16}, "tetrahedral_element"),
         ({"Cu": 32}, "alloy"),
         ({"In": 16, "O": 24}, "metal_oxide"),
-        ({"Si": 16, "O": 32}, "covalent_oxide"),
+        ({"Si": 16, "O": 32}, "network_forming_oxide"),
         ({"Ga": 16, "As": 16}, "pnictide"),
         ({"Si": 16, "C": 16}, "covalent_carbide"),
         ({"Zn": 16, "S": 16}, "chalcogenide"),
@@ -352,7 +352,7 @@ class TestAutoDeriveInLogFile:
         # And contain the expected fields
         auto_line = next(l for l in log.splitlines() if l.startswith("[auto-derive]"))
         assert "Si16O32" in auto_line
-        assert "covalent_oxide" in auto_line
+        assert "network_forming_oxide" in auto_line
         assert "Si:+4" in auto_line
         # Pair keys are sorted alphabetically: Si-O → 'O-Si'
         assert "O-Si:" in auto_line and "ionic" in auto_line

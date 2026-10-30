@@ -39,5 +39,5 @@ keywords:
   - molecular dynamics
   - machine-learning interatomic potentials
   - materials science
-version: "1.0.0rc5"
-date-released: "2026-10-14"
+version: "1.0.0rc6"
+date-released: "2026-10-20"
