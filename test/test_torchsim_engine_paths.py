@@ -151,6 +151,66 @@ def test_reordered_optimizer_output_is_rejected(monkeypatch):
                            log=lambda *a: None)
 
 
+@pytest.mark.parametrize("autobatch", [None, False], ids=["cpu-default", "disabled"])
+def test_cpu_or_disabled_autobatching_does_not_probe_memory(monkeypatch, autobatch):
+    model = _zero_model()
+    import torch_sim.autobatching as batching
+
+    probe = Mock(side_effect=AssertionError("memory probing was not requested"))
+    monkeypatch.setattr(batching, "measure_model_memory_forward", probe)
+    result = engine.batch_relax(
+        [atoms_pair()], model, cell_filter="none", max_steps=10,
+        autobatch=autobatch, log=lambda *a: None)
+
+    assert len(result) == 1
+    probe.assert_not_called()
+
+
+@pytest.mark.parametrize("heterogeneous", [False, True], ids=["singleton", "mixed-density"])
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_autobatching_probes_only_the_workload_and_keeps_system_order(
+        monkeypatch, heterogeneous, dtype):
+    model = _zero_model()
+    import torch
+    import torch_sim.autobatching as batching
+
+    model._dtype = getattr(torch, dtype)
+    inputs = [atoms_pair()]
+    if heterogeneous:
+        # The denser system's memory metric exceeds every bounded batch of
+        # the sparse first system. It must still fit as a single system.
+        # Three atoms and this cell also exercise the different roundoff of
+        # batched versus singleton density metrics, especially in float32.
+        inputs.append(Atoms("Cu3", positions=[[0, 0, 0], [2, 0, 0], [0, 2, 0]],
+                            cell=[4.1, 4.1, 4.1], pbc=True))
+    for index, atoms in enumerate(inputs):
+        atoms.info["input_index"] = index
+    total_atoms = sum(map(len, inputs))
+    probed_atoms = []
+
+    def measure(state, guarded_model):
+        probed_atoms.append(state.n_atoms)
+        assert state.n_atoms <= total_atoms
+        guarded_model(state)
+        return 0.01
+
+    # Run the real estimators and optimizer on CPU; replace only the CUDA
+    # memory measurement so this regression also runs in CPU-backend CI.
+    monkeypatch.setattr(batching, "measure_model_memory_forward", measure)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    estimate = Mock(wraps=batching.estimate_max_memory_scaler)
+    monkeypatch.setattr(batching, "estimate_max_memory_scaler", estimate)
+    result = engine.batch_relax(
+        inputs, model, cell_filter="none", max_steps=10,
+        autobatch=True, log=lambda *a: None)
+
+    assert probed_atoms
+    estimate.assert_called_once()  # initialization and in-flight reuse the limit
+    assert [atoms.info["input_index"] for atoms in result] == list(range(len(inputs)))
+    for original, relaxed in zip(inputs, result):
+        assert relaxed.positions == pytest.approx(original.positions)
+
+
 @pytest.mark.filterwarnings("ignore:All systems have reached the maximum number of steps")
 def test_cell_convergence_without_state_stress_is_an_error(monkeypatch):
     model = _zero_model(with_stress=False)

@@ -24,6 +24,16 @@ def rattled_cu(seed, scale=1.05):
     return atoms
 
 
+def beta_cristobalite(repeat=(1, 1, 1)):
+    """Fresh ideal silica network with six-membered rings and linear bridges."""
+    from ase.spacegroup import crystal
+
+    return crystal(
+        ["Si", "O"], basis=[(0, 0, 0), (0.125, 0.125, 0.125)],
+        spacegroup=227, cellpar=[7.16, 7.16, 7.16, 90, 90, 90],
+    ).repeat(repeat)
+
+
 def composition_symbols(composition):
     return [symbol for symbol, count in composition.items() for _ in range(count)]
 

@@ -451,9 +451,31 @@ def batch_relax(atoms_list, model, fmax: float = 0.01, max_steps: int = 1000,
         + f"; fmax = {fmax} eV/A; max_steps = {max_steps}")
     t0 = time.time()
     state = guard.attach(ts.initialize_state(atoms_list, model.device, model.dtype))
+    batcher = False
+    if autobatch:
+        from torch_sim.autobatching import (
+            calculate_memory_scalers, estimate_max_memory_scaler,
+        )
+
+        # Probe only batches this workload could need. Giving optimize a
+        # known limit also prevents its initialization and in-flight batchers
+        # from repeating their default searches up to 500,000 atoms.
+        probe_atoms = min(500_000, state.n_atoms)
+        metrics = calculate_memory_scalers(state, model.memory_scales_with)
+        estimated = estimate_max_memory_scaler(
+            state, model, metrics, max_atoms=probe_atoms)
+        # Keep the usual headroom, but a successful one-system probe must
+        # still admit that system (including the largest/densest input).
+        # Batched and singleton metric reductions can round differently.
+        capacity = max(max(metrics) * (1.0 + 1e-6), 0.9 * estimated)
+        batcher = ts.InFlightAutoBatcher(
+            model=model, memory_scales_with=model.memory_scales_with,
+            max_memory_scaler=capacity, max_atoms_to_try=probe_atoms,
+            max_memory_padding=0.9,
+        )
     state = ts.optimize(system=state, model=model,
                         optimizer=(checked_init, checked_step), convergence_fn=conv,
-                        max_steps=int(max_steps), autobatcher=bool(autobatch),
+                        max_steps=int(max_steps), autobatcher=batcher,
                         init_kwargs=init_kwargs)
     # final energies / forces for the log and the written files
     res = model(state)

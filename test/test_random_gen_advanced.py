@@ -447,9 +447,12 @@ class TestSoftPack:
         from amorphgen.pipeline.random_gen import generate_random, _get_minsep
         from amorphgen.utils.common import compute_density_gcm3
         comp = {"Mg": 54, "O": 54}
-        a = generate_random(comp, seed=7)
+        # A bounded rejection budget reaches the real soft-pack/expansion
+        # paths sooner while keeping the original dense 108-atom regression.
+        settings = {"seed": 7, "max_attempts_per_atom": 20_000}
+        a = generate_random(comp, **settings)
         assert a.info.get("soft_pack") is True
-        b = generate_random(comp, seed=7, _soft_pack=False)          # old behaviour: expands
+        b = generate_random(comp, _soft_pack=False, **settings)  # old behaviour: expands
         assert compute_density_gcm3(a) > 1.15 * compute_density_gcm3(b)
         floors = default_minsep(list(comp))
         i, j, d = neighbor_list("ijd", a, max(floors.values()))

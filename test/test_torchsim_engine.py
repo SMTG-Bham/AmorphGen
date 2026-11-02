@@ -72,16 +72,18 @@ class TestBatchOptimizeEngine:
 
 
 class TestCellConvergenceAndOptimizer:
-    def test_cell_forces_converged_and_optimizer_choice(self):
-        import torch_sim as ts
+    @pytest.mark.parametrize("optimizer", ["lbfgs", "fire"])
+    def test_cell_forces_converged(self, optimizer):
         model = build_model("lennard-jones", device="cpu", classical_params=LJ)
-        for opt in ("lbfgs", "fire"):
-            out = batch_relax([_rattled_cu(k) for k in range(2)], model, fmax=0.02, max_steps=800,
-                              cell_filter="cubic", optimizer=opt, log=lambda *a: None)
-            st = ts.io.atoms_to_state(out, device=model.device, dtype=model.dtype)
-            stress = model(st)["stress"].detach().cpu().numpy()
-            for s in stress:                       # cell converged: |P| < 0.02 GPa
-                assert abs(np.trace(s) / 3) * 160.21766 < 0.02
+        out = batch_relax([_rattled_cu(k) for k in range(2)], model, fmax=0.02, max_steps=800,
+                          cell_filter="cubic", optimizer=optimizer, log=lambda *a: None)
+        st = ts.io.atoms_to_state(out, device=model.device, dtype=model.dtype)
+        stress = model(st)["stress"].detach().cpu().numpy()
+        for s in stress:                       # cell converged: |P| < 0.02 GPa
+            assert abs(np.trace(s) / 3) * 160.21766 < 0.02
+
+    def test_unknown_optimizer_is_rejected(self):
+        model = build_model("lennard-jones", device="cpu", classical_params=LJ)
         with pytest.raises(ValueError, match="optimizer"):
             batch_relax([_rattled_cu(0)], model, optimizer="nelder-mead", log=lambda *a: None)
 
@@ -123,7 +125,7 @@ class TestBatchNVT:
     def _cells(self, n=2):
         return [bulk("Cu", "fcc", a=3.6, cubic=True).repeat((2, 2, 2)) for _ in range(n)]
 
-    def test_temperature_momenta_files_and_seed(self, tmp_path):
+    def test_temperature_momenta_and_saved_observables(self, tmp_path):
         from amorphgen.utils.torchsim_md import batch_nvt, _RunWriter
         from amorphgen.utils.common import compute_pressure_GPa, compute_density_gcm3
         m = self._model()
@@ -142,15 +144,41 @@ class TestBatchNVT:
         fresh = m(ts.initialize_state(out, m.device, m.dtype))["stress"].detach().cpu().numpy()
         for atoms, stress in zip(out, fresh):
             np.testing.assert_allclose(atoms.get_stress(voigt=False), stress, atol=1e-12)
-        again = batch_nvt(self._cells(), m, 300.0, n_steps=400, timestep_fs=1.0, seed=1, log=lambda *a: None)
-        assert np.allclose(out[0].positions, again[0].positions)              # seeded noise
-        other = batch_nvt(self._cells(), m, 300.0, n_steps=400, timestep_fs=1.0, seed=2, log=lambda *a: None)
-        assert not np.allclose(out[0].positions, other[0].positions)          # the seed matters
-        tagged = batch_nvt(self._cells(), m, 300.0, n_steps=400, timestep_fs=1.0, seed=1, tag=1, log=lambda *a: None)
-        assert not np.allclose(out[0].positions, tagged[0].positions)         # so does the chunk / resume tag
-        free1 = batch_nvt(self._cells(), m, 300.0, n_steps=400, timestep_fs=1.0, log=lambda *a: None)
-        free2 = batch_nvt(self._cells(), m, 300.0, n_steps=400, timestep_fs=1.0, log=lambda *a: None)
-        assert not np.allclose(free1[0].positions, free2[0].positions)        # unseeded runs are independent
+
+    @pytest.mark.parametrize("first_options,second_options,reproduces", [
+        ({"seed": 1}, {"seed": 1}, True),
+        ({"seed": 1}, {"seed": 2}, False),
+        ({"seed": 1}, {"seed": 1, "tag": 1}, False),
+        ({"seed": 1}, {"seed": 1, "run_index": 1}, False),
+        ({}, {}, False),
+    ], ids=["same-seed", "different-seed", "chunk-tag", "run-index", "unseeded"])
+    def test_noise_stream_identity(self, tmp_path, first_options, second_options, reproduces):
+        """Seed routing needs a few real MD steps, not thermal equilibration."""
+        from amorphgen.utils.torchsim_md import batch_nvt, _RunWriter
+
+        model = self._model()
+
+        def run(options, writers=None):
+            return batch_nvt(self._cells(), model, 300.0, n_steps=8,
+                             timestep_fs=1.0, interval=4, writers=writers,
+                             log=lambda *a: None, **options)
+
+        # Saving trajectories must not perturb the seeded dynamics.
+        writers = ([_RunWriter(tmp_path / f"run_{index}", "md.log", "md.xyz")
+                    for index in range(2)] if reproduces else None)
+        first, second = run(first_options, writers), run(second_options)
+        if reproduces:
+            assert all(len(read(tmp_path / f"run_{index}" / "md.xyz", index=":")) == 2
+                       for index in range(2))
+        assert len(first) == len(second) == 2
+        assert not np.allclose(first[0].get_momenta(), first[1].get_momenta())
+        for a, b in zip(first, second):
+            if reproduces:
+                np.testing.assert_allclose(a.positions, b.positions, rtol=0, atol=1e-12)
+                np.testing.assert_allclose(a.get_momenta(), b.get_momenta(), rtol=0, atol=1e-12)
+            else:
+                assert not np.allclose(a.positions, b.positions)
+                assert not np.allclose(a.get_momenta(), b.get_momenta())
 
     def test_ramp_and_momenta_carry_over(self):
         from amorphgen.utils.torchsim_md import batch_nvt
@@ -231,18 +259,31 @@ class TestPhase3:
 
     # --opt-steps 5: the chunking is under test, not the relaxation
     @pytest.mark.filterwarnings("ignore:All systems have reached the maximum number of steps")
-    def test_cli_batch_size_auto_and_int(self, tmp_path, monkeypatch, capsys):
+    @pytest.mark.parametrize("batch_size,expected", [
+        ("auto", "batch size 16 -> 1 chunk(s)"),
+        ("2", "batch size 2 -> 2 chunk(s)"),
+    ])
+    def test_cli_batch_size(self, tmp_path, monkeypatch, capsys, batch_size, expected):
         """--batch-size accepts 'auto' (CPU -> 16 per chunk) or an integer."""
         from amorphgen.cli import main
         y = tmp_path / "lj.yaml"
         y.write_text("model: lennard-jones\ndevice: cpu\nclassical_params:\n  cutoff: 6.0\n  params:\n"
                      "    Cu-Cu: {sigma: 2.3, epsilon: 0.1}\n")
-        for bs, expect in (("auto", "batch size 16 -> 1 chunk(s)"), ("2", "batch size 2 -> 2 chunk(s)")):
-            monkeypatch.setattr(sys, "argv", ["amorphgen", "--random-gen", "--composition", "Cu=16", "-n", "3", "--relax",
-                                              "--config", str(y), "--engine", "torchsim", "--batch-size", bs,
-                                              "-C", "none", "--opt-steps", "5", "--seed", "19", "-o", str(tmp_path / f"o_{bs}")])
-            main()
-            assert expect in capsys.readouterr().out
+        # Dilute, unconstrained placement keeps this real CLI integration
+        # focused on chunk dispatch instead of dense-packing retries.
+        output = tmp_path / "out"
+        monkeypatch.setattr(sys, "argv", [
+            "amorphgen", "--random-gen", "--composition", "Cu=16", "-n", "3", "--relax",
+            "--no-sc", "--target-density", "2", "--max-attempts", "1000", "--retry-mode", "none",
+            "--config", str(y), "--engine", "torchsim", "--batch-size", batch_size,
+            "-C", "none", "--opt-steps", "5", "--seed", "19", "-o", str(output),
+        ])
+        main()
+        assert expected in capsys.readouterr().out
+        initial = sorted((output / "random_initial").glob("*.xyz"))
+        relaxed = sorted((output / "random_opt").glob("*.xyz"))
+        assert len(initial) == len(relaxed) == 3
+        assert all(len(read(path)) == 16 for path in relaxed)
 
     def _stage4_runs(self, tmp_path, steps=300):
         from amorphgen.pipeline.batch_quench import run_torchsim
@@ -360,20 +401,6 @@ class TestPhase3:
 class TestSeedReachesTheBatchedEngine:
     """Review round 11: the run index must reach the torch-sim MD path too, or
     two SLURM array tasks with the same --seed draw identical momenta."""
-
-    def test_run_index_changes_the_momenta(self):
-        import numpy as np
-        from ase.build import bulk
-        from amorphgen.utils.torchsim_md import batch_nvt
-        m = build_model("lennard-jones", device="cpu", classical_params=LJ)
-        def run(run_index):
-            cells = [bulk("Cu", "fcc", a=3.6, cubic=True).repeat((2, 2, 2))]
-            out = batch_nvt(cells, m, 300.0, n_steps=100, timestep_fs=1.0, seed=11,
-                            stage=4, run_index=run_index, log=lambda *a: None)
-            return out[0].get_positions()
-        a, b, again = run(0), run(1), run(0)
-        assert np.allclose(a, again)            # same index reproduces
-        assert not np.allclose(a, b)            # a different one does not
 
     def test_hybrid_torchsim_uses_the_job_run_index(self, tmp_path, monkeypatch):
         """Through run_torchsim: two jobs differing only by SLURM array task

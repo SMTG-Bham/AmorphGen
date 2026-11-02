@@ -251,15 +251,17 @@ def test_auto_derive_summary_reports_the_roles():
     ({"Na": 12, "N": 12, "O": 36}, "N", 1.25, 1.5),
     ({"P": 16, "O": 40}, "P", 1.53, 3.0),
 ])
-def test_generated_centres_are_bonded(composition, centre, bond, min_mean):
+@pytest.mark.parametrize("seed", [1, 2])
+def test_generated_centres_are_bonded(composition, centre, bond, min_mean, seed):
     """Every generated P had its nearest O at >= 2.43 A, every C at >= 2.25 A.
     Now nearly all centres have O at bonding distance: the placement is
     coordination-aware for them (target CN), as it is for Si in a silicate."""
-    for seed in (1, 2):
-        atoms = generate_random(composition, seed=seed)
-        s = np.array(atoms.get_chemical_symbols())
-        i, j, d = neighbor_list("ijd", atoms, 1.25 * bond)
-        cns = np.array([np.sum((i == k) & (s[j] == "O"))
-                        for k in np.where(s == centre)[0]])
-        assert np.mean(cns >= 1) >= 0.85, (seed, cns)
-        assert cns.mean() >= min_mean, (seed, cns)
+    # Preserve the real placement and both seeds, but bound rejected proposals
+    # before the generator's normal retries instead of using its production cap.
+    atoms = generate_random(composition, seed=seed, max_attempts_per_atom=20_000)
+    s = np.array(atoms.get_chemical_symbols())
+    i, j = neighbor_list("ij", atoms, 1.25 * bond)
+    cns = np.array([np.sum((i == k) & (s[j] == "O"))
+                    for k in np.where(s == centre)[0]])
+    assert np.mean(cns >= 1) >= 0.85, cns
+    assert cns.mean() >= min_mean, cns

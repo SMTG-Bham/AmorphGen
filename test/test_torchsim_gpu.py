@@ -58,6 +58,11 @@ class TestLJOnCuda:
 @pytest.fixture(scope="class")
 def mace_backend():
     pytest.importorskip("mace")
+
+
+@pytest.fixture(autouse=True)
+def restore_default_dtype():
+    """MACE calculator construction must not affect another test's tensors."""
     original_dtype = torch.get_default_dtype()
     try:
         yield
@@ -65,36 +70,73 @@ def mace_backend():
         torch.set_default_dtype(original_dtype)
 
 
+def _mace_model(dtype):
+    # Class fixtures are built before function-scoped dtype restoration.
+    original_dtype = torch.get_default_dtype()
+    try:
+        return build_model("mace-mpa-0", device="cuda", dtype=dtype)
+    finally:
+        torch.set_default_dtype(original_dtype)
+
+
 @pytest.fixture(scope="class")
-def model(mace_backend):
-    return build_model("mace-mpa-0", device="cuda", dtype="float64")
+def mace_model(mace_backend):
+    return _mace_model("float64")
+
+
+@pytest.fixture(scope="class")
+def thermal_model(mace_backend):
+    return _mace_model("float32")
+
+
+@pytest.fixture(scope="class")
+def relaxed_silica(mace_model):
+    """Converged specimens shared read-only by parity and short MD checks."""
+    return batch_relax([_sio2(seed) for seed in (1, 2)], mace_model,
+                       fmax=0.1, max_steps=300, cell_filter="cubic",
+                       log=lambda *a: None)
 
 
 @pytest.mark.mace
 @pytest.mark.usefixtures("mace_backend")
 class TestMaceOnCuda:
-    def test_relax_matches_ase_mace_energy(self, model):
+    def test_relax_matches_ase_mace_energy(self, relaxed_silica):
         """torch-sim relaxation reaches the force/pressure tolerance, and ASE's
         MACE calculator agrees on the energy of the relaxed structure."""
         from mace.calculators import mace_mp
-        ats = [_sio2(s) for s in (1, 2)]
-        out = batch_relax(ats, model, fmax=0.1, max_steps=300, cell_filter="cubic",
-                          log=lambda *a: None)
         calc = mace_mp(model="medium-mpa-0", default_dtype="float64", device="cuda")
-        assert len(out) == len(ats)
-        for a in out:
+        assert len(relaxed_silica) == 2
+        for a in relaxed_silica:
             b = a.copy(); b.calc = calc
             assert abs(b.get_potential_energy() - a.get_potential_energy()) / len(a) < 1e-3
             assert np.linalg.norm(b.get_forces(), axis=1).max() < 0.1 + 0.02
             P = -np.trace(b.get_stress(voigt=False)) / 3 / units.GPa
             assert abs(P) < 0.05
 
+    def test_float64_md_preserves_systems_and_finite_results(self, mace_model, relaxed_silica):
+        """Keep double-precision MACE MD coverage without repeating equilibration."""
+        out = batch_nvt([atoms.copy() for atoms in relaxed_silica], mace_model,
+                        300.0, n_steps=8, interval=4, timestep_fs=0.5,
+                        seed=3, log=lambda *a: None)
+        assert mace_model.dtype == torch.float64
+        assert len(out) == len(relaxed_silica)
+        for original, atoms in zip(relaxed_silica, out):
+            assert atoms.get_chemical_symbols() == original.get_chemical_symbols()
+            np.testing.assert_array_equal(atoms.cell, original.cell)
+            assert np.isfinite(atoms.positions).all()
+            assert np.isfinite(atoms.get_potential_energy())
+            assert np.isfinite(atoms.get_forces()).all()
+            assert np.abs(atoms.get_momenta()).sum() > 0
+
     # the 50-step pre-relax only takes the worst forces off before the MD
     @pytest.mark.filterwarnings("ignore:All systems have reached the maximum number of steps")
-    def test_batched_md_temperature(self, model):
+    def test_batched_md_temperature(self, thermal_model):
+        # Thermal scale needs no double-precision accuracy. Retain the full
+        # trajectory and four independent structures, using float32 inference.
+        assert thermal_model.dtype == torch.float32
         ats = [_sio2(s) for s in range(1, 5)]
-        ats = batch_relax(ats, model, fmax=0.5, max_steps=50, cell_filter="none", log=lambda *a: None)
-        out = batch_nvt(ats, model, 1500.0, n_steps=200, timestep_fs=0.5, seed=3, log=lambda *a: None)
+        ats = batch_relax(ats, thermal_model, fmax=0.5, max_steps=50, cell_filter="none", log=lambda *a: None)
+        out = batch_nvt(ats, thermal_model, 1500.0, n_steps=200, timestep_fs=0.5, seed=3, log=lambda *a: None)
         assert len(out) == 4
         assert all(np.abs(a.get_momenta()).sum() > 0 for a in out)
         assert 600 < np.mean([a.get_temperature() for a in out]) < 2400

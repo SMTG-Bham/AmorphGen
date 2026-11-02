@@ -48,6 +48,23 @@ def compute_voronoi(atoms_list, element=None):
         central_end = 14 * n
         per_structure[-1]["tessellation_succeeded"] = True
 
+        # Each ridge is a face shared by its two endpoints. Accumulate the
+        # central cells' faces in one pass instead of scanning every ridge
+        # again for each atom.
+        face_counts = [[0, 0, 0, 0] for _ in range(n)]
+        for (p1, p2), face_verts in zip(vor.ridge_points, vor.ridge_vertices):
+            first_central = central_start <= p1 < central_end
+            second_central = central_start <= p2 < central_end
+            if not (first_central or second_central):
+                continue
+            nv = len(face_verts)
+            if nv < 3 or nv > 6 or -1 in face_verts:
+                continue
+            if first_central:
+                face_counts[p1 - central_start][nv - 3] += 1
+            if second_central and p2 != p1:
+                face_counts[p2 - central_start][nv - 3] += 1
+
         for atom_idx in range(central_start, central_end):
             real_idx = atom_idx - central_start
             if element is not None and syms[real_idx] != element:
@@ -59,16 +76,7 @@ def compute_voronoi(atoms_list, element=None):
             if -1 in region or len(region) == 0:
                 continue
 
-            n_faces = {3: 0, 4: 0, 5: 0, 6: 0}
-            for ridge_idx, (p1, p2) in enumerate(vor.ridge_points):
-                if p1 == atom_idx or p2 == atom_idx:
-                    face_verts = vor.ridge_vertices[ridge_idx]
-                    if -1 not in face_verts:
-                        nv = len(face_verts)
-                        if nv in n_faces:
-                            n_faces[nv] += 1
-
-            idx_tuple = (n_faces[3], n_faces[4], n_faces[5], n_faces[6])
+            idx_tuple = tuple(face_counts[real_idx])
             all_indices.append(idx_tuple)
             frame_indices.append(idx_tuple)
         if frame_indices:
