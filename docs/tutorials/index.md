@@ -34,6 +34,7 @@ simulation settings):
 | [Tutorial 5: Hybrid batch quench](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T5_mix_random_MQ/tutorial_5_batch_quench.ipynb) | Random gen → equilibrate → batch quench | CHGNet | TiO₂ |
 | [Tutorial 6: Classical potentials](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T6_classical_potential/tutorial_6_classical_potential.ipynb) | Buckingham+Coulomb relaxation, hybrid workflow | Classical; optional MACE refinement | SiO₂, Al₂O₃, TiO₂ |
 | [Tutorial 8: Ensemble analysis](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T8_validation_workflow/tutorial_8_validation_workflow.ipynb) | The analysis of `--analyse` through the API on a shipped ensemble: partial RDFs, CN, angles, dimers, connectivity, rings, X-ray/neutron S(q), T(r)/G(r), relaxed vs annealed; uses the production analyser directly | none (geometric analysis) | Ga₂O₃ (10 relaxed + 10 annealed 400-atom cells from the paper) |
+| [Tutorial 9: EXAFS](https://github.com/SMTG-Bham/AmorphGen/blob/main/Tutorials/T9_exafs/tutorial_9_exafs.ipynb) | First-shell cumulants and skew, the bias of a Gaussian EXAFS fit, FEFF inputs, `feff_pipeline()` from structures to ensemble-averaged χ(k) and \|χ(R)\| with bootstrap bands, and a FEFF path-length convergence check; see the {doc}`../guides/exafs` guide | none for sections 1–3; external FEFF8.5L for 4–5 | Ga₂O₃ (the Tutorial 8 cells) |
 
 Application case studies (these assume you have done the workflow tutorials):
 

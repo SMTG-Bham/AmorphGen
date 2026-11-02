@@ -1,0 +1,65 @@
+{
+  "revision": "ec8dcb07ca8ee034d0fa7431782074f0f65357a5",
+  "files": [
+    {
+      "path": "LICENSE",
+      "url": "https://raw.githubusercontent.com/xraypy/feff85exafs/ec8dcb07ca8ee034d0fa7431782074f0f65357a5/LICENSE",
+      "sha256": "251241a5119a264db76fe5f8ea848c76dc90fdf3037ee31ee43d250713d2d947"
+    },
+    {
+      "path": "tests/NiO/README.md",
+      "url": "https://raw.githubusercontent.com/xraypy/feff85exafs/ec8dcb07ca8ee034d0fa7431782074f0f65357a5/tests/NiO/README.md",
+      "sha256": "691f2b06f2ee123a0741c6b5178eb628d9568dcbda290918ff335f1b6cc07fb1"
+    },
+    {
+      "path": "tests/NiO/NiO.json",
+      "url": "https://raw.githubusercontent.com/xraypy/feff85exafs/ec8dcb07ca8ee034d0fa7431782074f0f65357a5/tests/NiO/NiO.json",
+      "sha256": "436c09d0f51a515d5706d1339a8f9455c01c1df92f38333e6bc2a13bf2b9786b"
+    },
+    {
+      "path": "tests/NiO/NiO.chik",
+      "url": "https://raw.githubusercontent.com/xraypy/feff85exafs/ec8dcb07ca8ee034d0fa7431782074f0f65357a5/tests/NiO/NiO.chik",
+      "sha256": "c90c0dac63331f9e276733bd4c31360b5c188b2d5d92c0401bb14f86fbd97d3f"
+    },
+    {
+      "path": "tests/NiO/baseline/noSCF/feff.inp",
+      "url": "https://raw.githubusercontent.com/xraypy/feff85exafs/ec8dcb07ca8ee034d0fa7431782074f0f65357a5/tests/NiO/baseline/noSCF/feff.inp",
+      "sha256": "2dd13c77a6680ed4f17a70c12870d791d462e869eff700c5a655b482ffe9a07e"
+    },
+    {
+      "path": "tests/NiO/baseline/noSCF/chi.dat",
+      "url": "https://raw.githubusercontent.com/xraypy/feff85exafs/ec8dcb07ca8ee034d0fa7431782074f0f65357a5/tests/NiO/baseline/noSCF/chi.dat",
+      "sha256": "2286207a3ad5e6343b5e8f647e66eda6bf1c1313719dd66120c6e0799407b7ba"
+    },
+    {
+      "path": "tests/UO2/README.md",
+      "url": "https://raw.githubusercontent.com/xraypy/feff85exafs/ec8dcb07ca8ee034d0fa7431782074f0f65357a5/tests/UO2/README.md",
+      "sha256": "083abaafcbb0d1f153f550d267a7587c4d242b86e04a28ff014d6d14bbc5f9dc"
+    },
+    {
+      "path": "tests/UO2/UO2.json",
+      "url": "https://raw.githubusercontent.com/xraypy/feff85exafs/ec8dcb07ca8ee034d0fa7431782074f0f65357a5/tests/UO2/UO2.json",
+      "sha256": "43382f02adbd41288b2c65d670f015f66f40513637102ebf69ca1091d713e606"
+    },
+    {
+      "path": "tests/UO2/baseline/noSCF/feff.inp",
+      "url": "https://raw.githubusercontent.com/xraypy/feff85exafs/ec8dcb07ca8ee034d0fa7431782074f0f65357a5/tests/UO2/baseline/noSCF/feff.inp",
+      "sha256": "d59453bf21e989677047e1a27917af934c8cffbdec74d988505bf9d841439200"
+    },
+    {
+      "path": "tests/UO2/baseline/noSCF/chi.dat",
+      "url": "https://raw.githubusercontent.com/xraypy/feff85exafs/ec8dcb07ca8ee034d0fa7431782074f0f65357a5/tests/UO2/baseline/noSCF/chi.dat",
+      "sha256": "d286e310e4e436b244f131d491ad505b8ea5690d2ad0402ba2cb23fb0578f543"
+    },
+    {
+      "path": "tests/Copper/baseline/withSCF/feff.inp",
+      "url": "https://raw.githubusercontent.com/xraypy/feff85exafs/ec8dcb07ca8ee034d0fa7431782074f0f65357a5/tests/Copper/baseline/withSCF/feff.inp",
+      "sha256": "8da28e879a9e4aacb1ee14c64dcc6d8c223101d348ff2ce5f93b0679e6250b33"
+    },
+    {
+      "path": "tests/Copper/baseline/withSCF/chi.dat",
+      "url": "https://raw.githubusercontent.com/xraypy/feff85exafs/ec8dcb07ca8ee034d0fa7431782074f0f65357a5/tests/Copper/baseline/withSCF/chi.dat",
+      "sha256": "e264b1c29765e629dfb6685246be1dd252a2c553b35e389dd667088f294b5cdc"
+    }
+  ]
+}

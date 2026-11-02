@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- EXAFS analysis (`docs/guides/exafs.md`), in three tiers that are kept
+  distinct:
+  - **Geometric descriptors** (`--exafs`): first-shell coordination,
+    distance cumulants and an approximate effective-distance correction,
+    with whole-structure bootstrap errors.
+  - **Harmonic-fit diagnostic** (`--harmonic-fit`): an estimate of the bias
+    a Gaussian first-shell EXAFS fit would show on the ensemble, using a
+    bundled FEFF6L backscatter table.
+  - **FEFF forward spectra** (`--feff-write`, `--feff-run`, `--feff-collect`;
+    `amorphgen.analysis.feff`):
+    - absorber-centred clusters from periodic structures, with optional
+      parent-cell potential populations;
+    - fingerprinted, locked and resumable job trees;
+    - parallel local runs, and a guard against FEFF8.5L's silent
+      15,000-path truncation;
+    - site-then-structure averaging of chi(k) before the transform.
+    FEFF itself is not bundled.
+- Structures to spectra in one command: `--feff-run` now runs, collects and
+  plots. `--feff-absorber` takes several elements (one tree each). New
+  options are `--feff-executable`, `--feff-workers` and a repeatable
+  `--feff-card KEY=VALUE`, with matching `analysis.*` YAML keys. `--resume`
+  keeps finished jobs. The Python equivalent is `feff_pipeline()`.
+- EXAFS figures follow the other analysis plots: standalone
+  `analysis_<El>_feff_chik` and `_chir` figures saved without pyplot, with
+  whole-structure bootstrap bands. A CSV of each is written automatically.
+- Tutorial 9, `Tutorials/T9_exafs/`: EXAFS on the Tutorial 8 a-Ga2O3 cells,
+  from first-shell cumulants and harmonic-fit bias to `feff_pipeline()`
+  spectra and a FEFF convergence check. Sections 1-3 run without FEFF.
+  The README gains an EXAFS section and Tutorial 9 entry.
+
 ## v1.0.0rc6 (2026-10-20)
 
 ### Changed

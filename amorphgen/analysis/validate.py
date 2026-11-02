@@ -139,12 +139,144 @@ def validate_against_reference(analyser, reference):
         add_row(f"Angle {triplet}", _entry(ba, triplet, either_order=True),
                 lo, hi, spec.get("units", "°"))
 
+    if "exafs" in reference:
+        rows.extend(_exafs_rows(analyser, reference["exafs"]))
+
     return {
         "system": reference.get("system", "(unspecified)"),
         "sources": reference.get("references", []),
         "rows": rows,
         "intervals": intervals,
     }
+
+
+def _warn_unmatched(section, key, computed):
+    """Warn that a reference key matched nothing the analyser computed.
+
+    Silently skipping it would drop the metric from the table, and a
+    summary missing a row it was never told about reads as a pass. The
+    caller emits an "n/a" row as well; this names the likely cause (a typo,
+    or an element absent from the ensemble).
+    """
+    import warnings
+    available = ", ".join(sorted(computed)) or "none"
+    warnings.warn(
+        f"reference {section} key {key!r} matched nothing in the ensemble "
+        f"(computed: {available}); reported as n/a", stacklevel=3)
+
+
+def _warn_fit_quality(pair, d, quality, consequence):
+    """Warn that a harmonic fit is too poor to score against cleanly."""
+    import warnings
+    why = d.get("quality_flags") or f"R-factor {d['r_factor']:.2g}"
+    warnings.warn(
+        f"harmonic fit for exafs key {pair!r} is {quality} ({why}); "
+        f"{consequence}", stacklevel=4)
+
+
+def _exafs_rows(analyser, spec):
+    """Rows for the ``exafs`` section of a reference YAML.
+
+    ``spec`` maps an ordered pair ("Ga-O" = Ga absorber, O scatterer) to any
+    of ``N_expected``, ``R_expected`` and ``sigma2_expected``. Two reserved
+    keys control what the reference is compared against:
+
+    ``r_convention``
+        ``"effective"`` (default) or ``"real"`` -- whether R is scored
+        against ``R_eff`` or the plain mean. A published EXAFS R is the
+        first cumulant of the *effective* distribution, so "effective" is
+        the like-for-like comparison; see
+        :mod:`amorphgen.analysis.exafs`.
+    ``source``
+        ``"geometric"`` (default) scores against the descriptor table.
+        ``"harmonic-fit"`` scores against the N, R and sigma^2 a harmonic
+        EXAFS fit of this ensemble would report
+        (:mod:`amorphgen.analysis.harmonic`), which is the closer match
+        for a reference taken from a published fit -- especially for an
+        asymmetric shell, where the two differ by more than the tolerance
+        the reference is quoted to. It costs one fit per pair. A pair
+        whose fit failed (see :func:`~amorphgen.analysis.harmonic.fit_quality`)
+        is reported as n/a with a warning; a poor one is scored, with a
+        warning that the verdict is indicative only.
+    """
+    spec = dict(spec)
+    convention = str(spec.pop("r_convention", "effective")).lower()
+    if convention not in ("effective", "real"):
+        raise ValueError(
+            f"exafs r_convention must be 'effective' or 'real', got {convention!r}")
+    source = str(spec.pop("source", "geometric")).lower()
+    if source not in ("geometric", "harmonic-fit"):
+        raise ValueError(
+            f"exafs source must be 'geometric' or 'harmonic-fit', "
+            f"got {source!r}")
+
+    if source == "harmonic-fit":
+        return _exafs_fit_rows(analyser, spec)
+
+    r_key = "R_eff" if convention == "effective" else "R"
+    r_label = "R_eff" if convention == "effective" else "R"
+
+    ex = analyser.exafs_descriptors()
+    rows = []
+    for pair, pspec in spec.items():
+        d = ex.get(pair)    # ordered absorber-scatterer: no reversed fallback
+        if d is None:
+            _warn_unmatched("exafs", pair, ex)
+        for yaml_key, value_key, label, units in (
+            ("N_expected", "N", "N", ""),
+            ("R_expected", r_key, r_label, "A"),
+            ("sigma2_expected", "sigma2", "sigma2", "A^2"),
+        ):
+            if yaml_key not in pspec:
+                continue
+            lo, hi = pspec[yaml_key]
+            v = d[value_key] if d is not None else None
+            rows.append((f"EXAFS {label} {pair}", v, lo, hi,
+                         pspec.get("units", units) if yaml_key == "R_expected"
+                         else units,
+                         _verdict(v, lo, hi)))
+    return rows
+
+
+def _exafs_fit_rows(analyser, spec):
+    """``exafs`` rows scored against the harmonic fit rather than geometry.
+
+    The fitted R already lives on the effective distribution -- the fit
+    finds it directly -- so ``r_convention`` does not apply here.
+    """
+    from .harmonic import fit_quality
+
+    fits = analyser.harmonic_fit()
+    rows = []
+    for pair, pspec in spec.items():
+        d = fits.get(pair)  # ordered absorber-scatterer: no reversed fallback
+        if d is None:
+            _warn_unmatched("exafs", pair, fits)
+        else:
+            quality = d.get("fit_quality")
+            if quality is None and "r_factor" in d:
+                quality = fit_quality(d["r_factor"], d.get("converged", True))
+            if quality == "failed":
+                # A failed fit has no N, R or sigma^2 to score: a verdict
+                # off it would be a verdict about the fitting, not the
+                # structure.
+                _warn_fit_quality(pair, d, "failed", "reported as n/a")
+                d = None
+            elif quality == "poor":
+                _warn_fit_quality(pair, d, "poor",
+                                  "its verdicts are indicative only")
+        for yaml_key, value_key, label, units in (
+            ("N_expected", "N_fit", "N(fit)", ""),
+            ("R_expected", "R_fit", "R(fit)", "A"),
+            ("sigma2_expected", "sigma2_fit", "sigma2(fit)", "A^2"),
+        ):
+            if yaml_key not in pspec:
+                continue
+            lo, hi = pspec[yaml_key]
+            v = d[value_key] if d is not None else None
+            rows.append((f"EXAFS {label} {pair}", v, lo, hi, units,
+                         _verdict(v, lo, hi)))
+    return rows
 
 
 def format_validation_report(result):
@@ -169,6 +301,8 @@ def format_validation_report(result):
                      "describe uncertainty of that mean.")
         lines.append("  Structures are treated as independent sampling units.")
         lines.append("")
+    if any(row[0].startswith("EXAFS") for row in rows):
+        lines.append("  EXAFS rows compare point estimates only; harmonic fits are approximate.")
     interval_heading = f"  {'Mean t interval':>25}" if intervals else ""
     lines.append(f"  {'Descriptor':<22}{'Computed':>10}{interval_heading}  "
                  f"{'Expected':>14}  {'Units':<6}  Verdict")
@@ -181,6 +315,9 @@ def format_validation_report(result):
         else:
             cval = f"{value:>10.3f}"
         expected = f"[{lo:.2f}, {hi:.2f}]"
+        if descriptor.startswith("EXAFS") and "sigma2" in descriptor:
+            cval = f"{value:.3e}" if _finite(value) else "n/a"
+            expected = f"[{lo:.3e}, {hi:.3e}]"
         interval = ""
         if intervals:
             uncertainty = intervals.get(descriptor)

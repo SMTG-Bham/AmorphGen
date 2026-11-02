@@ -130,6 +130,31 @@ _BLOCK_SCHEMA = {
         "seed": (int, type(None)),
     },
     "analysis": {
+        "exafs": (bool, str, type(None)),
+        "exafs_mfp": _NUMBER,
+        "exafs_bootstrap": int,
+        "harmonic_fit": (bool, str, type(None)),
+        "harmonic_kmin": _NUMBER,
+        "harmonic_kmax": _NUMBER,
+        "harmonic_kweight": int,
+        "harmonic_bootstrap": int,
+        "harmonic_float_e0": bool,
+        "feff_write": _OPTIONAL_STRING,
+        "feff_collect": _OPTIONAL_STRING,
+        "feff_absorber": _OPTIONAL_STRING,
+        "feff_sites": (int, type(None)),
+        "feff_radius": _NUMBER,
+        "feff_edge": str,
+        "feff_stoichiometry": str,
+        "feff_run": bool,
+        "feff_executable": _OPTIONAL_STRING,
+        "feff_workers": int,
+        "feff_cards": (dict, type(None)),
+        "feff_kweight": int,
+        "feff_kmin": _NUMBER,
+        "feff_kmax": _NUMBER,
+        "feff_dk": _NUMBER,
+        "feff_trust_external": bool,
         "screening": (dict, bool),
         "screening_output": _OPTIONAL_STRING,
         "convergence": bool,
@@ -333,6 +358,30 @@ def _validate_nested_values(cfg: dict, errors: list[str], path: str) -> None:
     analysis = cfg.get("analysis")
     if not isinstance(analysis, dict):
         return
+    if analysis.get("feff_stoichiometry", "cluster") not in ("cluster", "structure"):
+        errors.append("analysis.feff_stoichiometry must be 'cluster' or 'structure'")
+    cards = analysis.get("feff_cards")
+    if isinstance(cards, dict) and any(
+            not isinstance(key, str) or not key.strip()
+            or isinstance(value, bool) or not isinstance(value, (str, int, float))
+            for key, value in cards.items()):
+        errors.append("analysis.feff_cards must map card names to strings or numbers, "
+                      "e.g. {RPATH: 8, CRITERIA: '1.0 0.5'}")
+    for name, minimum in (("exafs_bootstrap", 0), ("harmonic_bootstrap", 0),
+                          ("harmonic_kweight", 0), ("feff_kweight", 0),
+                          ("feff_sites", 1), ("feff_workers", 1)):
+        value = analysis.get(name)
+        if type(value) is int and value < minimum:
+            errors.append(f"analysis.{name} must be at least {minimum}")
+    for name in ("exafs_mfp", "feff_radius", "harmonic_kmax", "feff_kmax",
+                 "harmonic_kmin", "feff_kmin", "feff_dk"):
+        value = analysis.get(name)
+        minimum_inclusive = name in ("harmonic_kmin", "feff_kmin", "feff_dk")
+        if type(value) in _NUMBER and (
+                not math.isfinite(value)
+                or (value < 0 if minimum_inclusive else value <= 0)):
+            errors.append(f"analysis.{name} must be finite and "
+                          f"{'non-negative' if minimum_inclusive else 'positive'}")
     if "screening" in analysis:
         from ..analysis.screening import validate_screening_config
         try:

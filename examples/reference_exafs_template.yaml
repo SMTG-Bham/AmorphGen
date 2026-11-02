@@ -1,0 +1,87 @@
+# Template: scoring an ensemble against a published EXAFS fit table.
+#
+#   amorphgen --analyse --input-dir DIR --exafs \
+#             --reference examples/reference_exafs_template.yaml
+#
+# The values below are PLACEHOLDERS chosen to show the schema. Replace every
+# one with the fit table of the paper you are comparing against, and put that
+# paper in `references:`. Do not ship a reference file with these numbers in
+# it.
+#
+# Why a separate section from `coordination:` and `bond_distances:`
+# -----------------------------------------------------------------
+# Those two sections score AmorphGen's geometric descriptors: a neighbour
+# count inside a cutoff, and the mean of a distance set. An EXAFS paper does
+# not report either of those. It reports parameters fitted to chi(k) under a
+# harmonic model — N correlated with sigma^2 and with the amplitude reduction
+# factor S0^2, and an R that is the first cumulant of the *effective*
+# distribution (the 1/R^2 and exp(-2R/lambda) weighted one), not of P(R).
+#
+# The `exafs:` section scores against `exafs_descriptors()`, which computes
+# geometric shell statistics from the ensemble. These are not guaranteed to
+# equal parameters fitted to measured spectra; all EXAFS verdicts are point-estimate
+# comparisons, and the harmonic route is an approximation. Use `coordination:` / `bond_distances:` for diffraction-derived or
+# DFT-derived references, and `exafs:` for EXAFS-derived ones.
+
+system: TEMPLATE -- replace with your system
+
+references:
+  - "REPLACE: author, journal, volume (year) page -- EXAFS fit table, Table N"
+  - "Note the edge, the k-range, the fitted S0^2 and the measurement temperature."
+
+exafs:
+  # What the reference is compared against:
+  #   geometric (default) -- the descriptor table: a neighbour count inside a
+  #                          cutoff, and the cumulants of the distance set.
+  #                          Right for a diffraction- or DFT-derived reference.
+  #   harmonic-fit        -- the N, R and sigma^2 a harmonic EXAFS fit of this
+  #                          ensemble would return (--harmonic-fit). Right for a
+  #                          reference taken from a published fit table: for an
+  #                          asymmetric shell a fit under-counts N, so scoring a
+  #                          fitted N against a geometric one compares two
+  #                          different quantities. Costs one fit per pair.
+  source: geometric
+
+  # Which computed distance R_expected is scored against (source: geometric
+  # only -- a fitted R already lives on the effective distribution):
+  #   effective (default) -- R_eff, the first cumulant of the distribution
+  #                          EXAFS samples. This is what a fit reports, and
+  #                          it sits ~0.005-0.02 A below the plain mean.
+  #   real                -- R, the plain mean of the distance set. Use this
+  #                          only if the paper states it corrected R back to
+  #                          the real distribution.
+  r_convention: effective
+
+  # Keys are ORDERED: "Ga-O" means the Ga edge with O scatterers (the Ga K-edge
+  # Ga-O single-scattering path). "O-Ga" is a different row with the same R and
+  # sigma^2 but a different N. Include only the metrics the paper actually
+  # reports; a missing key produces no row rather than a spurious pass.
+  Ga-O:
+    N_expected: [4.0, 4.8]          # first-shell coordination from the fit
+    R_expected: [1.83, 1.88]        # A -- scored against R_eff, see above
+    sigma2_expected: [0.004, 0.010] # A^2 -- Debye-Waller factor from the fit
+
+  In-O:
+    N_expected: [5.0, 6.2]
+    R_expected: [2.12, 2.18]
+
+# ── Before trusting a sigma^2 verdict ────────────────────────────────────
+#
+# A relaxed (0 K) ensemble carries only the CONFIGURATIONAL part of the
+# disorder:
+#
+#     sigma^2_experiment  =  sigma^2_static  +  sigma^2_thermal
+#
+# so a computed sigma^2 is a lower bound on a room-temperature measurement,
+# and a "fail" verdict against a 300 K fit is expected rather than
+# informative. Two ways to make the comparison meaningful:
+#
+#   1. Load finite-temperature frames explicitly with ase.io.read(index=":")
+#      and pass the Atoms list to StructureAnalyser. Select independent frames
+#      or use blocks for uncertainty; reading a single trajectory path does
+#      not automatically analyse all its frames.
+#   2. Compare against a T -> 0 extrapolation of temperature-dependent EXAFS
+#      (a correlated-Debye or Einstein fit), which separates the static term.
+#
+# N and R do not carry this caveat: they are only weakly temperature
+# dependent over the range a relaxed ensemble is used for.
