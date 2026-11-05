@@ -58,6 +58,7 @@ build/
 .eggs/
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
 
 # ======================
 # Jupyter Notebooks
@@ -175,3 +176,7 @@ texput.log
 
 # local agent/editor instructions, not part of the distribution
 CLAUDE.md
+AGENTS.md
+CLAUDE.local.md
+.claude/settings.local.json
+.claude/worktrees/
