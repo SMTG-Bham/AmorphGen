@@ -158,6 +158,7 @@ namespaces = false
 
 [tool.setuptools.package-data]
 "amorphgen" = ["slurm_runtime.sh"]
+"amorphgen.analysis" = ["data/*.json"]
 "amorphgen.configs" = ["*.yaml"]
 
 [tool.pytest.ini_options]

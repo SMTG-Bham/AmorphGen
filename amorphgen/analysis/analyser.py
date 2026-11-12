@@ -28,6 +28,10 @@ from .voronoi import compute_voronoi
 from .energy import compute_energy_ranking, stored_info_energy
 from .plotting import plot_analysis
 from .uncertainty import summarize_structures, summarize_site_groups
+from .exafs import (compute_exafs_descriptors, DEFAULT_MFP,
+                    DEFAULT_BOOTSTRAP)
+from .harmonic import (fit_shells, DEFAULT_KMIN, DEFAULT_KMAX,
+                       DEFAULT_BOOTSTRAP as H_DEFAULT_BOOTSTRAP)
 
 
 class StructureAnalyser:
@@ -376,6 +380,110 @@ class StructureAnalyser:
         """
         return compute_bond_distances(self.atoms_list, self._max_cutoff,
                                       self._get_cutoff, pair)
+
+    def exafs_descriptors(self, pair=None, mfp=DEFAULT_MFP, nbins=120,
+                          bootstrap=DEFAULT_BOOTSTRAP, seed=0):
+        """First-shell descriptors in the form an EXAFS paper reports them.
+
+        Returns N, R, sigma^2 and the third cumulant C3 for each ordered
+        absorber-scatterer pair, so an ensemble can be compared against a
+        published EXAFS fit table with explicit modelling caveats. ``coordination()`` gives a
+        geometric count inside a cutoff; an EXAFS N is a fit parameter
+        extracted under a harmonic model, and in an asymmetric glass shell
+        the two differ. ``skew`` flags the pairs where that matters.
+
+        Parameters
+        ----------
+        pair : str, optional
+            One **ordered** pair, ``"Ga-O"`` meaning Ga absorber with O
+            scatterers (the Ga K-edge Ga-O path). Unlike
+            ``bond_distances()``, ``"Ga-O"`` and ``"O-Ga"`` are separate
+            entries: same R and sigma^2, different N.
+        mfp : float
+            Photoelectron mean free path lambda (A) for the effective-
+            distribution correction behind ``R_eff`` (default 5.0).
+        nbins : int
+            Bins for the returned first-shell distribution P(R).
+        bootstrap : int
+            Resamples for the ensemble-sampling error bars, by resampling
+            whole structures. 0 turns them off.
+        seed : int
+            Seed for the resampling, so the bars are reproducible.
+
+        Returns
+        -------
+        dict
+            Keyed by ``"<absorber>-<scatterer>"`` with ``N``, ``N_std``,
+            ``R``, ``R_eff``, ``sigma2``, ``C3``, ``skew``, ``cutoff``,
+            sample sizes and ``P_R``. See
+            :func:`amorphgen.analysis.exafs.compute_exafs_descriptors`.
+
+        Notes
+        -----
+        For a relaxed (0 K) ensemble ``sigma2`` is the *configurational*
+        disorder only and is a lower bound on a finite-temperature
+        measurement, which also carries a thermal term. Point the analyser
+        at a finite-T trajectory to sample that term directly.
+        """
+        return compute_exafs_descriptors(self.atoms_list, self._max_cutoff,
+                                         self._get_cutoff, pair=pair,
+                                         mfp=mfp, nbins=nbins,
+                                         bootstrap=bootstrap, seed=seed)
+
+    def harmonic_fit(self, pair=None, mfp=DEFAULT_MFP, kmin=DEFAULT_KMIN,
+                     kmax=DEFAULT_KMAX, kweight=2, nk=200, fit_e0=False,
+                     bootstrap=H_DEFAULT_BOOTSTRAP, seed=0, backscatter=True):
+        """Approximate N, R and sigma^2 from a Gaussian first-shell model.
+
+        ``exafs_descriptors()`` gives the *geometric* first shell;
+        ``skew`` there flags a shell too asymmetric for a harmonic model.
+        This measures that instead of flagging it: the harmonic (Gaussian)
+        model is fitted to the ensemble's own EXAFS amplitude, and the
+        result sits next to the geometric values with the difference
+        spelled out.
+
+        A negative ``N_bias`` means a fit would report fewer neighbours
+        than the structure has -- the usual reason a published EXAFS N
+        sits below a simulated coordination number.
+
+        Parameters
+        ----------
+        pair : str, optional
+            One ordered ``"<absorber>-<scatterer>"`` pair.
+        mfp : float
+            Photoelectron mean free path lambda (A).
+        kmin, kmax : float
+            Fit window (A^-1). The bias grows with ``kmax``; match the
+            range of the paper being compared against.
+        kweight : int
+            k-weighting of the fit residual (2 is conventional).
+        nk : int
+            k points across the window.
+        fit_e0 : bool
+            Float an edge-energy shift, as a real fit usually does. It
+            absorbs the third-cumulant phase distortion but not the N
+            bias; see :mod:`amorphgen.analysis.harmonic`.
+        bootstrap : int
+            Resamples for the error bars on both columns. Each one is a
+            full fit, so this dominates the cost; 0 turns them off.
+        seed : int
+            Seed for the resampling, so the bars are reproducible.
+        backscatter : bool
+            Weight the fit residual by the scatterer's ``|f(k)|`` as a real
+            chi(k) fit does (default). ``False`` only for comparison: it
+            overstates the bias.
+
+        Returns
+        -------
+        dict
+            Keyed by ordered pair, with ``N_geom``/``N_fit``/``N_bias``,
+            the same for R and sigma^2, plus ``skew`` and ``r_factor``.
+        """
+        return fit_shells(self.atoms_list, self._max_cutoff,
+                          self._get_cutoff, pair=pair, mfp=mfp, kmin=kmin,
+                          kmax=kmax, kweight=kweight, nk=nk, fit_e0=fit_e0,
+                          bootstrap=bootstrap, seed=seed,
+                          backscatter=backscatter)
 
     def _compute_all_angles(self, triplet=None, bonding_only=True):
         return compute_all_angles(self.atoms_list, self._max_cutoff,

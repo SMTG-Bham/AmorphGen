@@ -6,6 +6,8 @@ include Tutorials/analysis_helpers.py
 recursive-include Tutorials *.ipynb
 # Offline experimental benchmarks must also run from an unpacked sdist.
 recursive-include test/data *.xyz *.md
+recursive-include test/data/feff *.dat *.json LICENSE.*
+recursive-include examples/exafs *.py *.md
 # The Slurm regression tests exercise these workflow/script examples.
 include examples/slurm_workflow.yaml
 include examples/*.slurm
@@ -15,3 +17,4 @@ include examples/reference_a_*.yaml
 recursive-include Tutorials/T8_validation_workflow/structures *.xyz
 # An executed copy of Tutorial 8 left by nbconvert must not reach the sdist.
 exclude Tutorials/T8_validation_workflow/executed.ipynb
+exclude Tutorials/T9_exafs/executed.ipynb

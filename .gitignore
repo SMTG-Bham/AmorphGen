@@ -58,6 +58,7 @@ build/
 .eggs/
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
 
 # ======================
 # Jupyter Notebooks
@@ -156,6 +157,10 @@ Tutorials/_*/
 Tutorials/T8_validation_workflow/analysis_*/
 Tutorials/T8_validation_workflow/*.log
 Tutorials/T8_validation_workflow/executed.ipynb
+# Tutorial 9 writes its FEFF job trees and figures next to the notebook
+Tutorials/T9_exafs/feff_*/
+Tutorials/T9_exafs/analysis*/
+Tutorials/T9_exafs/executed.ipynb
 
 # ======================
 # LaTeX scratch
@@ -171,3 +176,7 @@ texput.log
 
 # local agent/editor instructions, not part of the distribution
 CLAUDE.md
+AGENTS.md
+CLAUDE.local.md
+.claude/settings.local.json
+.claude/worktrees/
