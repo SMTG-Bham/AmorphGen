@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "amorphgen"
-version = "1.0.0rc6"
+version = "1.0.0"
 description = "Amorphous structure generation via melt-quench MD and random placement"
 readme = "README.md"
 license = "MIT"
@@ -17,6 +17,7 @@ license-files = ["LICENSE"]
 authors = [
     {name = "Chaiyawat Kaewmeechai"},
     {name = "Louie Slocombe"},
+    {name = "Alexis G. Manche"},
     {name = "David O. Scanlon"},
 ]
 maintainers = [
@@ -38,7 +39,7 @@ keywords = [
 ]
 requires-python = ">=3.10"
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
     "Operating System :: MacOS",
     "Operating System :: POSIX :: Linux",

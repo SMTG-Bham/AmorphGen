@@ -140,7 +140,7 @@ It requires Python 3.12 or newer; hybrid MD supports NVT only. See the
 
 ## Authors & Contact
 
-**Authors:** [Chaiyawat Kaewmeechai](https://orcid.org/0000-0003-1603-2659), [Louie Slocombe](https://orcid.org/0000-0002-6986-5526) and [David O. Scanlon](https://orcid.org/0000-0001-9174-8601)<br>
+**Authors:** [Chaiyawat Kaewmeechai](https://orcid.org/0000-0003-1603-2659), [Louie Slocombe](https://orcid.org/0000-0002-6986-5526), [Alexis G. Manche](https://orcid.org/0000-0002-8505-474X) and [David O. Scanlon](https://orcid.org/0000-0001-9174-8601)<br>
 **Maintainer:** [Chaiyawat Kaewmeechai](https://cywkmc21.github.io/), University of Birmingham<br>
 **Email:** `c[dot]kaewmeechai[at]bham[dot]ac[dot]uk`
 
@@ -157,7 +157,7 @@ file; a BibTeX citation is:
 
 ```bibtex
 @misc{amorphgen,
-  author = {Kaewmeechai, Chaiyawat and Slocombe, Louie and Scanlon, David O.},
+  author = {Kaewmeechai, Chaiyawat and Slocombe, Louie and Manche, Alexis G. and Scanlon, David O.},
   title  = {AmorphGen: A Python package for amorphous structure generation
             with machine-learning and classical interatomic potentials},
   year   = {2026},

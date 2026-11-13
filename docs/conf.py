@@ -4,9 +4,16 @@
 # -- Project information -----------------------------------------------------
 project = "AmorphGen"
 copyright = "2026, Chaiyawat Kaewmeechai"
-author = "Chaiyawat Kaewmeechai, Louie Slocombe, David O. Scanlon"
-version = "1.0.0rc4"
-release = "1.0.0rc4"
+author = "Chaiyawat Kaewmeechai, Louie Slocombe, Alexis G. Manche, David O. Scanlon"
+# Read from the package, so the docs cannot fall behind a release. The module
+# is parsed rather than imported: importing it needs the full dependency stack.
+import re as _re
+from pathlib import Path as _Path
+
+release = _re.search(r'^__version__ = "([^"]+)"',
+                     (_Path(__file__).resolve().parents[1] / "amorphgen" / "__init__.py")
+                     .read_text(encoding="utf-8"), _re.M).group(1)
+version = release
 
 # -- General configuration ---------------------------------------------------
 extensions = [
