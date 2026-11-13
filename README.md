@@ -1318,7 +1318,7 @@ MIT
 <summary><h2>Development notes</h2></summary>
 
 Parts of this codebase were developed with assistance from an AI tool,
-Anthropic's Claude (Opus 4.8), for code drafting, refactoring, and
+Anthropic's Claude, for code drafting, refactoring, and
 documentation. All AI-assisted code was reviewed, tested, and validated
 by the authors, who take full responsibility for the contents of this
 repository.
