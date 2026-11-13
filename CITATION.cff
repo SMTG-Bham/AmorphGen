@@ -35,6 +35,15 @@ authors:
     affiliation: University of Birmingham
     orcid: "https://orcid.org/0000-0001-9174-8601"
 repository-code: "https://github.com/SMTG-Bham/AmorphGen"
+# Concept DOI: always resolves to the latest version on Zenodo.
+doi: "10.5281/zenodo.24207926"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.24207926"
+    description: "All versions (concept DOI)"
+  - type: doi
+    value: "10.5281/zenodo.24207927"
+    description: "Version 1.0.0"
 license: MIT
 keywords:
   - amorphous materials

@@ -161,6 +161,7 @@ file; a BibTeX citation is:
   title  = {AmorphGen: A Python package for amorphous structure generation
             with machine-learning and classical interatomic potentials},
   year   = {2026},
+  doi    = {10.5281/zenodo.24207926},
   url    = {https://github.com/SMTG-Bham/AmorphGen}
 }
 ```
