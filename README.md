@@ -7,6 +7,7 @@
   <a href="https://smtg-bham.github.io/AmorphGen/"><img src="https://img.shields.io/badge/docs-online-blue" alt="Docs"></a>
   <a href="https://github.com/SMTG-Bham/AmorphGen/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="https://pypi.org/project/amorphgen/"><img src="https://img.shields.io/pypi/v/amorphgen?label=PyPI" alt="PyPI"></a>
+  <a href="https://doi.org/10.5281/zenodo.24207926"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.24207926.svg" alt="DOI"></a>
 </p>
 
 <p align="center">
@@ -1224,6 +1225,7 @@ and the potential(s) you used.
   title  = {AmorphGen: A Python package for amorphous structure generation
             with machine-learning and classical interatomic potentials},
   year   = {2026},
+  doi    = {10.5281/zenodo.24207926},
   url    = {https://github.com/SMTG-Bham/AmorphGen}
 }
 ```
