@@ -26,6 +26,10 @@ authors:
     given-names: Louie
     affiliation: University of Birmingham
     orcid: "https://orcid.org/0000-0002-6986-5526"
+  - family-names: Manche
+    given-names: Alexis G.
+    affiliation: University of Birmingham
+    orcid: "https://orcid.org/0000-0002-8505-474X"
   - family-names: Scanlon
     given-names: David O.
     affiliation: University of Birmingham
@@ -39,5 +43,5 @@ keywords:
   - molecular dynamics
   - machine-learning interatomic potentials
   - materials science
-version: "1.0.0rc6"
-date-released: "2026-10-20"
+version: "1.0.0"
+date-released: "2026-11-13"
