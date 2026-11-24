@@ -151,11 +151,22 @@ For research collaborations or scientific questions, please email the maintainer
 
 ## Citing AmorphGen
 
-If you use AmorphGen in your research, cite the software version you used.
+If you use AmorphGen in your research, cite the paper
+([arXiv:2611.29539](https://doi.org/10.48550/arXiv.2611.29539))
+and the software version you used.
 The repository includes a [CITATION.cff](https://github.com/SMTG-Bham/AmorphGen/blob/main/CITATION.cff)
-file; a BibTeX citation is:
+file; the BibTeX entries are:
 
 ```bibtex
+@article{kaewmeechai2026amorphgen,
+  author  = {Kaewmeechai, Chaiyawat and Slocombe, Louie and Manche, Alexis G. and Scanlon, David O.},
+  title   = {AmorphGen: A Python package for amorphous structure generation
+             with machine-learning and classical interatomic potentials},
+  journal = {arXiv preprint arXiv:2611.29539},
+  year    = {2026},
+  doi     = {10.48550/arXiv.2611.29539}
+}
+
 @misc{amorphgen,
   author = {Kaewmeechai, Chaiyawat and Slocombe, Louie and Manche, Alexis G. and Scanlon, David O.},
   title  = {AmorphGen: A Python package for amorphous structure generation
@@ -166,7 +177,8 @@ file; a BibTeX citation is:
 }
 ```
 
-A Zenodo DOI for each tagged release will be added on first stable release.
+The Zenodo DOI above always resolves to the latest release; each release also has
+its own DOI on Zenodo.
 Please also cite the underlying interatomic potential you use (MACE, CHGNet,
 SevenNet, or the ACE or LAMMPS potential and the code that evaluates it) and
 any reference structures or experimental data you compare against.
