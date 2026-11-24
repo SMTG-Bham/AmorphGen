@@ -5,8 +5,9 @@
 # release (test/test_citation.py checks them).
 cff-version: 1.2.0
 message: >-
-  If you use AmorphGen in your research, please cite it as below, and also cite
-  the interatomic potential you used: the README lists their references.
+  If you use AmorphGen in your research, please cite the paper below, the
+  software version you used, and the interatomic potential you used: the
+  README lists their references.
 type: software
 title: >-
   AmorphGen: A Python package for amorphous structure generation with
@@ -44,6 +45,24 @@ identifiers:
   - type: doi
     value: "10.5281/zenodo.24207927"
     description: "Version 1.0.0"
+preferred-citation:
+  type: article
+  title: >-
+    AmorphGen: A Python package for amorphous structure generation with
+    machine-learning and classical interatomic potentials
+  authors:
+    - family-names: Kaewmeechai
+      given-names: Chaiyawat
+    - family-names: Slocombe
+      given-names: Louie
+    - family-names: Manche
+      given-names: Alexis G.
+    - family-names: Scanlon
+      given-names: David O.
+  journal: "arXiv preprint arXiv:2611.29539"
+  year: 2026
+  doi: "10.48550/arXiv.2611.29539"
+  url: "https://arxiv.org/abs/2611.29539"
 license: MIT
 keywords:
   - amorphous materials
