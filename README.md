@@ -8,6 +8,7 @@
   <a href="https://github.com/SMTG-Bham/AmorphGen/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="https://pypi.org/project/amorphgen/"><img src="https://img.shields.io/pypi/v/amorphgen?label=PyPI" alt="PyPI"></a>
   <a href="https://doi.org/10.5281/zenodo.24207926"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.24207926.svg" alt="DOI"></a>
+  <a href="https://arxiv.org/abs/2611.29539"><img src="https://img.shields.io/badge/arXiv-2611.29539-b31b1b.svg" alt="arXiv"></a>
 </p>
 
 <p align="center">
