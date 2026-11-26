@@ -1787,7 +1787,8 @@ def _main():
         try:
             require_backend(model, model_path=model_path)
             require_dtype(model, override.get("default_dtype", args.default_dtype),
-                          model_path=model_path)
+                          model_path=model_path,
+                          device=override.get("device", args.device))
             require_potential(model, model_path, engine=engine,
                               **_potential_kwargs(override))
         except (BackendNotInstalledError, ValueError, NotImplementedError,
