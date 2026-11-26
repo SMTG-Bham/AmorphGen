@@ -88,6 +88,30 @@ _CHGNET_FLOAT64_MSG = (
     "float64 precision."
 )
 
+# PyTorch's MPS backend (Apple-silicon GPUs) has no float64, and mace-torch
+# casts energies to float64 inside the model's forward pass (e.g.
+# ``node_e0.clone().double()`` in mace 0.3.16), so MACE cannot run on MPS in
+# any precision. On a Mac, device "auto" resolves to "mps"; MACE then falls
+# back to the CPU, and an explicit --device mps is refused before any work.
+MPS_UNSUPPORTED_BACKENDS = ("mace",)
+
+
+def _mps_unsupported_message(model: str) -> str:
+    return (
+        f"Model '{model}' cannot run on device 'mps': Apple's MPS backend has "
+        "no float64, and mace-torch computes energies in float64 inside the "
+        "model even when default_dtype is float32. Use --device cpu (or "
+        "--device auto, which falls back to the CPU for MACE)."
+    )
+
+
+def mps_unsupported(model: str, device: str,
+                    model_path: str | None = None) -> bool:
+    """True if *model*'s backend cannot run on MPS at all."""
+    if device != "mps":
+        return False
+    return backend_for(model, model_path) in MPS_UNSUPPORTED_BACKENDS
+
 
 def _ci_get(registry: dict, name: str):
     """Case-insensitive registry lookup (``MACE-MPA-0`` == ``mace-mpa-0``)."""
@@ -679,19 +703,25 @@ def require_potential(model: str, model_path: str | None = None, *,
 
 
 def require_dtype(model: str, default_dtype: str | None = None,
-                  model_path: str | None = None) -> None:
-    """Fail-fast check that *model* can run at *default_dtype*.
+                  model_path: str | None = None,
+                  device: str | None = None) -> None:
+    """Fail-fast check that *model* can run at *default_dtype* on *device*.
 
     Raises the same :class:`NotImplementedError` as the CHGNet loader when
-    CHGNet is asked for float64. The CLI calls this next to
-    :func:`require_backend`, BEFORE any setup work: the melt-quench stages
-    build their calculator without ``default_dtype``, so ``--mq-ensemble``
-    would otherwise run stages 1-4 and only fail when phase 3 builds one.
+    CHGNet is asked for float64, and a :class:`ValueError` when a backend
+    that cannot run on MPS (MACE) is given an *explicit* ``device="mps"``;
+    ``device="auto"`` is allowed, because :func:`get_calculator` then falls
+    back to the CPU. The CLI calls this next to :func:`require_backend`,
+    BEFORE any setup work: the melt-quench stages build their calculator
+    without ``default_dtype``, so ``--mq-ensemble`` would otherwise run
+    stages 1-4 and only fail when phase 3 builds one.
     """
     # dtype first: _detect_backend warns about unregistered mace-* names
     if (default_dtype == "float64" and model_path is None
             and _detect_backend(model) == "chgnet"):
         raise NotImplementedError(_CHGNET_FLOAT64_MSG)
+    if device == "mps" and mps_unsupported(model, device, model_path):
+        raise ValueError(_mps_unsupported_message(model))
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -798,6 +828,17 @@ def get_calculator(
         kwargs["default_dtype"] = (
             "float32" if backend in ("chgnet", "classical") else "float64"
         )
+
+    # ── MACE cannot run on MPS (see MPS_UNSUPPORTED_BACKENDS) ─────────────
+    # The stages resolve device "auto" before calling here, so on a Mac this
+    # sees "mps"; fall back to the CPU rather than crash mid-run. The CLI
+    # refuses an explicit --device mps earlier (require_dtype).
+    if mps_unsupported(model, device, model_path):
+        warnings.warn(
+            f"{backend.upper()} cannot run on 'mps' (no float64 on Apple GPUs); "
+            f"using the CPU instead.", stacklevel=2)
+        print(f"[{backend.upper()}] Device 'mps' is not supported; running on cpu")
+        device = "cpu"
 
     # ── Custom model path → MACE backend ──────────────────────────────────
     if model_path is not None:

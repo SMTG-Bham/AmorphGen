@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- MACE on Apple-silicon GPUs. PyTorch's MPS backend has no float64 and
+  mace-torch computes energies in float64 inside the model, so MACE crashed on
+  MPS at any `default_dtype`. With `--device auto` (which picks MPS on a Mac)
+  MACE now falls back to the CPU with a warning; an explicit `--device mps`
+  with a MACE model is refused before any work. CHGNet and SevenNet still run
+  on MPS.
+
 ## v1.0.0 (2026-11-13)
 
 ### Added
