@@ -337,13 +337,13 @@ def test_repeated_geometry_reuses_contact_search_but_checks_temperature(atoms, m
     from amorphgen.utils import safety
 
     calls = []
-    real_neighbours = safety.neighbor_list
+    real_neighbours = safety._close_pairs
 
     def neighbours(*args, **kwargs):
         calls.append(1)
         return real_neighbours(*args, **kwargs)
 
-    monkeypatch.setattr(safety, "neighbor_list", neighbours)
+    monkeypatch.setattr(safety, "_close_pairs", neighbours)
     monitor = SafetyMonitor()
     monitor.check_geometry(atoms)
     monitor.check(atoms)
@@ -371,3 +371,47 @@ def test_contact_cache_invalidated_by_in_place_geometry_changes(atoms, change):
         monitor.config["min_distance"] = 2.1
     with pytest.raises(DivergenceError, match="Close contact"):
         monitor.check_geometry(atoms)
+
+
+@pytest.mark.parametrize("seed", range(6))
+def test_fast_contact_search_finds_what_ase_finds(seed):
+    """Orthorhombic periodic cells are searched with a k-d tree; it must find
+    the pairs ASE's neighbour list finds, including across the boundaries."""
+    from ase import Atoms
+    from ase.neighborlist import neighbor_list
+    from amorphgen.utils import safety
+
+    rng = np.random.default_rng(seed)
+    cell = rng.uniform(4.0, 9.0, 3)
+    positions = rng.uniform(-3.0, 12.0, (60, 3))             # also outside the cell
+    positions[1] = positions[0] + [0.3, 0.0, 0.0]            # one certain contact
+    positions[3] = positions[2] + [cell[0] - 0.2, cell[1], -cell[2]]   # one through images
+    atoms = Atoms("Ar60", positions=positions, cell=cell, pbc=True)
+    for minimum in (0.5, 1.2, 1.9):
+        i, j, d = safety._close_pairs(atoms, minimum)
+        ai, aj, ad = neighbor_list("ijd", atoms, minimum)
+        once = ai < aj
+        assert sorted(zip(i.tolist(), j.tolist())) == sorted(zip(ai[once].tolist(),
+                                                                 aj[once].tolist()))
+        assert np.allclose(sorted(d), sorted(ad[once]), atol=1e-12)
+    assert (0, 1) in set(zip(i.tolist(), j.tolist())) and (2, 3) in set(zip(i.tolist(), j.tolist()))
+
+
+@pytest.mark.parametrize("change", ["skew", "open", "narrow"])
+def test_other_cells_use_the_ase_search(monkeypatch, change):
+    from ase import Atoms
+    from amorphgen.utils import safety
+
+    calls = []
+    real = safety.neighbor_list
+    monkeypatch.setattr(safety, "neighbor_list",
+                        lambda *a, **k: calls.append(1) or real(*a, **k))
+    atoms = Atoms("Ar2", positions=[[0, 0, 0], [0.3, 0, 0]], cell=[6.0, 6.0, 6.0], pbc=True)
+    if change == "skew":
+        atoms.cell[1, 0] = 1.0
+    elif change == "open":
+        atoms.pbc = [True, True, False]
+    else:
+        atoms.cell[2, 2] = 0.9                               # not wider than 2 x 0.5
+    i, j, d = safety._close_pairs(atoms, 0.5)
+    assert calls and len(d) and d.min() == pytest.approx(0.3)

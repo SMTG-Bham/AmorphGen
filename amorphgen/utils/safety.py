@@ -27,6 +27,34 @@ _REFERENCE_DEFAULTS = {
 _REFERENCE_MODEL_KEYS = {"model", "model_path", "device", "default_dtype"}
 
 
+def _close_pairs(atoms, minimum):
+    """``(i, j, d)`` of the pairs closer than *minimum*, as
+    ``neighbor_list("ijd", atoms, minimum)`` finds them.
+
+    This runs for every structure at every step, where ASE's neighbour list
+    (pure Python) costs more than a fast model evaluation. A fully periodic
+    orthorhombic cell wider than twice the distance, which is the usual
+    amorphous cell, is searched with a periodic k-d tree instead (each pair
+    once, ``i < j``); every other cell goes to ASE.
+    """
+    cell = atoms.cell.array
+    lengths = np.diag(cell).copy()
+    if (atoms.pbc.all() and not np.count_nonzero(cell - np.diag(lengths))
+            and (lengths > 2 * minimum).all()):
+        from scipy.spatial import cKDTree
+        wrapped = np.mod(atoms.positions, lengths)
+        wrapped[wrapped >= lengths] = 0.0           # mod of a tiny negative number
+        pairs = cKDTree(wrapped, boxsize=lengths).query_pairs(minimum, output_type="ndarray")
+        if not len(pairs):
+            return pairs[:, 0], pairs[:, 1], np.empty(0)
+        delta = wrapped[pairs[:, 1]] - wrapped[pairs[:, 0]]
+        delta -= lengths * np.round(delta / lengths)
+        distances = np.linalg.norm(delta, axis=1)
+        close = distances < minimum
+        return pairs[close, 0], pairs[close, 1], distances[close]
+    return neighbor_list("ijd", atoms, minimum)
+
+
 def _positive_or_none(value, name):
     if value is not None and (
         isinstance(value, bool)
@@ -190,7 +218,7 @@ class SafetyMonitor:
                     f"Close contact with a periodic self-image: {shortest:.6g} "
                     f"angstrom < min_distance {minimum:g} angstrom", step
                 )
-        indices_i, indices_j, distances = neighbor_list("ijd", atoms, minimum)
+        indices_i, indices_j, distances = _close_pairs(atoms, minimum)
         if len(distances):
             closest = int(np.argmin(distances))
             self._fail(

@@ -188,6 +188,8 @@ AmorphGen requires Python 3.10+ and supports Linux and macOS. Windows is not sup
 | MLIP relaxation and melt-quench MD | `pip install -e ".[mace]"` or `pip install -e ".[chgnet]"` |
 | MACE + CHGNet | `pip install -e ".[all]"` |
 | Batched relaxation and hybrid MD (`--engine torchsim`) | `pip install -e ".[mace,torchsim]"` (Python 3.12+, a C/C++ compiler, CUDA or CPU; no Apple MPS) |
+| Faster MACE on a GPU (`--accelerator symmetrix-xl`) | `pip install -e ".[symmetrix-xl]"` (Linux x86-64) plus a Symmetrix-XL GPU backend package |
+| Faster random generation | add `numba` to the extras, e.g. `pip install -e ".[numba]"` |
 | A published ACE potential or LAMMPS pair style | `pip install -e ".[ace]"` (Linux x86_64 wheels, Python 3.10-3.13) or `pip install -e ".[lammps]"` |
 
 Install from source:

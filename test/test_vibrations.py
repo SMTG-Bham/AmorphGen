@@ -157,9 +157,19 @@ def test_nonfinite_forces_rejected_without_mutation():
 
 
 def test_calculator_without_forces_rejected():
+    # Two messages: mace-torch's MACECalculator extends ASE's shared base list of
+    # implemented properties, so once a MACE calculator exists in the process a
+    # bare Calculator claims forces and is only caught when they are evaluated.
     atoms = Atoms("H")
-    with pytest.raises(ValueError, match="does not support forces"):
+    with pytest.raises(ValueError, match="does not support forces|Could not evaluate forces"):
         compute_vibrational_dos([atoms], calculator=Calculator())
+
+
+def test_calculator_without_forces_rejected_after_mace_was_loaded(monkeypatch):
+    from ase.calculators.calculator import BaseCalculator
+    monkeypatch.setattr(BaseCalculator, "implemented_properties", ["energy", "forces"])
+    with pytest.raises(ValueError, match="Could not evaluate forces"):
+        compute_vibrational_dos([Atoms("H")], calculator=Calculator())
 
 
 def test_nonfinite_geometry_rejected():

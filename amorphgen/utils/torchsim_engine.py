@@ -54,18 +54,25 @@ def check_model(model: str, model_path: str | None = None) -> None:
 
     Needs neither torch nor torch-sim, so the CLI checks before any work.
     """
-    from .calculators import is_ace_file
+    from .calculators import is_ace_file, is_symmetrix_file
     name = (model or "").lower()
     if model_path is not None and is_ace_file(model_path):
         name = "ace"
-    if name in ("chgnet", "ace", "lammps"):
+    if model_path is not None and is_symmetrix_file(model_path):
+        name = "symmetrix"
+    if name in ("chgnet", "ace", "lammps", "symmetrix"):
         raise ValueError(f"'{name}' has no torch-sim implementation; use the ASE "
                          f"engine (drop --engine torchsim) for this model.")
 
 
 def build_model(model: str, device: str = "auto", model_path: str | None = None,
-                classical_params: dict | None = None, dtype: str = "float64"):
-    """Build a torch-sim ModelInterface for an AmorphGen model name."""
+                classical_params: dict | None = None, dtype: str = "float64",
+                accelerator=None):
+    """Build a torch-sim ModelInterface for an AmorphGen model name.
+
+    With an ``accelerator`` (see :mod:`amorphgen.utils.accelerator`) a MACE
+    model is evaluated by Symmetrix-XL in joined calls instead of by PyTorch.
+    """
     check_model(model, model_path)
     if model_path is not None and not os.path.isfile(model_path):
         raise FileNotFoundError(
@@ -94,6 +101,12 @@ def build_model(model: str, device: str = "auto", model_path: str | None = None,
         return build_classical_model(classical_params, device=dev, dtype=tdtype)
 
     if model_path or name.startswith("mace") or _ci_get(MACE_FOUNDATION_MODELS, model) != model:
+        if accelerator:
+            from .accelerator import torchsim_model
+            accelerated = torchsim_model(accelerator, model=model, model_path=model_path,
+                                         dtype=str(dtype), device=dev, torch_dtype=tdtype)
+            if accelerated is not None:
+                return accelerated
         from torch_sim.models.mace import MaceModel
         if model_path is not None:
             raw = model_path
@@ -397,6 +410,10 @@ def batch_relax(atoms_list, model, fmax: float = 0.01, max_steps: int = 1000,
     if not atoms_list:
         return []
     guard = _TorchSafetyBridge(atoms_list, safety, "torch-sim relaxation")
+    # A Symmetrix-XL model names its own batch size: probing PyTorch's GPU
+    # memory says nothing about what Symmetrix needs.
+    fixed_batch = getattr(model, "amorphgen_batch", None)
+    fixed_atoms = getattr(model, "amorphgen_batch_atoms", None)
     model = guard.wrap_model(wrap_torch_model(model, repulsive_core))
 
     key = str(cell_filter or "none").lower()
@@ -462,8 +479,11 @@ def batch_relax(atoms_list, model, fmax: float = 0.01, max_steps: int = 1000,
         # from repeating their default searches up to 500,000 atoms.
         probe_atoms = min(500_000, state.n_atoms)
         metrics = calculate_memory_scalers(state, model.memory_scales_with)
-        estimated = estimate_max_memory_scaler(
-            state, model, metrics, max_atoms=probe_atoms)
+        if fixed_batch:
+            estimated = (fixed_atoms or fixed_batch * max(metrics)) / 0.9
+        else:
+            estimated = estimate_max_memory_scaler(
+                state, model, metrics, max_atoms=probe_atoms)
         # Keep the usual headroom, but a successful one-system probe must
         # still admit that system (including the largest/densest input).
         # Batched and singleton metric reductions can round differently.
@@ -522,6 +542,10 @@ def estimate_batch_size(model, atoms_list, fraction: float = 0.5, md: bool = Fal
     atoms_list = list(atoms_list)
     if not atoms_list:
         return fallback
+    if getattr(model, "amorphgen_batch", None):
+        log(f"[torch-sim] chunks of {model.amorphgen_batch} structures "
+            f"(accelerator batch setting; no memory probe for Symmetrix)")
+        return int(model.amorphgen_batch)
     big = max(atoms_list, key=len)
     guard = _TorchSafetyBridge([big], safety, "torch-sim memory probe")
     if not str(dev).startswith("cuda"):

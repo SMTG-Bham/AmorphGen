@@ -21,6 +21,8 @@
 | MLIP relaxation & melt-quench MD | `pip install "amorphgen[mace]"` or `pip install "amorphgen[chgnet]"` |
 | MACE + CHGNet | `pip install "amorphgen[all]"` |
 | batched GPU relaxation and MD of ensembles (`--engine torchsim`) | `pip install "amorphgen[mace,torchsim]"` (Python 3.12+, and a C/C++ compiler) |
+| faster MACE on a GPU (`--accelerator`) | `pip install "amorphgen[symmetrix-xl]"` (Linux x86-64) plus a Symmetrix-XL GPU backend package |
+| faster random generation | add `numba`, e.g. `pip install "amorphgen[numba]"` |
 | a published ACE potential (pacemaker `.yaml` / `.yace`) | `pip install "amorphgen[ace]"` (wheels: Linux x86_64, Python 3.10-3.13) |
 | a LAMMPS pair style (Tersoff, SW, EAM, SNAP, ...) | `pip install "amorphgen[lammps]"` |
 
@@ -63,6 +65,12 @@ pip install "amorphgen[ace]"
 
 # LAMMPS pair styles (unofficial PyPI wheel with MPICH; no pair_style pace)
 pip install "amorphgen[lammps]"
+
+# Symmetrix-XL accelerator for MACE (Linux x86-64; add the GPU backend for your card)
+pip install "amorphgen[symmetrix-xl]"
+
+# Numba: compiles the random-placement loop (optional, same structures)
+pip install "amorphgen[numba]"
 ```
 
 :::{warning}
@@ -164,6 +172,31 @@ cd AmorphGen
 pip install -e ".[mace,chgnet]"
 ```
 
+### The Symmetrix-XL accelerator
+
+The `[symmetrix-xl]` extra installs MACE and
+[Symmetrix-XL](https://pypi.org/project/symmetrix-xl/) (0.2 series), which
+evaluates MACE models about 10-25 times faster on a GPU (`--accelerator`, see
+{doc}`../guides/accelerator`). Symmetrix-XL has wheels for Linux x86-64 only.
+Its GPU backend is a separate package chosen for the card:
+
+```bash
+pip install "amorphgen[symmetrix-xl,torchsim]"
+pip install "symmetrix-xl-cuda13-sm80>=0.2,<0.3"   # NVIDIA A100 generation
+symmetrix backend show                             # must name the GPU backend
+```
+
+Without a matching GPU backend Symmetrix-XL runs on the CPU without an error.
+The extra is not part of `[all]`.
+
+### Numba (optional)
+
+With Numba installed (`pip install "amorphgen[numba]"`, or `pip install numba`)
+the candidate loop of random placement is compiled: 2-50 times faster depending
+on the composition, with the same structure for a given seed. Without it the
+Python loop runs. It is not a core dependency because it is large and restricts
+the NumPy version; set `AMORPHGEN_NO_NUMBA=1` to switch the compiled loop off.
+
 ## Backend compatibility
 
 | Backend | PyPI package | GPU support | Mac (Apple Silicon) |
@@ -175,6 +208,7 @@ pip install -e ".[mace,chgnet]"
 | ACE | `python-ace` | No (CPU) | Build from source (no macOS wheels) |
 | LAMMPS | `lammps` (or conda-forge `lammps`) | No (CPU, serial) | CPU yes |
 | torch-sim engine (`--engine torchsim`) | `torch-sim-atomistic` | CUDA yes | CPU only, no MPS |
+| Symmetrix-XL accelerator (`--accelerator`) | `symmetrix-xl` + a GPU backend package | CUDA yes | No wheels (source build) |
 
 On Apple Silicon, `--device auto` can select MPS. MACE and SevenNet default
 to float64, which MPS cannot represent; use `--device cpu` for these defaults.

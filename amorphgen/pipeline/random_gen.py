@@ -801,6 +801,13 @@ def generate_random(
     _t_start = _time.time()
     _last_progress = _t_start
 
+    # The candidate loop below, compiled (optional Numba; same draws, same
+    # tests, same structure for a seed). None -> the Python loop is used.
+    from ._placement_kernel import placement_kernel
+    _kernel = placement_kernel()
+    _cn_for_kernel = cn_array if use_sc else np.zeros(n_atoms, dtype=int)
+    _no_seeds = np.empty(0, dtype=np.int64)
+
     for i, sym in enumerate(symbols):
         sym_idx = _sym_to_idx[sym]
         if n_placed > 0:
@@ -808,9 +815,40 @@ def generate_random(
 
         placed = False
 
+        if _kernel is not None:
+            # Seeds that need more bonds, most under-coordinated first: as in
+            # the coordination-aware path below.
+            bondable_idx, attempts_per_seed = _no_seeds, 0
+            if use_sc and n_placed > 0:
+                types_placed = placed_type_idx[:n_placed]
+                tgt_placed = _target_cn_arr[types_placed]
+                cn_placed = cn_array[:n_placed]
+                bondable_idx = np.where(
+                    (_dmax_table[types_placed, sym_idx] > 0)
+                    & (tgt_placed < 999)
+                    & (cn_placed < tgt_placed + cn_tolerance))[0]
+                if len(bondable_idx) > 0:
+                    deficits = tgt_placed[bondable_idx] - cn_placed[bondable_idx]
+                    bondable_idx = bondable_idx[np.argsort(-deficits, kind="stable")]
+                    attempts_per_seed = max(
+                        1000, max_attempts_per_atom // len(bondable_idx))
+            placed = bool(_kernel(
+                rng, positions, n_placed, placed_type_idx, sym_idx,
+                _minsep_sq_table, _dmax_table, _dmax_sq_table, _target_cn_arr,
+                _cn_for_kernel, int(cn_tolerance), float(L), bool(pbc), bool(use_sc),
+                np.ascontiguousarray(bondable_idx, dtype=np.int64),
+                int(attempts_per_seed), int(max_attempts_per_atom)))
+            if placed:
+                placed_symbols.append(sym)
+                placed_type_idx[n_placed] = sym_idx
+                n_placed += 1
+                if use_sc:
+                    _update_cn_array(cn_array, n_placed - 1, positions, n_placed,
+                                     placed_type_idx, sym_idx, _dmax_sq_table, L, pbc)
+
         # -- Coordination-aware path --
         # Find seeds that need more bonds (vectorized).
-        if use_sc and n_placed > 0:
+        if _kernel is None and use_sc and n_placed > 0:
             types_placed = placed_type_idx[:n_placed]
             dm_to_new = _dmax_table[types_placed, sym_idx]
             tgt_placed = _target_cn_arr[types_placed]
@@ -891,7 +929,7 @@ def generate_random(
                         break
 
         # -- Standard path: pure rejection sampling --
-        if not placed:
+        if _kernel is None and not placed:
             for attempt in range(max_attempts_per_atom):
                 pos = rng.random(3) * L
 

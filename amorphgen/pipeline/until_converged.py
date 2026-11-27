@@ -297,7 +297,8 @@ def run_until_converged(composition, output_dir, *, targets, batch_size=8,
             raise ValueError("Fresh sequential production requires an empty output directory; use --resume")
         model_files = _model_files(cfg)
         model = build_model(cfg["model"], device=cfg["device"], model_path=cfg.get("model_path"),
-                            classical_params=cfg.get("classical_params"), dtype=dtype)
+                            classical_params=cfg.get("classical_params"), dtype=dtype,
+                            accelerator=cfg.get("accelerator"))
         model.eval()
         if _model_files(cfg) != model_files:
             raise ValueError("Model files changed during loading")
