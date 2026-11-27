@@ -41,6 +41,16 @@ and has an MPS loading path. See the
 
 Install: `pip install "amorphgen[mace]"`
 
+#### Faster MACE: the Symmetrix-XL accelerator
+
+`--accelerator symmetrix-xl` (or `auto`) evaluates the same MACE model with
+Symmetrix-XL, about 10-25 times faster per call on a GPU, after checking it
+against `mace-torch`. See {doc}`accelerator`.
+
+```bash
+amorphgen structure.cif -m mace-mpa-0 -d cuda --accelerator symmetrix-xl
+```
+
 ### CHGNet
 
 Crystal Hamiltonian Graph Neural Network. Select `chgnet` to load its

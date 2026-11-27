@@ -209,6 +209,7 @@ guides/best-practices
 guides/analysis
 guides/exafs
 guides/backends
+guides/accelerator
 guides/yaml-config
 guides/benchmarks
 guides/api-reference

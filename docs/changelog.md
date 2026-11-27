@@ -1,6 +1,30 @@
 # Changelog
 
-## Unreleased
+## v1.1.0 (2026-11-27)
+
+### Added
+
+- `--accelerator {none,auto,symmetrix-xl}` (YAML: `accelerator.engine`)
+  evaluates MACE models with Symmetrix-XL, about 10-25x faster per call on an
+  NVIDIA A100:
+  - on the ASE engine, and with `--engine torchsim` in one joined call per
+    chunk of structures;
+  - the model is converted once into a store and checked against MACE for the
+    elements of the run; a failed check refuses the run;
+  - `auto` uses the accelerator when it is installed and the calculator is
+    MACE, and otherwise carries on unchanged; a named accelerator that cannot
+    be used is refused before any work;
+  - install with `pip install "amorphgen[symmetrix-xl]"` (Linux x86-64) plus
+    the Symmetrix-XL GPU package for the card. The default is `none`: nothing
+    changes without the package.
+- Random placement compiles its candidate loop with Numba when it is installed
+  (`pip install "amorphgen[numba]"`): 2-50x faster, same structure per seed.
+  Without Numba the Python loop runs as before.
+
+### Changed
+
+- The safety monitor's close-contact check is faster for periodic orthorhombic
+  cells (k-d tree search); results are unchanged.
 
 ### Fixed
 
@@ -10,6 +34,10 @@
   MACE now falls back to the CPU with a warning; an explicit `--device mps`
   with a MACE model is refused before any work. CHGNet and SevenNet still run
   on MPS.
+- The vibrations test of a calculator without forces no longer fails when a
+  MACE calculator was created earlier in the same process (`--run-mace`).
+- Building the package no longer warns that `amorphgen.analysis.data` is
+  missing from the packages configuration.
 
 ## v1.0.0 (2026-11-13)
 

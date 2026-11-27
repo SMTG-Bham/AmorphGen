@@ -330,6 +330,22 @@ Both keep stress, so the default NPT stages run unchanged. File paths are
 relative to where `amorphgen` is run, not to the YAML file, as for
 `model_path`. See {doc}`backends` for the type-order rules and installation.
 
+## Example: MACE with the Symmetrix-XL accelerator
+
+```yaml
+model: mace-mpa-0
+device: cuda
+default_dtype: float32
+accelerator:
+  engine: symmetrix-xl      # none (default), auto, symmetrix-xl
+  # tolerance: 1.0          # meV/A, largest accepted force difference from MACE
+  # batch_skin: 0.5         # A, kept neighbour lists with --engine torchsim
+  # options: {execution_profile: speed}
+```
+
+`--accelerator` on the command line overrides `accelerator.engine`. All keys
+are listed in {doc}`accelerator`.
+
 ## Loading YAML in Python
 
 ```python

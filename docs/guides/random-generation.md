@@ -216,6 +216,14 @@ Each field:
 
 The line is grep-friendly: `grep "auto-derive" random_gen.log` retrieves it as a single line per generation run. Bond classes shown are `ionic`, `covalent`, `metallic`, `cation-cation` (a nonmetal cation and another cation, see "Nonmetal cations" above), and `anion-pack` (same-element anion pairs use a separate anion-packing scale factor, see "Bond-type classifier" above).
 
+### Speed: optional Numba
+
+Placement tries many candidate positions per atom, and dense or
+strongly constrained compositions reject most of them. With Numba installed
+(`pip install "amorphgen[numba]"`) this loop is compiled, which makes
+generation 2-50 times faster; a given seed gives the same structure with and
+without it.
+
 ## CLI examples
 
 ```bash

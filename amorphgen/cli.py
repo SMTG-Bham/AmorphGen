@@ -31,6 +31,7 @@ Convert structure files between formats (xyz/extxyz/vasp/cif):
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sys
 import os
 
@@ -365,6 +366,17 @@ def _add_arguments(p):
     g_calc.add_argument("--lammps-elements", default=None, metavar="EL,EL",
                         help="Element of each LAMMPS type in order, e.g. 'Si,O'. "
                              "Needed when no '* * file El ...' pair_coeff line names them.")
+    g_calc.add_argument("--accelerator", default=None,
+                        choices=["none", "auto", "symmetrix-xl"],
+                        help="Run the MACE model through Symmetrix-XL: the model is "
+                             "converted once into the model store "
+                             "(~/.amorphgen/models or $AMORPHGEN_MODEL_STORE) and "
+                             "checked against MACE. 'auto' uses it when it is "
+                             "installed, else plain MACE.")
+    g_calc.add_argument("--accelerator-option", action="append", default=None,
+                        metavar="KEY=VALUE",
+                        help="Option for the accelerator, e.g. metal=true or "
+                             "execution_profile=speed; repeat for several.")
     g_calc.add_argument("-d", "--device", default="auto",
                         choices=["auto", "cuda", "cpu", "mps"],
                         help="Device.")
@@ -1020,6 +1032,68 @@ def _parse_composition(spec: str) -> dict[str, int]:
     return comp
 
 
+def _parse_key_values(items, flag: str) -> dict | None:
+    """``["metal=true", "neighbor_skin=0.4"]`` → ``{"metal": True, "neighbor_skin": 0.4}``."""
+    if not items:
+        return None
+    import yaml
+    parsed = {}
+    for item in items:
+        key, sep, value = item.partition("=")
+        if not sep or not key.strip():
+            raise SystemExit(f"Error: {flag} expects KEY=VALUE, got '{item}'")
+        parsed[key.strip()] = yaml.safe_load(value)
+    return parsed
+
+
+def _fill_accelerator_elements(args, override: dict) -> None:
+    """Give the accelerator the run's elements when they are known.
+
+    They are used for the first-use check against MACE. They come from
+    --composition, a random_gen composition, the input structure, the
+    structures in --input-dir, or --snapshot-dir (a directory of structures
+    or a trajectory file).
+    """
+    acc = override.get("accelerator")
+    if isinstance(acc, str):
+        acc = override["accelerator"] = {"engine": acc}
+    if not isinstance(acc, dict) or acc.get("engine") in (None, "none") or acc.get("elements"):
+        return
+    elements = set()
+
+    def from_directory(folder):
+        from ase.io import read
+        for name in sorted(os.listdir(folder))[:50]:
+            path = os.path.join(folder, name)
+            if os.path.isfile(path) and not name.startswith("."):
+                with contextlib.suppress(Exception):
+                    elements.update(read(path).get_chemical_symbols())
+
+    spec = getattr(args, "composition", None)
+    snapshots = getattr(args, "snapshot_dir", None)
+    rg = override.get("random_gen") or {}
+    try:
+        if spec:
+            elements.update(_parse_composition(spec))
+        elif isinstance(rg.get("composition"), dict):
+            elements.update(rg["composition"])
+        elif getattr(args, "input_file", None) and os.path.isfile(args.input_file):
+            from ase.io import read
+            elements.update(read(args.input_file).get_chemical_symbols())
+        elif getattr(args, "input_dir", None) and os.path.isdir(args.input_dir):
+            from_directory(args.input_dir)
+        elif snapshots and os.path.isdir(snapshots):
+            from_directory(snapshots)
+        elif snapshots and os.path.isfile(snapshots):
+            from ase.io import read
+            with contextlib.suppress(Exception):
+                elements.update(read(snapshots, index=0).get_chemical_symbols())
+    except (OSError, ValueError):
+        return
+    if elements:
+        acc["elements"] = sorted(elements)
+
+
 def _cli_calculator_kwargs(args, override):
     return calculator_kwargs(override, defaults={
         key: getattr(args, key)
@@ -1029,19 +1103,21 @@ def _cli_calculator_kwargs(args, override):
 
 def _potential_kwargs(override: dict) -> dict:
     """Extract the potential parameter blocks (classical_params,
-    lammps_params, ace_params) from the config override if present."""
+    lammps_params, ace_params, symmetrix_params) from the config override
+    if present."""
     from .utils.calculators import potential_kwargs
     return potential_kwargs(override)
 
 
 def _infer_potential_model(override: dict) -> str | None:
-    """Set ``model`` to ace / lammps when only their settings were given.
+    """Set ``model`` to ace / lammps / symmetrix when only their settings were given.
 
-    A ``.yaml`` / ``.yace`` / ``.ace`` model_path implies ACE, and a
-    lammps_params block (or --pair-style) implies LAMMPS. Returns an error
+    A ``.yaml`` / ``.yace`` / ``.ace`` model_path implies ACE, a ``.json``
+    model_path implies Symmetrix, and a lammps_params block (or
+    --pair-style) implies LAMMPS. Returns an error
     message when the model was set to something that would ignore them.
     """
-    from .utils.calculators import is_ace_file
+    from .utils.calculators import is_ace_file, is_symmetrix_file
     model = override.get("model")
     path = override.get("model_path")
     if path is not None and is_ace_file(path):
@@ -1050,6 +1126,12 @@ def _infer_potential_model(override: dict) -> str | None:
         elif model.lower() != "ace":
             return (f"{path} is an ACE potential, but the model is '{model}'; "
                     f"use --model ace (or drop the model setting).")
+    if path is not None and is_symmetrix_file(path):
+        if model is None:
+            override["model"] = model = "symmetrix"
+        elif model.lower() != "symmetrix":
+            return (f"{path} is a Symmetrix model, but the model is '{model}'; "
+                    f"use --model symmetrix (or drop the model setting).")
     if override.get("lammps_params"):
         if model is None:
             override["model"] = model = "lammps"
@@ -1184,6 +1266,10 @@ def _build_override(args, parser, explicit_only: bool = False,
         "run_index": get("run_index"),
         "engine": get("engine"),
         "model_path": get("model_path"),
+        "accelerator": {
+            "engine": get("accelerator"),
+            "options": _parse_key_values(get("accelerator_option"), "--accelerator-option"),
+        },
         "device": get("device"),
         "default_dtype": get("default_dtype"),
         "opt": {
@@ -1749,6 +1835,7 @@ def _main():
     if potential_error:
         print(f"Error: {potential_error}")
         sys.exit(1)
+    _fill_accelerator_elements(args, override)
 
     # --hybrid-ensemble / --batch-opt relax with the stage-7 ("final_opt")
     # settings; let a YAML that only has an `opt:` block drive that relax
@@ -1780,7 +1867,9 @@ def _main():
     # 1-4 of MD.
     if until_options is not None or _requires_calculator(args, override.get("analysis", {})):
         from .utils.calculators import (require_backend, require_dtype,
-                                        require_potential, BackendNotInstalledError)
+                                        require_potential, BackendNotInstalledError,
+                                        backend_for)
+        from .utils.accelerator import require_accelerator
         model = override.get("model", args.model) or "mace-mpa-0"
         model_path = override.get("model_path", getattr(args, "model_path", None))
         engine = "torchsim" if until_options is not None else override.get("engine")
@@ -1790,7 +1879,14 @@ def _main():
                           model_path=model_path,
                           device=override.get("device", args.device))
             require_potential(model, model_path, engine=engine,
-                              **_potential_kwargs(override))
+                              **{k: v for k, v in _potential_kwargs(override).items()
+                                 if k != "accelerator"})
+            require_accelerator(override.get("accelerator"),
+                                backend=backend_for(model, model_path),
+                                model=model, model_path=model_path,
+                                default_dtype=override.get("default_dtype",
+                                                           args.default_dtype),
+                                engine=engine)
         except (BackendNotInstalledError, ValueError, NotImplementedError,
                 FileNotFoundError) as exc:
             print(f"Error: {exc}")
@@ -2704,7 +2800,7 @@ def _main():
                 "engine": "torchsim" if use_torchsim else "ase",
             }
             # Only when set, so runs started before these backends resume.
-            for key in ("lammps_params", "ace_params"):
+            for key in ("lammps_params", "ace_params", "symmetrix_params", "accelerator"):
                 if override.get(key):
                     relax_settings[key] = override[key]
             if use_torchsim:

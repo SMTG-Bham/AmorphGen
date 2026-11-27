@@ -291,6 +291,35 @@ fails there, load one in the script (`module load GCC`; the name varies by
 site). See
 [the installation page](../getting-started/installation.md#the-torch-sim-engine).
 
+### The Symmetrix-XL accelerator on a cluster
+
+With `--accelerator` (see {doc}`accelerator`):
+
+- **Model store.** Set `AMORPHGEN_MODEL_STORE` to a folder on shared storage,
+  so a model is converted once and reused by every job.
+- **Kernel cache.** Symmetrix-XL compiles kernels on first use and caches them
+  in `SYMMETRIX_JIT_CACHE`. Some shared filesystems cannot hold this cache (the
+  error mentions an atomic rename). Point the variable at node-local disk in
+  the job script; the kernels are then compiled again in each job, which takes
+  about half a minute per precision.
+- **GPU backend.** Run `symmetrix backend show` in the job. If it names the
+  CPU backend, the GPU package does not match the card and the run will be
+  slow without any error.
+
+```bash
+export AMORPHGEN_MODEL_STORE=/path/to/shared/amorphgen_models
+export SYMMETRIX_JIT_CACHE="${TMPDIR:-/tmp}/symmetrix-jit-$SLURM_JOB_ID"
+mkdir -p "$SYMMETRIX_JIT_CACHE"
+```
+
+A single process on the ASE engine leaves the GPU idle while Python integrates
+and writes files. For many small cells, either use `--engine torchsim` with
+the accelerator, or run several processes on one GPU, each with its share of
+the input structures. With the NVIDIA Multi-Process Service (start
+`nvidia-cuda-mps-control -d` in the job) the processes use the GPU at the same
+time: in our tests eight processes gave about four times the throughput of
+one, for cells of 80 and 400 atoms, each needing under 1 GB of GPU memory.
+
 ### Python API
 
 ```python

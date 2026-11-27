@@ -34,6 +34,7 @@ _INTERNAL_KEYS = frozenset({"seed_index"})
 
 _VALID_TOP_KEYS = {
     "model": str,
+    "accelerator": (str, dict),   # name, or the block in _BLOCK_SCHEMA
     "mace_model": (str, type(None)),
     "seed": (int, type(None)),
     "run_index": (int, type(None)),
@@ -54,6 +55,7 @@ _VALID_TOP_KEYS = {
     "classical_params": dict,
     "lammps_params": dict,
     "ace_params": dict,
+    "symmetrix_params": dict,
     "convert": dict,
     "safety": dict,
     "repulsive_core": dict,
@@ -253,6 +255,29 @@ _BLOCK_SCHEMA = {
         "recursive_evaluator": bool,
         "recursive": bool,
         "fast_nl": bool,
+    },
+    # --accelerator: run MACE through Symmetrix (amorphgen.utils.accelerator).
+    "accelerator": {
+        "engine": str,
+        "spline_points": int,
+        "elements": list,
+        "validate": bool,
+        "tolerance": _NUMBER,
+        "convert": bool,
+        "store": (str, type(None)),
+        "options": dict,
+        # --engine torchsim with an accelerator (joined Symmetrix calls)
+        "batch_max_atoms": (int, type(None)),
+        "batch_skin": _NUMBER,
+    },
+    # Forwarded to symmetrix.Symmetrix (Symmetrix-XL).
+    "symmetrix_params": {
+        "execution_profile": str,
+        "streamed_edges": str,
+        "allow_fixed_workspace": bool,
+        "neighbor_skin": _NUMBER,
+        "head": str,
+        "metal": bool,          # symmetrix-xl Apple GPU (float32 only)
     },
     "convert": {
         "input": str,
@@ -550,6 +575,14 @@ def _validate_config(cfg: dict, path: str) -> tuple[list[str], list[str]]:
             except (TypeError, ValueError) as exc:
                 errors.append(str(exc))
 
+    accelerator = cfg.get("accelerator")
+    engine = accelerator.get("engine") if isinstance(accelerator, dict) else accelerator
+    if isinstance(engine, str):
+        from ..utils.accelerator import ACCELERATORS
+        if engine.lower() not in ACCELERATORS:
+            errors.append(f"Invalid accelerator '{engine}'. "
+                          f"Choose from: {', '.join(ACCELERATORS)}")
+
     # Only check enum membership for strings, so malformed containers produce
     # validation errors rather than an unhashable-type exception.
     device = cfg.get("device")
@@ -643,4 +676,8 @@ def load_yaml_config(path: str) -> dict:
             + "; ".join(errors)
         )
 
+    # `accelerator: symmetrix-xl` is shorthand for the block, so a CLI
+    # --accelerator-option merges into it instead of replacing it.
+    if isinstance(cfg.get("accelerator"), str):
+        cfg["accelerator"] = {"engine": cfg["accelerator"]}
     return cfg

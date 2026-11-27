@@ -153,6 +153,13 @@ def calculator_provenance(cfg, calc=None, *, injected=False):
         "device": {"requested": _text(cfg.get("device", "auto")),
                    "resolved": None},
     }
+    # Accelerated MACE (amorphgen.utils.accelerator): which package and
+    # version ran, the converted file used, and the source model's hash.
+    accelerated = getattr(calc, "amorphgen_accelerator", None) or getattr(
+        getattr(calc, "base_calculator", None), "amorphgen_accelerator", None)
+    if isinstance(accelerated, dict):
+        result["accelerator"] = {key: _text(value) if isinstance(value, str) else value
+                                 for key, value in accelerated.items()}
     model_info = result["model"]
     try:
         base, models = _models(calc)
@@ -162,14 +169,18 @@ def calculator_provenance(cfg, calc=None, *, injected=False):
             name = _attribute(base, "name")
             model_info["name"] = name if isinstance(name, str) else _class_name(base)
         else:
-            from .calculators import is_ace_file
+            from .calculators import is_ace_file, is_symmetrix_file
             path = cfg.get("model_path")
-            # ACE and LAMMPS are named by backend: a .yace model_path loads
-            # ACE whatever (default) model name the config carries.
+            # ACE, LAMMPS and Symmetrix are named by backend: a .yace (.json)
+            # model_path loads ACE (Symmetrix) whatever (default) model name
+            # the config carries.
             backend = (model_name or "").lower()
             if path is not None and is_ace_file(path):
                 backend = "ace"
-            model_info["name"] = backend if backend in ("ace", "lammps") else model_name
+            elif path is not None and is_symmetrix_file(path):
+                backend = "symmetrix"
+            model_info["name"] = (backend if backend in ("ace", "lammps", "symmetrix")
+                                  else model_name)
             if path is None and model_name and model_name.lower().startswith("mace-"):
                 candidate = model_name.split(":", 1)[0]
                 if os.path.isfile(candidate):

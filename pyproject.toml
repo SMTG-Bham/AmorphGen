@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "amorphgen"
-version = "1.0.0"
+version = "1.1.0"
 description = "Amorphous structure generation via melt-quench MD and random placement"
 readme = "README.md"
 license = "MIT"
@@ -92,6 +92,23 @@ chgnet = [
 ]
 torchsim = [
     "torch-sim-atomistic>=0.6; python_version >= '3.12'",
+]
+# Symmetrix-XL accelerator for MACE models (--accelerator). Wheels exist for
+# Linux x86-64 only. The 0.2 series is the one the joined (torch-sim)
+# evaluation was tested with; it uses private functions of the package. The
+# GPU backend is a separate package chosen for the card, e.g.
+# symmetrix-xl-cuda13-sm80; without one Symmetrix-XL runs on the CPU.
+symmetrix-xl = [
+    "mace-torch>=0.3",
+    "e3nn>=0.4.4,<0.5",
+    "symmetrix-xl[mace]>=0.2,<0.3",
+]
+# Optional speed-up (random placement, kept neighbour lists): the loops are compiled with
+# Numba when it is installed (same structure per seed); without it the pure
+# Python loop runs. Kept out of the core dependencies: Numba is ~140 MB with
+# llvmlite and pins the NumPy version.
+numba = [
+    "numba>=0.59",
 ]
 # ACE potential files (pacemaker .yaml/.yace/.ace) through pyace. python-ace
 # has no stable release for Python >= 3.10 on PyPI; 0.4.0rc1 has wheels for

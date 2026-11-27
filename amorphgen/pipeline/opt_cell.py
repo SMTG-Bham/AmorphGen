@@ -393,7 +393,8 @@ def _batch_optimize_torchsim(files, output_dir, cfg, **kwargs):
 
     model = build_model(full.get("model", "mace-mpa-0"), device=full.get("device", "auto"),
                         model_path=full.get("model_path"),
-                        classical_params=full.get("classical_params"), dtype=dtype)
+                        classical_params=full.get("classical_params"), dtype=dtype,
+                        accelerator=full.get("accelerator"))
     paths = list(done_paths)
     if str(batch_size).lower() == "auto":
         from ..utils.torchsim_engine import estimate_batch_size

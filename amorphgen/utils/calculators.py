@@ -19,6 +19,9 @@ Supported backends
 * **ACE**       — ``ace`` with a pacemaker ``.yaml`` / ``.yace`` / ``.ace``
                    file via ``--model-path`` (the suffix alone implies ACE)
 * **LAMMPS**    — ``lammps`` with any pair style (``lammps_params``)
+* **Symmetrix** — ``symmetrix`` with a converted ``.json`` MACE model via
+                   ``--model-path`` (the suffix alone implies Symmetrix).
+                   Runs with Symmetrix-XL (bonan-group/symmetrix-xl).
 * **Custom**    — any local ``.model`` file via ``--model-path``
 * **External**  — pass your own ASE calculator object directly
 """
@@ -145,12 +148,16 @@ ACE_MODELS: set[str] = {"ace"}
 LAMMPS_MODELS: set[str] = {"lammps"}
 # The file formats PyACECalculator reads (B-basis .yaml, C-tilde .yace/.ace).
 ACE_SUFFIXES = (".yaml", ".yace", ".ace")
+# Symmetrix reads MACE models converted by ``symmetrix_extract_mace`` (.json).
+SYMMETRIX_MODELS: set[str] = {"symmetrix"}
+SYMMETRIX_SUFFIXES = (".json",)
 
 # Parameter blocks a model reads from the config, and the backend each is for.
 POTENTIAL_PARAM_KEYS = {
     "classical_params": "classical",
     "lammps_params": "lammps",
     "ace_params": "ace",
+    "symmetrix_params": "symmetrix",
 }
 
 
@@ -159,9 +166,16 @@ def is_ace_file(path) -> bool:
     return path is not None and os.fspath(path).endswith(ACE_SUFFIXES)
 
 
+def is_symmetrix_file(path) -> bool:
+    """True if *path* names a Symmetrix model file (``.json``) by its suffix."""
+    return path is not None and os.fspath(path).lower().endswith(SYMMETRIX_SUFFIXES)
+
+
 def potential_kwargs(cfg) -> dict:
-    """The parameter blocks set in *cfg*, as :func:`get_calculator` kwargs."""
-    return {key: cfg[key] for key in POTENTIAL_PARAM_KEYS if cfg and cfg.get(key)}
+    """The parameter blocks (and accelerator) set in *cfg*, as
+    :func:`get_calculator` kwargs."""
+    return {key: cfg[key] for key in (*POTENTIAL_PARAM_KEYS, "accelerator")
+            if cfg and cfg.get(key)}
 
 
 def calculator_kwargs(cfg, *, defaults=None) -> dict:
@@ -223,6 +237,7 @@ MODEL_DESCRIPTIONS: dict[str, str] = {
     # Potential files
     "ace":                "ACE (pacemaker)     | --model-path pot.yace (.yaml/.ace) | CPU",
     "lammps":             "LAMMPS pair style   | --pair-style ... --pair-coeff ... | CPU",
+    "symmetrix":          "Symmetrix-XL (MACE) | --model-path model.json | C++/Kokkos, CPU or GPU",
 }
 
 
@@ -519,6 +534,112 @@ def _load_lammps(device: str = "cpu", default_dtype: str | None = None,
     return calc
 
 
+def _load_symmetrix(model_path: str, device: str = "cpu",
+                    default_dtype: str | None = None,
+                    symmetrix_params: dict | None = None) -> Any:
+    """Load a Symmetrix-XL calculator for a converted MACE ``.json`` model.
+
+    ``from symmetrix import Symmetrix`` with ``Symmetrix(model_file,
+    dtype=..., ...)`` from **symmetrix-xl** (bonan-group). Its hardware
+    backend is chosen when the package is imported (``SYMMETRIX_BACKEND``, or
+    the installed GPU package that matches the visible GPU), so ``device`` is
+    informational. ``dtype`` is always passed explicitly: Symmetrix-XL's own
+    default is float32. ``symmetrix_params`` is forwarded to the constructor
+    unchanged (e.g. ``execution_profile``, ``metal``).
+
+    The original Symmetrix (wcwitt/symmetrix) installs under the same import
+    name; it is recognised by its ``use_kokkos`` argument and refused, as this
+    version does not support it.
+    """
+    if not os.path.isfile(model_path):
+        raise FileNotFoundError(
+            f"Symmetrix model file not found: {model_path}\n"
+            "Convert a MACE model first, e.g.\n"
+            "  symmetrix_extract_mace --model my.model --atomic-numbers 8 14")
+    try:
+        from symmetrix import Symmetrix
+    except ImportError:
+        raise BackendNotInstalledError(_install_message("symmetrix", "symmetrix"))
+
+    import inspect
+    try:
+        accepted = set(inspect.signature(Symmetrix.__init__).parameters)
+    except (TypeError, ValueError):
+        accepted = set()
+    if "use_kokkos" in accepted:
+        raise BackendNotInstalledError(
+            "The Symmetrix package installed here is the original Symmetrix "
+            "(wcwitt/symmetrix); this version of AmorphGen supports Symmetrix-XL "
+            "only.\n  Install it in a separate environment (the two share the "
+            "'symmetrix' import):   pip install symmetrix-xl")
+    flavour = "symmetrix-xl"
+
+    options = dict(symmetrix_params or {})
+    if "use_kokkos" in options:
+        raise ValueError(
+            "symmetrix_params.use_kokkos is an option of the original Symmetrix, "
+            "which this version does not support; Symmetrix-XL selects its "
+            "backend with the SYMMETRIX_BACKEND environment variable.")
+    dtype = default_dtype or "float64"
+    if dtype not in ("float32", "float64"):
+        raise ValueError(f"Symmetrix supports float32 or float64, not {dtype!r}")
+    if device not in ("cpu", "cuda"):
+        print(f"[Symmetrix] Device '{device}' is not used: the backend is "
+              f"fixed by how {flavour} was installed")
+    path = os.path.abspath(model_path)
+    print(f"[Symmetrix] Loading {path} ({flavour}, dtype={dtype})")
+    try:
+        return _shareable_symmetrix(Symmetrix)(path, dtype=dtype, **options)
+    except Exception as exc:
+        hint = _symmetrix_jit_cache_hint(exc)
+        if hint is None:
+            raise
+        raise RuntimeError(hint) from exc
+
+
+def _symmetrix_jit_cache_hint(exc) -> str | None:
+    """What to do when Symmetrix-XL cannot use its JIT cache directory.
+
+    Symmetrix-XL compiles kernels for the model on first use and keeps them
+    in a cache (``SYMMETRIX_JIT_CACHE``, by default under the home
+    directory). It refuses a cache on a filesystem without atomic
+    no-replace rename, which is the case for many cluster network
+    filesystems, and then cannot run at all.
+    """
+    text = str(exc)
+    if "atomic no-replace rename" not in text and "JitPublicationUnsupported" not in text:
+        return None
+    cache = os.environ.get("SYMMETRIX_JIT_CACHE", "its default location")
+    return (
+        "Symmetrix-XL could not store its compiled kernels: the filesystem of its "
+        f"JIT cache ({cache}) does not support the atomic rename it requires "
+        "(typical of cluster network filesystems).\n"
+        "  Put the cache on node-local disk before starting, e.g. in the job script:\n"
+        "      export SYMMETRIX_JIT_CACHE=${TMPDIR:-/tmp}/symmetrix-jit-$USER\n"
+        "  (the kernels are then compiled again in each job, about half a minute), or\n"
+        "  keep it where it is and accept a non-atomic write:\n"
+        "      export SYMMETRIX_JIT_PUBLISH=lock-fallback")
+
+
+_SHAREABLE: dict[type, type] = {}
+
+
+def _shareable_symmetrix(base: type) -> type:
+    """*base* with a ``__deepcopy__`` that returns the calculator itself.
+
+    The stages deep-copy their input Atoms, and the attached calculator with
+    them; Symmetrix's C++ evaluator (e.g. ``MACEKokkos``) cannot be copied.
+    The stages then attach the shared calculator anyway (as for ACE/LAMMPS).
+    """
+    if base not in _SHAREABLE:
+        _SHAREABLE[base] = type(base.__name__, (base,), {
+            "__deepcopy__": lambda self, memo: self,
+            "__module__": base.__module__,
+            "__doc__": base.__doc__,
+        })
+    return _SHAREABLE[base]
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Backend detection
 # ═════════════════════════════════════════════════════════════════════════════
@@ -528,7 +649,7 @@ def _detect_backend(model: str) -> str:
     Determine which backend a model name belongs to.
 
     Returns one of: "mace", "chgnet", "sevennet", "classical", "ace",
-    "lammps". Raises ValueError if the model is not recognised. A model
+    "lammps", "symmetrix". Raises ValueError if the model is not recognised. A model
     path changes the answer; use :func:`backend_for` when there may be one.
     """
     lower = model.lower()
@@ -547,6 +668,8 @@ def _detect_backend(model: str) -> str:
         return "ace"
     if lower in LAMMPS_MODELS:
         return "lammps"
+    if lower in SYMMETRIX_MODELS:
+        return "symmetrix"
 
     # MACE — explicit registry match only
     if lower in MACE_FOUNDATION_MODELS:
@@ -580,12 +703,15 @@ def backend_for(model: str, model_path: str | None = None) -> str:
     """The backend that :func:`get_calculator` uses for *model* / *model_path*.
 
     A model path means MACE (it takes priority over *model*), except for an
-    ACE potential: ``model='ace'`` or a ``.yaml`` / ``.yace`` / ``.ace`` path.
+    ACE potential (``model='ace'`` or a ``.yaml`` / ``.yace`` / ``.ace`` path)
+    and a Symmetrix model (``model='symmetrix'`` or a ``.json`` path).
     """
     name = (model or "").lower()
     if model_path is not None:
         if name in ACE_MODELS or is_ace_file(model_path):
             return "ace"
+        if name in SYMMETRIX_MODELS or is_symmetrix_file(model_path):
+            return "symmetrix"
         if name in LAMMPS_MODELS:
             raise ValueError(
                 "Model 'lammps' takes its potential files in the pair_coeff "
@@ -595,6 +721,10 @@ def backend_for(model: str, model_path: str | None = None) -> str:
         raise ValueError(
             "Model 'ace' needs its potential file: --model-path pot.yace "
             "(or a pacemaker .yaml / .ace file).")
+    if name in SYMMETRIX_MODELS:
+        raise ValueError(
+            "Model 'symmetrix' needs a converted model file: --model-path "
+            "model.json (from symmetrix_extract_mace).")
     return _detect_backend(model)
 
 
@@ -606,7 +736,7 @@ def backend_for(model: str, model_path: str | None = None) -> str:
 # knowledge: the CLI fail-fast, --list-models markers, and error messages all
 # derive from these two dicts.
 _BACKEND_IMPORT = {"mace": "mace", "chgnet": "chgnet", "sevennet": "sevenn",
-                   "ace": "pyace", "lammps": "lammps"}
+                   "ace": "pyace", "lammps": "lammps", "symmetrix": "symmetrix"}
 _BACKEND_EXTRA = {"mace": "mace", "chgnet": "chgnet", "sevennet": "sevennet",
                   "ace": "ace", "lammps": "lammps"}
 # Where the pip extra is not the whole story.
@@ -617,6 +747,13 @@ _BACKEND_NOTE = {
     "lammps": ("the PyPI lammps wheel has no pair_style pace; for that use "
                "conda-forge's\n"
                "                          lammps (conda install -c conda-forge lammps)"),
+}
+
+
+# Backends with no amorphgen extra: the install line to show instead.
+_BACKEND_INSTALL = {
+    "symmetrix": ("pip install symmetrix-xl   (Linux x86-64 wheels; build "
+                  "from source elsewhere)"),
 }
 
 
@@ -647,14 +784,16 @@ def available_backends() -> dict[str, bool]:
 
 
 def _install_message(model: str, backend: str) -> str:
-    extra = _BACKEND_EXTRA[backend]
+    install = _BACKEND_INSTALL.get(backend)
+    if install is None:
+        install = f'pip install "amorphgen[{_BACKEND_EXTRA[backend]}]"'
     installed = [b for b, ok in available_backends().items() if ok]
     note = (f"  Note:                   {_BACKEND_NOTE[backend]}\n"
             if backend in _BACKEND_NOTE else "")
     return (
         f"Model '{model}' needs the {backend.upper()} backend, which is not "
         f"installed.\n"
-        f"  Install it:             pip install \"amorphgen[{extra}]\"\n"
+        f"  Install it:             {install}\n"
         f"{note}"
         f"  Installed backends:     {', '.join(installed)}\n"
         f"  Torch-free alternative: classical potentials (--model lj or "
@@ -689,6 +828,13 @@ def require_potential(model: str, model_path: str | None = None, *,
     on the torch-sim engine. Other backends pass.
     """
     backend = backend_for(model, model_path)
+    if backend == "symmetrix":
+        if engine == "torchsim":
+            from .torchsim_engine import check_model
+            check_model(model, model_path)
+        if not os.path.isfile(model_path):
+            raise FileNotFoundError(f"Symmetrix model file not found: {model_path}")
+        return
     if backend not in ("ace", "lammps"):
         return
     if engine == "torchsim":
@@ -732,6 +878,7 @@ def get_calculator(
     model: str = "mace-mpa-0",
     device: str = "auto",
     model_path: str | None = None,
+    accelerator=None,
     **kwargs,
 ) -> Any:
     """
@@ -752,6 +899,7 @@ def get_calculator(
         * Classical: ``"lennard-jones"``, ``"buckingham"``
         * ACE:       ``"ace"`` (with *model_path*)
         * LAMMPS:    ``"lammps"`` (with ``lammps_params``)
+        * Symmetrix: ``"symmetrix"`` (with a ``.json`` *model_path*)
 
         Use :func:`list_models` or ``--list-models`` to see all options.
         Ignored if *model_path* is provided (defaults to MACE backend),
@@ -766,6 +914,14 @@ def get_calculator(
         Path to a local ``.model`` file (e.g. a fine-tuned MACE model).
         Takes priority over *model*. A pacemaker ``.yaml`` / ``.yace`` /
         ``.ace`` file loads an ACE potential instead.
+
+    accelerator : str or dict, optional
+        Run a MACE model through Symmetrix-XL: ``"none"`` (default),
+        ``"symmetrix-xl"`` or ``"auto"``, or the YAML
+        ``accelerator`` block (``engine``, ``spline_points``, ``elements``,
+        ``validate``, ``tolerance``, ``convert``, ``store``, ``options``).
+        The model is converted once into the model store; see
+        :mod:`amorphgen.utils.accelerator`.
 
     **kwargs
         Extra keyword arguments forwarded to the backend-specific
@@ -795,11 +951,23 @@ def get_calculator(
     >>> calc = get_calculator(model_path="/data/my_finetuned.model")
     >>> calc = get_calculator("buckingham", classical_params={...})
     >>> calc = get_calculator(model_path="potential.yace")
+    >>> calc = get_calculator(model_path="mace-8-14.json")   # Symmetrix
     >>> calc = get_calculator("lammps", lammps_params={
     ...     "pair_style": "sw", "pair_coeff": "* * Si.sw Si"})
     """
     device = resolve_device(device)
     backend = backend_for(model, model_path)
+    from .accelerator import AcceleratorError, AcceleratorSettings
+    acceleration = AcceleratorSettings.from_config(accelerator)
+    if acceleration.enabled and backend != "mace":
+        if acceleration.engine != "auto":
+            raise AcceleratorError(
+                f"--accelerator {acceleration.engine} accelerates MACE models; "
+                f"'{model_path or model}' uses the {backend} backend. Use "
+                f"--accelerator auto to run other backends unchanged.")
+        print(f"[Accelerator] auto: '{model_path or model}' uses the {backend} "
+              f"backend, which is not accelerated; running it unchanged")
+        acceleration.engine = "none"
     for key, owner in POTENTIAL_PARAM_KEYS.items():
         if key in kwargs and not kwargs[key]:
             del kwargs[key]
@@ -817,6 +985,12 @@ def get_calculator(
             return _load_ace(model_path, device=device, **kwargs)
         return _load_lammps(device=device, **kwargs)
 
+    # ── Symmetrix (.json): float64 unless asked, as for MACE ─────────────
+    if backend == "symmetrix":
+        if kwargs.get("default_dtype", "auto") == "auto":
+            kwargs["default_dtype"] = "float64"
+        return _load_symmetrix(model_path, device=device, **kwargs)
+
     # ── Resolve "auto" default_dtype per backend ──────────────────────────
     # CHGNet only supports float32; passing float64 raises NotImplementedError
     # in _load_chgnet. MACE / SevenNet default to float64 (the established
@@ -828,6 +1002,17 @@ def get_calculator(
         kwargs["default_dtype"] = (
             "float32" if backend in ("chgnet", "classical") else "float64"
         )
+
+    # ── Accelerator: the same MACE model through Symmetrix / Symmetrix-XL ──
+    # Symmetrix picks its hardware from how it was installed, so this runs
+    # before the MPS fallback below (which is for plain MACE only).
+    if acceleration.enabled:
+        from .accelerator import load_accelerated
+        calc = load_accelerated(acceleration, model=model, model_path=model_path,
+                                dtype=kwargs["default_dtype"],
+                                device="cpu" if device == "mps" else device)
+        if calc is not None:
+            return calc
 
     # ── MACE cannot run on MPS (see MPS_UNSUPPORTED_BACKENDS) ─────────────
     # The stages resolve device "auto" before calling here, so on a Mac this
@@ -917,6 +1102,8 @@ def list_models() -> None:
             return "[built-in]"
         if avail.get(backend):
             return "[installed]"
+        if backend in _BACKEND_INSTALL:
+            return "[not installed -> pip install symmetrix-xl]"
         return f'[not installed -> pip install "amorphgen[{_BACKEND_EXTRA[backend]}]"]'
 
     # Group by backend
@@ -932,6 +1119,8 @@ def list_models() -> None:
             if k in ("lennard-jones", "buckingham")}),
         ("ACE (pacemaker potential file)", "ace", {"ace": MODEL_DESCRIPTIONS["ace"]}),
         ("LAMMPS (any pair style)", "lammps", {"lammps": MODEL_DESCRIPTIONS["lammps"]}),
+        ("Symmetrix (converted MACE .json)", "symmetrix",
+         {"symmetrix": MODEL_DESCRIPTIONS["symmetrix"]}),
     ]
 
     for backend_name, backend_key, models in sections:
@@ -944,4 +1133,6 @@ def list_models() -> None:
     print("  Custom model:  --model-path /path/to/my_finetuned.model  (MACE)")
     print("                 --model-path /path/to/potential.yace    "
           "(ACE: .yaml / .yace / .ace)")
+    print("                 --model-path /path/to/model.json        "
+          "(Symmetrix: from symmetrix_extract_mace)")
     print(f"{bar}\n")

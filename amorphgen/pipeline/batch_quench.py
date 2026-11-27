@@ -341,7 +341,8 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
 
     model = build_model(cfg.get("model", "mace-mpa-0"), device=cfg.get("device", "auto"),
                         model_path=cfg.get("model_path"), classical_params=cfg.get("classical_params"),
-                        dtype="float64" if cfg.get("default_dtype") in (None, "auto") else cfg["default_dtype"])
+                        dtype="float64" if cfg.get("default_dtype") in (None, "auto") else cfg["default_dtype"],
+                        accelerator=cfg.get("accelerator"))
 
     def validate_checkpoint(frames):
         """Re-evaluate resumed frames before writing any reconstructed output."""
