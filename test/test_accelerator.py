@@ -8,7 +8,6 @@ nor torch is needed: the converter and calculators are stand-ins.
 """
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
