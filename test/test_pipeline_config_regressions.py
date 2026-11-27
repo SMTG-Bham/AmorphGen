@@ -14,7 +14,7 @@ from ase.io import read, write
 from ase.spacegroup import crystal
 
 from amorphgen.cli import _build_override, _get_parser, main
-from amorphgen.pipeline import final_opt, melt_cell
+from amorphgen.pipeline import batch_quench, final_opt, melt_cell
 from amorphgen.pipeline.run_pipeline import MeltQuenchPipeline
 from amorphgen.utils import merge_config
 from amorphgen.utils.calculators import get_calculator
@@ -104,6 +104,53 @@ def test_final_opt_specific_values_override_inherited_settings(tmp_path):
     log = (tmp_path / "stage7_opt.log").read_text()
     assert "Optimizer: FIRE  fmax=0.234  max_steps=3" in log
     assert "Cell filter: none" in log
+    assert cfg == original
+
+
+@pytest.mark.parametrize(
+    "final_override, expected_cell_filter",
+    [
+        ({"fmax": 0.234}, "none"),
+        ({"fmax": 0.234, "cell_filter": "frechet"}, "frechet"),
+    ],
+)
+def test_torchsim_stage7_merges_inherited_opt_with_partial_final_opt(
+        tmp_path, monkeypatch, final_override, expected_cell_filter):
+    source = tmp_path / "snapshot_0000.xyz"
+    write(source, bulk("Cu", cubic=True))
+    cfg = {
+        "opt": {
+            "optimizer": "FIRE",
+            "fmax": 0.123,
+            "max_steps": 2,
+            "cell_filter": "none",
+            "pressure_tol_gpa": 0.05,
+        },
+        "final_opt": final_override,
+    }
+    original = deepcopy(cfg)
+    observed = {}
+
+    def fake_batch_relax(atoms, model, **kwargs):
+        observed.update(kwargs)
+        return atoms
+
+    monkeypatch.setattr("amorphgen.utils.torchsim_engine.build_model",
+                        lambda *a, **kw: object())
+    monkeypatch.setattr("amorphgen.utils.torchsim_engine.batch_relax",
+                        fake_batch_relax)
+    (tmp_path / "run" / "run_0000").mkdir(parents=True)
+
+    batch_quench.run_torchsim(
+        [str(source)], stages=[7], batch_size=1,
+        work_dir=str(tmp_path / "run"), cfg_override=cfg,
+    )
+
+    assert observed["fmax"] == 0.234
+    assert observed["max_steps"] == 2
+    assert observed["optimizer"] == "FIRE"
+    assert observed["cell_filter"] == expected_cell_filter
+    assert observed["pressure_tol_gpa"] == 0.05
     assert cfg == original
 
 

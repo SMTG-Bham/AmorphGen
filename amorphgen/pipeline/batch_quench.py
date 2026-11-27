@@ -442,7 +442,7 @@ def run_torchsim(snapshot_files: list[str], cfg_override: dict | None = None,
             for d, a in zip(dirs, atoms):
                 write(os.path.join(d, endname), a, format="extxyz")
         if 7 in stages:
-            c = cfg.get("final_opt") or cfg["opt"]
+            c = merge_config(cfg["opt"], cfg.get("final_opt"))
             print(f"  [Stage 7] batched relaxation, fmax {c.get('fmax', 0.01)}, cell filter {c.get('cell_filter', 'cubic')}")
             for a in atoms:
                 a.set_momenta(np.zeros_like(a.positions))
